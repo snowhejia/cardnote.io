@@ -79,6 +79,19 @@ function putAuthMiddleware(req, res, next) {
   next();
 }
 
+/**
+ * multipart 文件名常为 UTF-8 字节被误读成 Latin-1，导致中文等乱码。
+ * 若已含 U+0100 以上字符，视为解析器已按 Unicode 解码，不再转换。
+ * 否则按 Latin-1 还原字节再以 UTF-8 解码；若解码出现 U+FFFD 则保留原串。
+ */
+function normalizeMultipartFilename(name) {
+  if (typeof name !== "string" || !name) return name;
+  if ([...name].some((ch) => (ch.codePointAt(0) ?? 0) > 0xff)) return name;
+  const recovered = Buffer.from(name, "latin1").toString("utf8");
+  if (recovered.includes("\uFFFD")) return name;
+  return recovered;
+}
+
 app.get("/api/health", (_req, res) => {
   res.json({
     ok: true,
@@ -199,7 +212,7 @@ app.post("/api/upload", putAuthMiddleware, (req, res) => {
       info.mimeType ||
       info.mime ||
       "application/octet-stream";
-    const filename = info.filename || "";
+    const filename = normalizeMultipartFilename(info.filename || "");
     const chunks = [];
     file.on("data", (d) => chunks.push(d));
     file.on("limit", () => {

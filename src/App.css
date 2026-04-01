@@ -808,20 +808,9 @@ textarea.main__hint-editor:focus {
   left: 0;
   right: 0;
   bottom: 0;
-  height: 48%;
-  background: linear-gradient(to top, rgba(0, 0, 0, 0.72), transparent);
+  height: 52%;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.82), transparent);
   pointer-events: none;
-}
-
-.card__gallery-audio-name--on-cover {
-  position: absolute;
-  bottom: 10px;
-  left: 8px;
-  right: 8px;
-  margin: 0;
-  z-index: 1;
-  color: rgba(255, 255, 255, 0.96);
-  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.55);
 }
 
 .card__gallery-audio-icon {
@@ -846,6 +835,24 @@ textarea.main__hint-editor:focus {
   text-align: center;
   color: rgba(55, 53, 47, 0.82);
   word-break: break-word;
+}
+
+/* 必须在 .card__gallery-audio-name 之后，否则深灰字色会盖住白色 */
+.card__gallery-audio-name.card__gallery-audio-name--on-cover {
+  position: absolute;
+  bottom: 10px;
+  left: 8px;
+  right: 8px;
+  margin: 0;
+  z-index: 2;
+  padding: 0 6px;
+  text-align: center;
+  color: #fff;
+  font-weight: 600;
+  text-shadow:
+    0 0 1px rgba(0, 0, 0, 0.95),
+    0 1px 2px rgba(0, 0, 0, 0.9),
+    0 2px 8px rgba(0, 0, 0, 0.65);
 }
 
 .card__gallery-file {
