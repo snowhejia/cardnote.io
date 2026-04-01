@@ -334,12 +334,14 @@
   padding-bottom: 6px;
 }
 
+/* 用 Grid 均分行宽；auto-fit 会合并空列，避免 flex 内容宽导致右侧大块留白 */
 .sidebar__tags-cloud {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(2.5rem, 1fr));
   gap: 6px;
+  justify-items: stretch;
   overflow-y: auto;
-  padding: 0 2px 2px 0;
+  padding: 0 8px 4px 10px;
   scrollbar-width: thin;
 }
 
@@ -353,9 +355,13 @@
 }
 
 .sidebar__tags-chip {
+  box-sizing: border-box;
   margin: 0;
-  padding: 4px 9px;
-  max-width: 100%;
+  padding: 4px 6px;
+  width: 100%;
+  max-width: 7rem;
+  min-width: 0;
+  justify-self: center;
   border: 1px solid rgba(55, 53, 47, 0.12);
   border-radius: 6px;
   background: #ffffff;
@@ -365,7 +371,7 @@
   color: rgba(55, 53, 47, 0.78);
   line-height: 1.3;
   cursor: pointer;
-  text-align: left;
+  text-align: center;
   word-break: break-word;
   transition:
     background 0.1s ease,
