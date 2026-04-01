@@ -3587,7 +3587,50 @@ export default function App() {
 
       <main className="main">
         <header className="main__header">
-          <div className="main__header-row">
+          <div
+            className={
+              "main__header-row" +
+              (searchExpanded ? " main__header-row--search-open" : "")
+            }
+          >
+            {searchExpanded ? (
+              <div
+                className="main__search main__search--expanded main__search--row-slot"
+                role="search"
+              >
+                <input
+                  ref={mainSearchInputRef}
+                  id="app-main-search"
+                  type="search"
+                  className="main__search-input"
+                  placeholder="搜索…"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") {
+                      e.preventDefault();
+                      setSearchQuery("");
+                      setSearchBarOpen(false);
+                    }
+                  }}
+                  autoComplete="off"
+                  aria-label="搜索笔记、附件名、合集名"
+                />
+                <button
+                  type="button"
+                  className="main__search-clear"
+                  aria-label={
+                    searchActive ? "清除搜索" : "收起搜索"
+                  }
+                  onClick={() => {
+                    if (searchActive) setSearchQuery("");
+                    else setSearchBarOpen(false);
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            ) : null}
             <button
               type="button"
               className="main__nav-toggle"
@@ -3617,44 +3660,7 @@ export default function App() {
                   : active?.name ?? "未选择合集"}
             </h1>
             <div className="main__header-actions">
-              {searchExpanded ? (
-                <div
-                  className="main__search main__search--expanded"
-                  role="search"
-                >
-                  <input
-                    ref={mainSearchInputRef}
-                    id="app-main-search"
-                    type="search"
-                    className="main__search-input"
-                    placeholder="搜索…"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Escape") {
-                        e.preventDefault();
-                        setSearchQuery("");
-                        setSearchBarOpen(false);
-                      }
-                    }}
-                    autoComplete="off"
-                    aria-label="搜索笔记、附件名、合集名"
-                  />
-                  <button
-                    type="button"
-                    className="main__search-clear"
-                    aria-label={
-                      searchActive ? "清除搜索" : "收起搜索"
-                    }
-                    onClick={() => {
-                      if (searchActive) setSearchQuery("");
-                      else setSearchBarOpen(false);
-                    }}
-                  >
-                    ×
-                  </button>
-                </div>
-              ) : (
+              {!searchExpanded ? (
                 <button
                   type="button"
                   className="main__header-icon-btn"
@@ -3677,7 +3683,7 @@ export default function App() {
                     <path d="m21 21-4.35-4.35" />
                   </svg>
                 </button>
-              )}
+              ) : null}
               {canEdit && active && !calendarDay ? (
                 <button
                   type="button"

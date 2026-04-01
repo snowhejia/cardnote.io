@@ -916,6 +916,33 @@
   flex-wrap: wrap;
 }
 
+/* 搜索展开：首子元素为输入条，用 order 排成 汉堡｜标题｜搜索｜加号（与 DOM 顺序不同） */
+.main__header-row--search-open {
+  flex-wrap: nowrap;
+}
+
+.main__header-row--search-open .main__search--row-slot {
+  order: 3;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: min(20rem, 70vw);
+}
+
+.main__header-row--search-open .main__nav-toggle {
+  order: 1;
+}
+
+.main__header-row--search-open .main__heading {
+  order: 2;
+  flex: 1;
+  min-width: 0;
+}
+
+.main__header-row--search-open .main__header-actions {
+  order: 4;
+  flex-shrink: 0;
+}
+
 .main__heading {
   margin: 0;
   font-size: 1.45rem;
@@ -2335,20 +2362,68 @@ div.card__text--readonly:not(.card__text--preview) {
     padding: 8px 8px 12px;
   }
 
+  /* 合集列表在中间区域内部滚动，避免与底部「标签」叠在一起 */
+  .sidebar__collections {
+    flex: 1 1 0;
+    min-height: 0;
+    overflow: hidden;
+  }
+
   .sidebar__nav {
+    flex: 1 1 0;
     flex-direction: column;
     flex-wrap: nowrap;
     width: 100%;
+    min-height: 0;
     max-height: none;
-    overflow-y: visible;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
   }
 
   .sidebar__tree-row {
     flex-shrink: 0;
   }
 
+  .sidebar__tags {
+    flex-shrink: 0;
+    position: relative;
+    z-index: 2;
+    background: #fbfbfa;
+    max-height: min(220px, 36vh);
+  }
+
   .main__nav-toggle {
     display: inline-flex;
+  }
+
+  /* 小屏：搜索展开时输入条独占首行，标题与按钮在下一行 */
+  .main__header-row--search-open {
+    flex-wrap: wrap;
+    row-gap: 0.5rem;
+    column-gap: 0.75rem;
+  }
+
+  .main__header-row--search-open .main__search--row-slot {
+    order: -1;
+    flex: 1 1 100%;
+    width: 100%;
+    max-width: none;
+  }
+
+  .main__header-row--search-open .main__nav-toggle {
+    order: 1;
+  }
+
+  .main__header-row--search-open .main__heading {
+    order: 2;
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .main__header-row--search-open .main__header-actions {
+    order: 3;
   }
 
   .main {
