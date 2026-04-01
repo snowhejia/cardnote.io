@@ -480,6 +480,7 @@ type LightboxState = {
   url: string;
   kind: NoteMediaKind;
   name?: string;
+  coverUrl?: string;
 };
 
 /** 卡片右侧媒体轮播：悬停箭头；多段时角标与圆点；单击全屏查看/播放；右键删除单项 */
@@ -500,7 +501,10 @@ function CardGallery({
   const n = items.length;
 
   const itemsKey = items
-    .map((x) => `${x.kind}:${x.url}:${x.name ?? ""}`)
+    .map(
+      (x) =>
+        `${x.kind}:${x.url}:${x.name ?? ""}:${x.coverUrl ?? ""}`
+    )
     .join("|");
   useEffect(() => {
     setI((prev) => {
@@ -561,8 +565,9 @@ function CardGallery({
     setLightbox({
       url: current.url,
       kind: current.kind,
-      ...(current.kind === "file" || current.kind === "audio"
-        ? { name: current.name ?? fileLabelFromUrl(current.url) }
+      name: current.name ?? fileLabelFromUrl(current.url),
+      ...(current.kind === "audio" && current.coverUrl
+        ? { coverUrl: current.coverUrl }
         : {}),
     });
   };
@@ -588,7 +593,16 @@ function CardGallery({
     }
     if (lightbox.kind === "audio") {
       const name = lightbox.name ?? fileLabelFromUrl(lightbox.url);
-      return { kind: "audio", url: lightbox.url, name };
+      return {
+        kind: "audio",
+        url: lightbox.url,
+        name,
+        ...(lightbox.coverUrl ? { coverUrl: lightbox.coverUrl } : {}),
+      };
+    }
+    if (lightbox.kind === "image" || lightbox.kind === "video") {
+      const name = lightbox.name ?? fileLabelFromUrl(lightbox.url);
+      return { kind: lightbox.kind, url: lightbox.url, name };
     }
     return { kind: lightbox.kind, url: lightbox.url };
   };
@@ -615,30 +629,44 @@ function CardGallery({
           ×
         </button>
         {lightbox.kind === "image" ? (
-          <img
-            src={lightbox.url}
-            alt=""
-            className="image-lightbox__img"
+          <div
+            className="image-lightbox__media-stack"
             onClick={(e) => e.stopPropagation()}
             onContextMenu={(e) => {
               const it = lightboxAsItem();
               if (it) openAttachmentMenu(e, it);
             }}
-          />
+          >
+            <img
+              src={lightbox.url}
+              alt=""
+              className="image-lightbox__img"
+            />
+            <p className="image-lightbox__media-caption">
+              {lightbox.name ?? fileLabelFromUrl(lightbox.url)}
+            </p>
+          </div>
         ) : lightbox.kind === "video" ? (
-          <video
-            key={lightbox.url}
-            src={lightbox.url}
-            className="image-lightbox__img image-lightbox__video"
-            controls
-            playsInline
-            autoPlay
+          <div
+            className="image-lightbox__media-stack"
             onClick={(e) => e.stopPropagation()}
             onContextMenu={(e) => {
               const it = lightboxAsItem();
               if (it) openAttachmentMenu(e, it);
             }}
-          />
+          >
+            <video
+              key={lightbox.url}
+              src={lightbox.url}
+              className="image-lightbox__img image-lightbox__video"
+              controls
+              playsInline
+              autoPlay
+            />
+            <p className="image-lightbox__media-caption">
+              {lightbox.name ?? fileLabelFromUrl(lightbox.url)}
+            </p>
+          </div>
         ) : lightbox.kind === "audio" ? (
           <div
             className="image-lightbox__audio-wrap"
@@ -648,6 +676,13 @@ function CardGallery({
               if (it) openAttachmentMenu(e, it);
             }}
           >
+            {lightbox.coverUrl ? (
+              <img
+                src={lightbox.coverUrl}
+                alt=""
+                className="image-lightbox__audio-cover"
+              />
+            ) : null}
             <p className="image-lightbox__audio-title">
               {lightbox.name ?? fileLabelFromUrl(lightbox.url)}
             </p>
@@ -786,10 +821,31 @@ function CardGallery({
           ) : current.kind === "audio" ? (
             <>
               <div className="card__gallery-audio-thumb">
-                <AudioGlyphIcon className="card__gallery-audio-icon" />
-                <span className="card__gallery-audio-name">
-                  {current.name ?? fileLabelFromUrl(current.url)}
-                </span>
+                {current.coverUrl ? (
+                  <>
+                    <img
+                      src={current.coverUrl}
+                      alt=""
+                      className="card__gallery-audio-cover"
+                      loading="lazy"
+                      decoding="async"
+                    />
+                    <div
+                      className="card__gallery-audio-cover-scrim"
+                      aria-hidden
+                    />
+                    <span className="card__gallery-audio-name card__gallery-audio-name--on-cover">
+                      {current.name ?? fileLabelFromUrl(current.url)}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <AudioGlyphIcon className="card__gallery-audio-icon" />
+                    <span className="card__gallery-audio-name">
+                      {current.name ?? fileLabelFromUrl(current.url)}
+                    </span>
+                  </>
+                )}
               </div>
               <span className="card__gallery-play-badge" aria-hidden>
                 ▶
@@ -1154,10 +1210,14 @@ export default function App() {
       setUploadBusyCardId(t.cardId);
       try {
         const r = await uploadCardMedia(file);
-        const item: NoteMediaItem =
-          r.kind === "file" && r.name
-            ? { kind: "file", url: r.url, name: r.name }
-            : { kind: r.kind, url: r.url };
+        const item: NoteMediaItem = {
+          kind: r.kind,
+          url: r.url,
+          ...(r.name?.trim() ? { name: r.name.trim() } : {}),
+          ...(r.kind === "audio" && r.coverUrl?.trim()
+            ? { coverUrl: r.coverUrl.trim() }
+            : {}),
+        };
         addMediaItemToCard(t.blockId, t.cardId, item);
       } catch (err) {
         window.alert(
@@ -1213,7 +1273,8 @@ export default function App() {
                   (m) =>
                     m.url === item.url &&
                     m.kind === item.kind &&
-                    (m.name ?? "") === (item.name ?? "")
+                    (m.name ?? "") === (item.name ?? "") &&
+                    (m.coverUrl ?? "") === (item.coverUrl ?? "")
                 );
                 if (idx < 0) return card;
                 const next = [...raw];

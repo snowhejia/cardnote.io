@@ -21,6 +21,8 @@ export type UploadMediaResult = {
   url: string;
   kind: NoteMediaKind;
   name?: string;
+  /** 音频内嵌封面 */
+  coverUrl?: string;
 };
 
 export async function uploadCardMedia(
@@ -39,6 +41,7 @@ export async function uploadCardMedia(
     url?: unknown;
     kind?: unknown;
     name?: unknown;
+    coverUrl?: unknown;
   };
   if (!r.ok) {
     throw new Error(
@@ -60,6 +63,13 @@ export async function uploadCardMedia(
   const out: UploadMediaResult = { url: j.url, kind };
   if (typeof j.name === "string" && j.name.trim()) {
     out.name = j.name;
+  }
+  if (
+    kind === "audio" &&
+    typeof j.coverUrl === "string" &&
+    j.coverUrl.trim()
+  ) {
+    out.coverUrl = j.coverUrl.trim();
   }
   return out;
 }

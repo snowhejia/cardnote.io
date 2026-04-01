@@ -1,11 +1,15 @@
 import { randomBytes } from "crypto";
 import { mkdir, writeFile } from "fs/promises";
 import { basename, join } from "path";
+import { parseBuffer } from "music-metadata";
 import {
   buildObjectPublicUrl,
   isCosConfigured,
   putCosPublicObject,
 } from "./storage.js";
+
+/** 内嵌封面过大则跳过，避免内存与存储压力 */
+const MAX_EMBEDDED_COVER_BYTES = 512 * 1024;
 
 /** 已知 MIME → 稳定扩展名；其余类型从原始文件名或 MIME 子类型推断 */
 const MIME_TO_EXT = {
@@ -98,6 +102,34 @@ function attachmentDisplayName(originalname) {
   return raw.slice(0, 160) || "附件";
 }
 
+/**
+ * 从 MP3/FLAC/M4A 等标签中取出第一张内嵌图，供封面展示。
+ * @returns {{ buffer: Buffer; mimeType: string; ext: string } | null}
+ */
+async function tryExtractEmbeddedAudioCover(buffer, mimeType) {
+  try {
+    const md = await parseBuffer(
+      new Uint8Array(buffer),
+      { mimeType },
+      { duration: false }
+    );
+    const pic = md.common.picture?.[0];
+    if (!pic?.data?.length) return null;
+    if (pic.data.length > MAX_EMBEDDED_COVER_BYTES) return null;
+    const buf = Buffer.from(pic.data);
+    const fmt = String(pic.format || "").toLowerCase();
+    if (fmt.includes("png")) {
+      return { buffer: buf, mimeType: "image/png", ext: "png" };
+    }
+    if (fmt.includes("webp")) {
+      return { buffer: buf, mimeType: "image/webp", ext: "webp" };
+    }
+    return { buffer: buf, mimeType: "image/jpeg", ext: "jpg" };
+  } catch {
+    return null;
+  }
+}
+
 /** @param {{ buffer: Buffer; mimetype: string; originalname?: string }} file */
 export async function saveUploadedMedia(file, opts) {
   const mimetype = normalizeMime(file.mimetype);
@@ -105,18 +137,37 @@ export async function saveUploadedMedia(file, opts) {
   const token = `${Date.now()}-${randomBytes(12).toString("hex")}`;
   const filename = `${token}.${ext}`;
   const kind = kindFromMime(mimetype);
-  const name = kind === "file" ? attachmentDisplayName(file.originalname) : undefined;
+  /** 对象键仍用随机名；前端用 name 展示原始文件名 */
+  const name = attachmentDisplayName(file.originalname);
+
+  let coverUrl;
+  if (kind === "audio") {
+    const cover = await tryExtractEmbeddedAudioCover(file.buffer, mimetype);
+    if (cover) {
+      const coverFilename = `${token}-cover.${cover.ext}`;
+      if (isCosConfigured()) {
+        const coverKey = `${mediaPrefix()}/${coverFilename}`;
+        await putCosPublicObject(coverKey, cover.buffer, cover.mimeType);
+        coverUrl = buildObjectPublicUrl(coverKey);
+      } else {
+        await mkdir(opts.publicUploadsDir, { recursive: true });
+        const coverPath = join(opts.publicUploadsDir, coverFilename);
+        await writeFile(coverPath, cover.buffer);
+        coverUrl = `/uploads/${coverFilename}`;
+      }
+    }
+  }
 
   if (isCosConfigured()) {
     const key = `${mediaPrefix()}/${filename}`;
     await putCosPublicObject(key, file.buffer, mimetype);
     const url = buildObjectPublicUrl(key);
-    return name ? { url, kind, name } : { url, kind };
+    return coverUrl ? { url, kind, name, coverUrl } : { url, kind, name };
   }
 
   await mkdir(opts.publicUploadsDir, { recursive: true });
   const diskPath = join(opts.publicUploadsDir, filename);
   await writeFile(diskPath, file.buffer);
   const url = `/uploads/${filename}`;
-  return name ? { url, kind, name } : { url, kind };
+  return coverUrl ? { url, kind, name, coverUrl } : { url, kind, name };
 }

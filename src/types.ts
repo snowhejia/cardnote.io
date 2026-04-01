@@ -3,8 +3,10 @@ export type NoteMediaKind = "image" | "video" | "audio" | "file";
 export type NoteMediaItem = {
   url: string;
   kind: NoteMediaKind;
-  /** 非图片/视频时在轮播中展示的文件名 */
+  /** 展示用原始文件名（上传/COS 存储路径仍为随机名） */
   name?: string;
+  /** 音频内嵌封面提取后的图片 URL（仅部分上传音频有） */
+  coverUrl?: string;
 };
 
 export type NoteCard = {

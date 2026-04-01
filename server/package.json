@@ -13,6 +13,7 @@
     "cos-nodejs-sdk-v5": "^2.15.4",
     "dotenv": "^16.6.1",
     "express": "^4.21.0",
-    "jsonwebtoken": "^9.0.3"
+    "jsonwebtoken": "^9.0.3",
+    "music-metadata": "^11.12.3"
   }
 }

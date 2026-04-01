@@ -792,6 +792,36 @@ textarea.main__hint-editor:focus {
   padding: 12px 10px;
   box-sizing: border-box;
   background: linear-gradient(160deg, #ede9fe 0%, #ddd6fe 45%, #c4b5fd 100%);
+  overflow: hidden;
+}
+
+.card__gallery-audio-cover {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.card__gallery-audio-cover-scrim {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 48%;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.72), transparent);
+  pointer-events: none;
+}
+
+.card__gallery-audio-name--on-cover {
+  position: absolute;
+  bottom: 10px;
+  left: 8px;
+  right: 8px;
+  margin: 0;
+  z-index: 1;
+  color: rgba(255, 255, 255, 0.96);
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.55);
 }
 
 .card__gallery-audio-icon {
@@ -937,6 +967,25 @@ textarea.main__hint-editor:focus {
   background: rgba(255, 255, 255, 0.22);
 }
 
+.image-lightbox__media-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  max-height: min(92vh, 100%);
+  cursor: default;
+}
+
+.image-lightbox__media-caption {
+  margin: 0;
+  max-width: min(96vw, 720px);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.78);
+  text-align: center;
+  word-break: break-word;
+}
+
 .image-lightbox__img {
   max-width: min(96vw, 1400px);
   max-height: min(90vh, 100%);
@@ -961,6 +1010,16 @@ video.image-lightbox__video {
   background: linear-gradient(165deg, #312e81 0%, #1e1b4b 100%);
   box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5);
   cursor: default;
+}
+
+.image-lightbox__audio-cover {
+  display: block;
+  width: 100%;
+  max-height: min(52vh, 360px);
+  margin: 0 auto 1rem;
+  object-fit: cover;
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
 }
 
 .image-lightbox__audio-title {

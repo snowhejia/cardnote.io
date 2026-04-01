@@ -16,8 +16,8 @@ RUN cd server && npm install --omit=dev
 COPY server/src ./server/src
 COPY --from=build /app/server/data/collections.json ./server/data/collections.json
 COPY --from=build /app/dist ./server/public
-ENV PORT=3001
+ENV PORT=3002
 ENV DATA_FILE=/data/collections.json
-EXPOSE 3001
+EXPOSE 3002
 VOLUME ["/data"]
 CMD ["node", "server/src/index.js"]

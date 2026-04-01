@@ -34,7 +34,7 @@ cd server && npm install && npm run dev
 npm install && npm run dev
 ```
 
-Vite 会把 `/api` 与 `/uploads` 代理到 `http://127.0.0.1:3001`（本地上传的静态文件）。
+Vite 会把 `/api` 与 `/uploads` 代理到 `http://127.0.0.1:3002`（本地上传的静态文件）。
 
 ## 生产：同一进程（静态 + API）
 
@@ -44,20 +44,20 @@ npm run build:deploy
 cd server && npm install && npm start
 ```
 
-浏览器访问 `http://localhost:3001`。数据文件在 `server/data/collections.json`（可先由 `npm run export:collections` 生成）。
+浏览器访问 `http://localhost:3002`。数据文件在 `server/data/collections.json`（可先由 `npm run export:collections` 生成）。
 
 ## Docker
 
 ```bash
 docker build -t mikujar .
-docker run -p 3001:3001 -v mikujar-data:/data mikujar
+docker run -p 3002:3002 -v mikujar-data:/data mikujar
 ```
 
 可选环境变量：
 
 | 变量 | 说明 |
 |------|------|
-| `PORT` | 默认 `3001` |
+| `PORT` | 默认 `3002` |
 | `DATA_FILE` | JSON 路径，默认容器内 `/data/collections.json` |
 | `ADMIN_PASSWORD` | 与 `JWT_SECRET` 同时设置时启用管理员登录；`PUT` 需 JWT（或见 `API_TOKEN`） |
 | `JWT_SECRET` | 签发/校验登录 JWT，生产请使用足够长的随机串 |
@@ -107,6 +107,17 @@ VITE_API_BASE=https://api.example.com npm run build
 1. 登录 [腾讯云控制台 → 访问管理 → API 密钥](https://console.cloud.tencent.com/cam/capi) 创建 **SecretId / SecretKey**（可建子用户并只授 COS 权限，更安全）。
 2. [对象存储 COS](https://console.cloud.tencent.com/cos) 里创建存储桶，记下 **桶名称（含 APPID）**、**地域**（如 `ap-guangzhou`），填到后端的 `COS_BUCKET`、`COS_REGION`。
 
+### 与机器上「已有后端」会冲突吗？
+
+**默认会冲突的只有两种：** 同一台机、**同一个监听端口**（例如两个进程都占 `3002`），或 **同一条 Nginx/反代 `location` 抢同一路径**。  
+
+可以这样**不冲突**地共存：
+
+- **新开一个端口**：若 `3002` 已被占用，可把本项目的 `server` 改成 **`PORT=其他空闲端口`**，在 1Panel / 反代里用**另一个域名或路径**指到该端口（例如 `api.note.hejiac.com` → `127.0.0.1:3002`；与其它服务并存时确保每条反代对应不同端口）。  
+- **或**把本仓库的 `/api` 逻辑合并进你现有后端（同一进程、统一路由），则不存在第二套 Node 抢端口的问题，但需要你自己接路由与存储。
+
+前端只认 **`VITE_API_BASE` 指向的地址**；只要该地址能访问到本项目的 Express（`/api/collections` 等），与根域上别的网站、别的 API **互不干扰**。
+
 ### 在 1Panel（后端）里怎么填？
 
 在 1Panel 中运行本项目的 **`server/`**（Docker 部署、Node 应用或「网站 → 反向代理到 Node」均可），在对应应用的 **环境变量** 中增加上表中的后端变量，例如：
@@ -114,7 +125,7 @@ VITE_API_BASE=https://api.example.com npm run build
 - `ADMIN_PASSWORD`：你自己定的管理密码（强密码）。
 - `JWT_SECRET`：随机长字符串（可用 `openssl rand -hex 32` 生成）。
 - `COS_SECRET_ID`、`COS_SECRET_KEY`、`COS_BUCKET`、`COS_REGION`：按上面腾讯云控制台填写。
-- `CORS_ORIGIN`：你的 Vercel 站点地址，如 `https://你的项目.vercel.app`（多个用英文逗号分隔；有自定义域名则一并写上）。
+- `CORS_ORIGIN`：浏览器里**实际打开前端**的完整来源（协议 + 域名），多个用英文逗号分隔。例如 Vercel 默认域 `https://xxx.vercel.app`；若前端绑定备案子域 **`https://note.hejiac.com`**，则必须写上 `https://note.hejiac.com`（不要漏 `https://`，不要路径）。根域 `hejiac.com` 已做别的站也没关系，子域 **note** 可单独指向本笔记前端。
 - 若 API 对外域名不是根路径，只要整站都是这一个 Node 提供 `/api` 即可；`PORT` 与 1Panel 反代端口保持一致。
 
 不要把含上述内容的文件提交到 Git；在 1Panel 界面里单独配置即可。
@@ -126,6 +137,13 @@ VITE_API_BASE=https://api.example.com npm run build
    - **`VITE_API_BASE`** = 你的后端公网地址，例如 `https://api.你的域名.com`（**不要**末尾 `/`）。  
 3. **Build command**：例如 `npm run build`，**Output directory**：`dist`（与 `vite.config` 一致）。
 4. 重新部署一次，使 `VITE_API_BASE` 被打进静态资源。
+
+**用备案子域当前端（例：`note.hejiac.com`）**  
+
+- 在域名 DNS（腾讯云解析等）为 **`note`** 增加记录：若前端在 Vercel，一般填 Vercel 提供的 **CNAME**（如 `cname.vercel-dns.com`），按 Vercel 项目 → *Domains* 里说明操作。  
+- Vercel 里把自定义域名 **`note.hejiac.com`** 加到该项目并等待证书生效。  
+- 后端 **`CORS_ORIGIN`** 写上 **`https://note.hejiac.com`**（若同时保留 `vercel.app` 测试域，可写成逗号分隔的两项）。  
+- API 仍可用另一子域或任意已部署地址；**`VITE_API_BASE`** 填该 API 根（**不要**末尾 `/`）。例如 `https://api.hejiac.com`，或把 API 归在笔记名下用 **`https://api.note.hejiac.com`**（在 DNS 里主机名一般为 **`api.note`**，指向你反代/服务器的 A 或 CNAME；证书用 1Panel / Let’s Encrypt 为该主机名单独申请即可）。
 
 本地可参考根目录 `.env.example`：分域时只用到 `VITE_API_BASE`（及旧版才需要的 `VITE_API_TOKEN`）。
 

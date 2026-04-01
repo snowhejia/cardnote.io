@@ -24,7 +24,7 @@ dotenv.config({ path: join(__dirname, "../.env") });
 const ROOT = join(__dirname, "..");
 const DATA_FILE =
   process.env.DATA_FILE || join(ROOT, "data", "collections.json");
-const PORT = Number(process.env.PORT || 3001);
+const PORT = Number(process.env.PORT || 3002);
 const API_TOKEN = process.env.API_TOKEN?.trim() || "";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD?.trim() || "";
 const JWT_SECRET = process.env.JWT_SECRET?.trim() || "";

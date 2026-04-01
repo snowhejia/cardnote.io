@@ -7,7 +7,7 @@ const rootDir = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, rootDir, "");
-  const apiPort = env.VITE_DEV_API_PORT || "3001";
+  const apiPort = env.VITE_DEV_API_PORT || "3002";
   const target = `http://127.0.0.1:${apiPort}`;
 
   return {
