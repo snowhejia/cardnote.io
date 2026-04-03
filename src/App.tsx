@@ -1,6 +1,5 @@
 import {
   Fragment,
-  forwardRef,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -8,14 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
-import type {
-  ChangeEvent,
-  ClipboardEvent,
-  DragEvent,
-  FocusEvent,
-  MouseEvent,
-  ReactNode,
-} from "react";
+import type { ChangeEvent, DragEvent, MouseEvent, ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { fetchApiHealth } from "./api/health";
 import { fetchCollectionsFromApi, saveCollectionsToApi } from "./api/collections";
@@ -32,16 +24,88 @@ import {
 import { useAuth } from "./auth/AuthContext";
 import { collections as initialCollections } from "./data";
 import { migrateCollectionTree } from "./migrateCollections";
+import { filesFromDataTransfer } from "./filesFromDataTransfer";
+import { NoteCardTiptap } from "./noteEditor/NoteCardTiptap";
+import { htmlToPlainText } from "./noteEditor/plainHtml";
 import type {
   Collection,
   NoteCard,
   NoteMediaItem,
   NoteMediaKind,
+  TrashedNoteEntry,
 } from "./types";
 import "./App.css";
 
 const DEFAULT_COLLECTION_HINT =
-  "欢迎使用 mikujar「未来罐」—— 按一天里的时刻收纳零碎笔记。";
+  "欢迎光临 mikujar「未来罐」～ 一条笔记一件小事，按一天里的时刻慢慢堆满！左侧合集随便切；这段灰灰的字双击一下，就能换成你自己的开场白 ✨";
+
+/** 与 favicon 一致的未来罐，手机底栏「新建」用 */
+function MobileDockJarIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      width="34"
+      height="34"
+      viewBox="0 0 32 32"
+      aria-hidden
+    >
+      <rect
+        x="9"
+        y="7"
+        width="14"
+        height="5"
+        rx="2.5"
+        fill="var(--mikujar-logo-lid)"
+      />
+      <rect
+        x="12"
+        y="11"
+        width="8"
+        height="5"
+        rx="1"
+        fill="var(--mikujar-logo-jar)"
+      />
+      <rect
+        x="10"
+        y="15"
+        width="12"
+        height="11"
+        rx="2"
+        fill="var(--mikujar-logo-jar)"
+      />
+      <circle cx="13" cy="18.5" r="1.25" fill="#fff" opacity="0.5" />
+      <circle cx="16" cy="21.8" r="0.9" fill="#fff" opacity="0.38" />
+    </svg>
+  );
+}
+
+/** 圆角星形（描边 / 填充），主栏标题与侧栏收藏共用 */
+function CollectionStarIcon({
+  filled,
+  className,
+}: {
+  filled: boolean;
+  className?: string;
+}) {
+  return (
+    <svg
+      className={className}
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      aria-hidden
+    >
+      <path
+        d="M12 2.25 15.09 8.51 22 9.52 17 14.39 18.18 21.25 12 18.02 5.82 21.25 7 14.39 2 9.52 8.91 8.51 12 2.25z"
+        fill={filled ? "currentColor" : "none"}
+        stroke={filled ? "none" : "currentColor"}
+        strokeWidth={filled ? 0 : 1.4}
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
 
 function cloneInitialCollections(): Collection[] {
   return structuredClone(initialCollections) as Collection[];
@@ -130,8 +194,82 @@ function walkCollectionsWithPath(
   return out;
 }
 
+const FAVORITE_COLLECTIONS_STORAGE_PREFIX = "mikujar-favorite-collections:";
+
+function favoriteCollectionsStorageKey(userId: string | null): string {
+  return `${FAVORITE_COLLECTIONS_STORAGE_PREFIX}${userId ?? "guest"}`;
+}
+
+function loadFavoriteCollectionIds(key: string): Set<string> {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(
+      parsed.filter(
+        (x): x is string => typeof x === "string" && x.length > 0
+      )
+    );
+  } catch {
+    return new Set();
+  }
+}
+
+function saveFavoriteCollectionIds(key: string, ids: Set<string>): void {
+  try {
+    localStorage.setItem(key, JSON.stringify([...ids]));
+  } catch {
+    /* quota / 隐私模式 */
+  }
+}
+
+const TRASH_CARDS_STORAGE_PREFIX = "mikujar-trash-cards:";
+
+function trashCardsStorageKey(userId: string | null): string {
+  return `${TRASH_CARDS_STORAGE_PREFIX}${userId ?? "guest"}`;
+}
+
+function isTrashedNoteEntry(x: unknown): x is TrashedNoteEntry {
+  if (x === null || typeof x !== "object") return false;
+  const o = x as Record<string, unknown>;
+  return (
+    typeof o.trashId === "string" &&
+    o.trashId.length > 0 &&
+    typeof o.colId === "string" &&
+    typeof o.colPathLabel === "string" &&
+    typeof o.deletedAt === "string" &&
+    o.card !== null &&
+    typeof o.card === "object" &&
+    typeof (o.card as NoteCard).id === "string"
+  );
+}
+
+function loadTrashedNoteEntries(key: string): TrashedNoteEntry[] {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(isTrashedNoteEntry);
+  } catch {
+    return [];
+  }
+}
+
+function saveTrashedNoteEntries(
+  key: string,
+  entries: TrashedNoteEntry[]
+): void {
+  try {
+    localStorage.setItem(key, JSON.stringify(entries));
+  } catch {
+    /* quota */
+  }
+}
+
 function cardTextMatchesQuery(card: NoteCard, q: string): boolean {
-  if (card.text.toLowerCase().includes(q)) return true;
+  if (htmlToPlainText(card.text).toLowerCase().includes(q)) return true;
   for (const t of card.tags ?? []) {
     if (t.toLowerCase().includes(q)) return true;
   }
@@ -403,7 +541,7 @@ function collectionPathLabel(cols: Collection[], colId: string): string {
 }
 
 function previewCardTextOneLine(text: string, maxLen = 72): string {
-  const line = text.replace(/\s+/g, " ").trim();
+  const line = htmlToPlainText(text).replace(/\s+/g, " ").trim();
   if (line.length <= maxLen) return line || "（无正文）";
   return `${line.slice(0, maxLen)}…`;
 }
@@ -732,8 +870,10 @@ function dropPositionFromEvent(
   const r = el.getBoundingClientRect();
   const y = e.clientY - r.top;
   const h = Math.max(r.height, 1);
-  if (y < h * 0.28) return "before";
-  if (y > h * 0.72) return "after";
+  /** 上下边缘各留一条「细带」，矮行用像素下限，避免 28%/72% 在 min-height 36px 上过窄难操作 */
+  const margin = Math.max(10, Math.min(16, h * 0.3));
+  if (y < margin) return "before";
+  if (y > h - margin) return "after";
   return "inside";
 }
 
@@ -745,23 +885,6 @@ function splitPinnedCards(cards: NoteCard[]): {
   const pinned = cards.filter((c) => c.pinned);
   const rest = cards.filter((c) => !c.pinned);
   return { pinned, rest };
-}
-
-/** 从剪贴板或拖拽 DataTransfer 取出文件（含截图粘贴等） */
-function filesFromDataTransfer(dt: DataTransfer | null): File[] {
-  if (!dt) return [];
-  if (dt.files?.length) return Array.from(dt.files);
-  const items = dt.items;
-  if (!items?.length) return [];
-  const out: File[] = [];
-  for (let i = 0; i < items.length; i++) {
-    const it = items[i];
-    if (it?.kind === "file") {
-      const f = it.getAsFile();
-      if (f) out.push(f);
-    }
-  }
-  return out;
 }
 
 function dataTransferHasFiles(dt: DataTransfer | null): boolean {
@@ -787,234 +910,6 @@ function mediaItemFromUploadResult(r: {
       : {}),
   };
 }
-
-/** 仅允许 http(s)，避免 javascript: 等 */
-function safeHttpUrlHref(raw: string): string | null {
-  const t = raw.trim();
-  const withScheme = /^www\./i.test(t) ? `https://${t}` : t;
-  if (!/^https?:\/\//i.test(withScheme)) return null;
-  try {
-    const u = new URL(withScheme);
-    if (u.protocol !== "http:" && u.protocol !== "https:") return null;
-    return u.href;
-  } catch {
-    return null;
-  }
-}
-
-function splitTextWithUrls(text: string): Array<
-  { type: "text"; value: string } | { type: "url"; value: string; href: string }
-> {
-  const re = /https?:\/\/[^\s<>"'`[\]{}|\\^]+|www\.[^\s<>"'`[\]{}|\\^]+/gi;
-  const out: Array<
-    { type: "text"; value: string } | { type: "url"; value: string; href: string }
-  > = [];
-  let last = 0;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(text)) !== null) {
-    const start = m.index;
-    const full = m[0];
-    const trimmed = full.replace(/[.,;:!?)\]'"""»«\]]+$/u, "") || full;
-    const href = safeHttpUrlHref(trimmed);
-    if (start > last) {
-      out.push({ type: "text", value: text.slice(last, start) });
-    }
-    const end = start + full.length;
-    if (href) {
-      out.push({ type: "url", value: trimmed, href });
-      const tail = full.slice(trimmed.length);
-      if (tail) out.push({ type: "text", value: tail });
-    } else {
-      out.push({ type: "text", value: full });
-    }
-    last = end;
-  }
-  if (last < text.length) {
-    out.push({ type: "text", value: text.slice(last) });
-  }
-  return out;
-}
-
-function CardTextWithLinkPieces({ text }: { text: string }) {
-  const parts = useMemo(() => splitTextWithUrls(text), [text]);
-  return (
-    <>
-      {parts.map((p, i) =>
-        p.type === "url" ? (
-          <a
-            key={i}
-            href={p.href}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {p.value}
-          </a>
-        ) : (
-          <Fragment key={i}>{p.value}</Fragment>
-        )
-      )}
-    </>
-  );
-}
-
-/** 可编辑时未聚焦为可点链接预览，点正文进入编辑；只读时始终为可点链接 */
-function NoteCardBodyText({
-  id,
-  value,
-  onChange,
-  canEdit,
-  minRows = 3,
-  ariaLabel = "笔记正文",
-  onPaste,
-}: {
-  id: string;
-  value: string;
-  onChange: (next: string) => void;
-  canEdit: boolean;
-  minRows?: number;
-  ariaLabel?: string;
-  onPaste?: (e: ClipboardEvent<HTMLTextAreaElement>) => void;
-}) {
-  const [editing, setEditing] = useState(false);
-  const taRef = useRef<HTMLTextAreaElement | null>(null);
-
-  useLayoutEffect(() => {
-    if (editing && taRef.current) {
-      taRef.current.focus();
-    }
-  }, [editing]);
-
-  if (!canEdit) {
-    return (
-      <div id={id} className="card__text card__text--readonly" aria-label={ariaLabel}>
-        <CardTextWithLinkPieces text={value} />
-      </div>
-    );
-  }
-
-  if (editing) {
-    return (
-      <AutoHeightTextarea
-        ref={taRef}
-        id={id}
-        className="card__text"
-        value={value}
-        minRows={minRows}
-        ariaLabel={ariaLabel}
-        readOnly={false}
-        onChange={onChange}
-        onPaste={onPaste}
-        onBlur={() => setEditing(false)}
-      />
-    );
-  }
-
-  return (
-    <div
-      id={id}
-      role="textbox"
-      tabIndex={0}
-      aria-multiline="true"
-      aria-label={ariaLabel}
-      className="card__text card__text--readonly card__text--preview"
-      onClick={(e: MouseEvent<HTMLDivElement>) => {
-        if ((e.target as HTMLElement).closest("a")) return;
-        const sel = typeof window !== "undefined" ? window.getSelection()?.toString() ?? "" : "";
-        if (sel.length > 0) return;
-        setEditing(true);
-      }}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" && !(e.target as HTMLElement).closest("a")) {
-          e.preventDefault();
-          setEditing(true);
-        }
-      }}
-    >
-      <CardTextWithLinkPieces text={value} />
-    </div>
-  );
-}
-
-type AutoHeightTextareaProps = {
-  id: string;
-  value: string;
-  onChange: (next: string) => void;
-  placeholder?: string;
-  minRows?: number;
-  className?: string;
-  ariaLabel?: string;
-  readOnly?: boolean;
-  onPaste?: (e: ClipboardEvent<HTMLTextAreaElement>) => void;
-  onBlur?: (e: FocusEvent<HTMLTextAreaElement>) => void;
-};
-
-/** 高度随内容增高，并按行高取整，与横格背景对齐 */
-const AutoHeightTextarea = forwardRef<HTMLTextAreaElement, AutoHeightTextareaProps>(
-  function AutoHeightTextarea(
-    {
-      id,
-      value,
-      onChange,
-      placeholder,
-      minRows = 3,
-      className,
-      ariaLabel,
-      readOnly,
-      onPaste: onPasteExtra,
-      onBlur,
-    },
-    forwardedRef
-  ) {
-    const innerRef = useRef<HTMLTextAreaElement | null>(null);
-
-    const setRefs = useCallback(
-      (el: HTMLTextAreaElement | null) => {
-        innerRef.current = el;
-        if (typeof forwardedRef === "function") {
-          forwardedRef(el);
-        } else if (forwardedRef) {
-          forwardedRef.current = el;
-        }
-      },
-      [forwardedRef]
-    );
-
-    const syncHeight = useCallback(() => {
-      const el = innerRef.current;
-      if (!el) return;
-      const lh = parseFloat(getComputedStyle(el).lineHeight);
-      const lineHeight = Number.isFinite(lh) && lh > 0 ? lh : 30;
-      el.style.height = "0px";
-      const contentH = el.scrollHeight;
-      const lines = Math.max(minRows, Math.ceil(contentH / lineHeight));
-      el.style.height = `${lines * lineHeight}px`;
-    }, [minRows]);
-
-    useLayoutEffect(() => {
-      syncHeight();
-    }, [value, syncHeight]);
-
-    return (
-      <textarea
-        ref={setRefs}
-        id={id}
-        className={className}
-        value={value}
-        placeholder={placeholder}
-        rows={minRows}
-        spellCheck={false}
-        readOnly={readOnly}
-        aria-label={ariaLabel ?? "笔记正文"}
-        onChange={(e) => onChange(e.target.value)}
-        onPaste={(e) => {
-          onPasteExtra?.(e);
-        }}
-        onBlur={onBlur}
-      />
-    );
-  }
-);
 
 function formatTagsForInput(tags: string[] | undefined): string {
   return (tags ?? []).join("，");
@@ -1619,6 +1514,151 @@ function CardGallery({
   );
 }
 
+/** 候选行大致高度（含 gap），供 ResizeObserver 估算可显示条数 */
+const RELATED_PICK_ROW_EST_PX = 50;
+const RELATED_PICK_POOL_MAX = 800;
+
+/**
+ * 源笔记与候选笔记的内容相似度（越大越靠前）。含标签、词片段、汉字重合与搜索词加权。
+ */
+function relatedPickSimilarity(
+  sourceColId: string,
+  sourceCard: NoteCard,
+  col: Collection,
+  card: NoteCard,
+  path: string,
+  query: string
+): number {
+  const srcText = htmlToPlainText(sourceCard.text ?? "").trim();
+  const srcLower = srcText.toLowerCase();
+  const srcTags = sourceCard.tags ?? [];
+  const hay = `${htmlToPlainText(card.text ?? "").trim()}\n${(card.tags ?? []).join(" ")}\n${col.name}\n${path}`.toLowerCase();
+  let score = 0;
+
+  if (query) {
+    const ql = query.toLowerCase();
+    if (htmlToPlainText(card.text ?? "").toLowerCase().includes(ql)) score += 120;
+    if (col.name.toLowerCase().includes(ql)) score += 60;
+    if ((card.tags ?? []).some((t) => t.toLowerCase().includes(ql))) {
+      score += 90;
+    }
+    if (path.toLowerCase().includes(ql)) score += 40;
+  }
+
+  for (const t of srcTags) {
+    const tl = t.trim().toLowerCase();
+    if (tl.length < 1) continue;
+    if ((card.tags ?? []).some((x) => x.toLowerCase() === tl)) score += 85;
+    else if (hay.includes(tl)) score += 28;
+  }
+
+  const tokens = srcLower.split(/[\s,.;，。；、\n\r]+/).filter((w) => w.length >= 2);
+  const seen = new Set<string>();
+  for (const w of tokens) {
+    if (seen.has(w)) continue;
+    seen.add(w);
+    if (hay.includes(w)) score += Math.min(36, w.length * 4);
+  }
+
+  for (const ch of srcLower.replace(/\s/g, "")) {
+    if (/[\u4e00-\u9fff]/.test(ch) && hay.includes(ch)) score += 1.15;
+  }
+
+  if (col.id === sourceColId) score += 18;
+
+  return score;
+}
+
+/** 年月分栏输入；避免 type=month 受控时逐字改年会被浏览器解析成 1902 等错误值 */
+function CalendarYearMonthFields({
+  calendarViewMonth,
+  setCalendarViewMonth,
+}: {
+  calendarViewMonth: Date;
+  setCalendarViewMonth: (d: Date) => void;
+}) {
+  const syncKey = `${calendarViewMonth.getFullYear()}-${calendarViewMonth.getMonth()}`;
+  const [yearField, setYearField] = useState(() =>
+    String(calendarViewMonth.getFullYear())
+  );
+  const [monthField, setMonthField] = useState(() =>
+    String(calendarViewMonth.getMonth() + 1)
+  );
+
+  useEffect(() => {
+    setYearField(String(calendarViewMonth.getFullYear()));
+    setMonthField(String(calendarViewMonth.getMonth() + 1));
+  }, [syncKey]);
+
+  const commit = useCallback(() => {
+    const cy = calendarViewMonth.getFullYear();
+    const cm = calendarViewMonth.getMonth() + 1;
+    let y = parseInt(yearField.replace(/\D/g, ""), 10);
+    let mo = parseInt(monthField.replace(/\D/g, ""), 10);
+    if (yearField.trim() === "" || !Number.isFinite(y) || y < 1000 || y > 9999) {
+      y = cy;
+      setYearField(String(y));
+    }
+    if (
+      monthField.trim() === "" ||
+      !Number.isFinite(mo) ||
+      mo < 1 ||
+      mo > 12
+    ) {
+      mo = cm;
+      setMonthField(String(mo));
+    }
+    setCalendarViewMonth(new Date(y, mo - 1, 1));
+  }, [yearField, monthField, calendarViewMonth, setCalendarViewMonth]);
+
+  return (
+    <div className="sidebar__cal-title-wrap sidebar__cal-ym-fields">
+      <input
+        type="text"
+        className="sidebar__cal-year-field"
+        aria-label="年（四位数字）"
+        inputMode="numeric"
+        autoComplete="off"
+        maxLength={4}
+        value={yearField}
+        onChange={(e) => {
+          setYearField(e.target.value.replace(/\D/g, "").slice(0, 4));
+        }}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            (e.target as HTMLInputElement).blur();
+          }
+        }}
+      />
+      <span className="sidebar__cal-ym-sep" aria-hidden>
+        年
+      </span>
+      <input
+        type="text"
+        className="sidebar__cal-month-field"
+        aria-label="月（1–12）"
+        inputMode="numeric"
+        autoComplete="off"
+        maxLength={2}
+        value={monthField}
+        onChange={(e) => {
+          setMonthField(e.target.value.replace(/\D/g, "").slice(0, 2));
+        }}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            (e.target as HTMLInputElement).blur();
+          }
+        }}
+      />
+      <span className="sidebar__cal-ym-sep" aria-hidden>
+        月
+      </span>
+    </div>
+  );
+}
+
 function RelatedCardsSidePanel({
   sourceColId,
   sourceCardId,
@@ -1639,11 +1679,29 @@ function RelatedCardsSidePanel({
   onNavigateToCard: (targetColId: string, targetCardId: string) => void;
 }) {
   const [pickQuery, setPickQuery] = useState("");
+  const [pickSlots, setPickSlots] = useState(14);
+  const pickGrowRef = useRef<HTMLDivElement>(null);
   const source = findCardInTree(collections, sourceColId, sourceCardId);
 
   useEffect(() => {
     setPickQuery("");
   }, [sourceColId, sourceCardId]);
+
+  useLayoutEffect(() => {
+    if (!canEdit || !source) return;
+    const el = pickGrowRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver((entries) => {
+      const h = entries[0]?.contentRect.height ?? 0;
+      const slots = Math.max(
+        4,
+        Math.min(120, Math.floor(h / RELATED_PICK_ROW_EST_PX))
+      );
+      setPickSlots(slots);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [canEdit, source, sourceColId, sourceCardId, pickQuery]);
 
   const relatedList = useMemo(() => {
     if (!source) return [];
@@ -1654,11 +1712,12 @@ function RelatedCardsSidePanel({
     });
   }, [source, collections]);
 
-  const pickCandidates = useMemo(() => {
+  const pickCandidatesSorted = useMemo(() => {
+    if (!source) return [];
     const flat = flattenAllCardsWithPath(collections, []);
     const q = pickQuery.trim().toLowerCase();
     const relatedSet = new Set(
-      (source?.card.relatedRefs ?? []).map(
+      (source.card.relatedRefs ?? []).map(
         (r) => `${r.colId}\0${r.cardId}`
       )
     );
@@ -1667,13 +1726,36 @@ function RelatedCardsSidePanel({
       if (relatedSet.has(`${col.id}\0${card.id}`)) return false;
       if (!q) return true;
       return (
-        card.text.toLowerCase().includes(q) ||
+        htmlToPlainText(card.text).toLowerCase().includes(q) ||
         (card.tags ?? []).some((t) => t.toLowerCase().includes(q)) ||
         col.name.toLowerCase().includes(q)
       );
     });
-    return filtered.slice(0, 24);
+    const scored = filtered.map((row) => ({
+      col: row.col,
+      card: row.card,
+      path: row.path,
+      score: relatedPickSimilarity(
+        sourceColId,
+        source.card,
+        row.col,
+        row.card,
+        row.path,
+        q
+      ),
+    }));
+    scored.sort(
+      (a, b) =>
+        b.score - a.score || a.path.localeCompare(b.path, "zh-CN")
+    );
+    const top = scored.slice(0, RELATED_PICK_POOL_MAX);
+    return top.map(({ col, card, path }) => ({ col, card, path }));
   }, [collections, pickQuery, source, sourceColId, sourceCardId]);
+
+  const pickCandidatesShown = useMemo(
+    () => pickCandidatesSorted.slice(0, pickSlots),
+    [pickCandidatesSorted, pickSlots]
+  );
 
   return (
     <div className="related-panel-mount">
@@ -1701,109 +1783,144 @@ function RelatedCardsSidePanel({
             ×
           </button>
         </div>
-        <div className="related-panel__body">
+        <div
+          className={
+            "related-panel__body" +
+            (canEdit && source ? " related-panel__body--with-pick" : "")
+          }
+        >
           {!source ? (
-            <p className="related-panel__hint">源笔记已不存在。</p>
+            <p className="related-panel__hint">源笔记好像蒸发啦…</p>
           ) : (
             <>
-              {relatedList.length === 0 ? (
-                <p className="related-panel__hint">暂无关联卡片。</p>
-              ) : (
-                <ul className="related-panel__list">
-                  {relatedList.map(({ ref, hit }) => (
-                    <li
-                      key={`${ref.colId}-${ref.cardId}`}
-                      className="related-panel__item"
-                    >
-                      {hit ? (
-                        <>
-                          <div className="related-panel__item-path">
-                            {collectionPathLabel(collections, hit.col.id)}
-                          </div>
-                          <div className="related-panel__item-text">
-                            {previewCardTextOneLine(hit.card.text)}
-                          </div>
-                          <div className="related-panel__item-actions">
+              <div className="related-panel__upper">
+                {relatedList.length === 0 ? (
+                  <p className="related-panel__hint">
+                    还没有贴上羁绊卡片，去下面搜一只来贴贴～
+                  </p>
+                ) : (
+                  <ul className="related-panel__list">
+                    {relatedList.map(({ ref, hit }) => (
+                      <li
+                        key={`${ref.colId}-${ref.cardId}`}
+                        className={
+                          "related-panel__item" +
+                          (hit ? " related-panel__item--row" : "")
+                        }
+                      >
+                        {hit ? (
+                          <>
                             <button
                               type="button"
-                              className="related-panel__btn related-panel__btn--primary"
+                              className="related-panel__item-hit"
                               onClick={() =>
                                 onNavigateToCard(hit.col.id, hit.card.id)
                               }
                             >
-                              查看
+                              <div className="related-panel__item-path">
+                                {collectionPathLabel(collections, hit.col.id)}
+                              </div>
+                              <div className="related-panel__item-text">
+                                {previewCardTextOneLine(hit.card.text)}
+                              </div>
                             </button>
                             {canEdit ? (
                               <button
                                 type="button"
-                                className="related-panel__btn"
+                                className="related-panel__unlink"
+                                aria-label="解除贴贴"
+                                title="解除贴贴"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onRemoveRelation(ref.colId, ref.cardId);
+                                }}
+                              >
+                                ×
+                              </button>
+                            ) : null}
+                          </>
+                        ) : (
+                          <div className="related-panel__missing-wrap related-panel__missing-row">
+                            <p className="related-panel__missing">
+                              那边笔记不见啦或打不开惹
+                            </p>
+                            {canEdit ? (
+                              <button
+                                type="button"
+                                className="related-panel__unlink"
+                                aria-label="撕掉坏掉的贴贴"
+                                title="撕掉坏掉的贴贴"
                                 onClick={() =>
                                   onRemoveRelation(ref.colId, ref.cardId)
                                 }
                               >
-                                取消关联
+                                ×
                               </button>
                             ) : null}
                           </div>
-                        </>
-                      ) : (
-                        <div className="related-panel__missing-wrap">
-                          <p className="related-panel__missing">
-                            笔记已删除或不可用
-                          </p>
-                          {canEdit ? (
-                            <button
-                              type="button"
-                              className="related-panel__btn"
-                              onClick={() =>
-                                onRemoveRelation(ref.colId, ref.cardId)
-                              }
-                            >
-                              移除无效关联
-                            </button>
-                          ) : null}
-                        </div>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              )}
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
               {canEdit ? (
-                <div className="related-panel__add">
-                  <p className="related-panel__add-label">添加关联</p>
+                <div className="related-panel__add related-panel__add--fill">
+                  <p className="related-panel__add-label">贴贴关联</p>
                   <input
                     type="text"
                     className="related-panel__add-input"
-                    placeholder="搜索笔记…"
+                    placeholder="搜一只笔记来贴贴…"
                     value={pickQuery}
                     onChange={(e) => setPickQuery(e.target.value)}
                     autoComplete="off"
                   />
-                  {pickCandidates.length > 0 ? (
-                    <ul className="related-panel__pick-list">
-                      {pickCandidates.map(({ col, card, path }) => (
-                        <li key={`${col.id}-${card.id}`}>
-                          <button
-                            type="button"
-                            className="related-panel__pick-row"
-                            onClick={() => {
-                              onAddRelation(col.id, card.id);
-                              setPickQuery("");
-                            }}
-                          >
-                            <span className="related-panel__pick-path">
-                              {path}
-                            </span>
-                            <span className="related-panel__pick-text">
-                              {previewCardTextOneLine(card.text, 48)}
-                            </span>
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : pickQuery.trim() ? (
-                    <p className="related-panel__hint">无匹配笔记</p>
-                  ) : null}
+                  <div
+                    ref={pickGrowRef}
+                    className="related-panel__pick-grow"
+                  >
+                    {pickCandidatesShown.length > 0 ? (
+                      <>
+                        <ul className="related-panel__pick-list">
+                          {pickCandidatesShown.map(({ col, card, path }) => (
+                            <li key={`${col.id}-${card.id}`}>
+                              <button
+                                type="button"
+                                className="related-panel__pick-row"
+                                onClick={() => {
+                                  onAddRelation(col.id, card.id);
+                                  setPickQuery("");
+                                }}
+                              >
+                                <span className="related-panel__pick-path">
+                                  {path}
+                                </span>
+                                <span className="related-panel__pick-text">
+                                  {previewCardTextOneLine(card.text, 48)}
+                                </span>
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                        {pickCandidatesSorted.length >
+                        pickCandidatesShown.length ? (
+                          <p className="related-panel__pick-truncate-hint">
+                            窗口里先塞得下相似度最高的{" "}
+                            {pickCandidatesShown.length}{" "}
+                            条，搜一搜可以缩圈～
+                          </p>
+                        ) : null}
+                        <div
+                          className="related-panel__pick-spacer"
+                          aria-hidden
+                        />
+                      </>
+                    ) : pickQuery.trim() ? (
+                      <p className="related-panel__hint related-panel__hint--pick">
+                        没找到合拍笔记，换个关键词试试？
+                      </p>
+                    ) : null}
+                  </div>
                 </div>
               ) : null}
             </>
@@ -1828,6 +1945,16 @@ export default function App() {
   const canEdit = useMemo(
     () => !writeRequiresLogin || Boolean(currentUser),
     [writeRequiresLogin, currentUser]
+  );
+
+  const favoriteStorageKey = useMemo(
+    () => favoriteCollectionsStorageKey(currentUser?.id ?? null),
+    [currentUser?.id]
+  );
+
+  const trashStorageKey = useMemo(
+    () => trashCardsStorageKey(currentUser?.id ?? null),
+    [currentUser?.id]
   );
 
   const [collections, setCollections] = useState<Collection[]>(() =>
@@ -1868,6 +1995,11 @@ export default function App() {
   const [collapsedFolderIds, setCollapsedFolderIds] = useState<Set<string>>(
     () => new Set()
   );
+  const [favoriteCollectionIds, setFavoriteCollectionIds] = useState<
+    Set<string>
+  >(() => new Set());
+  const [trashEntries, setTrashEntries] = useState<TrashedNoteEntry[]>([]);
+  const [trashViewActive, setTrashViewActive] = useState(false);
   const [draggingCollectionId, setDraggingCollectionId] = useState<
     string | null
   >(null);
@@ -1908,6 +2040,8 @@ export default function App() {
   const avatarInputRef = useRef<HTMLInputElement>(null);
   /** 小笔记拖动会话：供 dragOver 识别（部分浏览器 types 不可靠） */
   const noteCardDragActiveRef = useRef(false);
+  /** 合集拖拽 id：在 dragStart 同步写入，避免 state 晚一帧时 dragOver 未 preventDefault 导致无法放置 */
+  const draggingCollectionIdRef = useRef<string | null>(null);
 
   const [userAdminOpen, setUserAdminOpen] = useState(false);
   const [adminUsers, setAdminUsers] = useState<PublicUser[]>([]);
@@ -2002,7 +2136,7 @@ export default function App() {
       .catch((e: unknown) => {
         if (!cancelled) {
           setAdminUsersErr(
-            e instanceof Error ? e.message : "无法加载用户列表"
+            e instanceof Error ? e.message : "小伙伴名单没拉出来…"
           );
         }
       })
@@ -2036,7 +2170,7 @@ export default function App() {
       setAdminUsersErr(null);
     } catch (e: unknown) {
       setAdminUsersErr(
-        e instanceof Error ? e.message : "无法加载用户列表"
+        e instanceof Error ? e.message : "小伙伴名单没拉出来…"
       );
     }
   }, []);
@@ -2048,7 +2182,7 @@ export default function App() {
       if (!file || !writeRequiresLogin) return;
       if (!mediaUploadMode) {
         setSidebarFlash(
-          "头像上传需开启服务端媒体存储（COS 或本地 public 目录）"
+          "头像上传要先开服务器媒体存储（COS 或本地 public）喵"
         );
         return;
       }
@@ -2057,10 +2191,10 @@ export default function App() {
       try {
         await uploadMyAvatar(file);
         await refreshMe();
-        setSidebarFlash("头像已更新");
+        setSidebarFlash("头像换新成功～");
       } catch (err: unknown) {
         setSidebarFlash(
-          err instanceof Error ? err.message : "头像上传失败"
+          err instanceof Error ? err.message : "头像翻车啦，再试一次？"
         );
       } finally {
         setAvatarBusy(false);
@@ -2074,7 +2208,7 @@ export default function App() {
     const u = newUserUsername.trim();
     const p = newUserPassword;
     if (!u || !p) {
-      setUserAdminFormErr("请填写用户名与密码");
+      setUserAdminFormErr("用户名和密码都要填好噢");
       return;
     }
     setNewUserBusy(true);
@@ -2092,7 +2226,7 @@ export default function App() {
       await reloadAdminUsers();
     } catch (e: unknown) {
       setUserAdminFormErr(
-        e instanceof Error ? e.message : "创建用户失败"
+        e instanceof Error ? e.message : "拉新失败惹，看看报错？"
       );
     } finally {
       setNewUserBusy(false);
@@ -2107,7 +2241,8 @@ export default function App() {
 
   const onDeleteUser = useCallback(
     async (u: PublicUser) => {
-      if (!window.confirm(`确定删除用户「${u.username}」？`)) return;
+      if (!window.confirm(`要把用户「${u.username}」请出群吗？（删除不可撤销）`))
+        return;
       setRowBusyId(u.id);
       setUserAdminFormErr(null);
       try {
@@ -2120,7 +2255,7 @@ export default function App() {
         }
       } catch (e: unknown) {
         setUserAdminFormErr(
-          e instanceof Error ? e.message : "删除失败"
+          e instanceof Error ? e.message : "送走失败惹…"
         );
       } finally {
         setRowBusyId(null);
@@ -2140,7 +2275,7 @@ export default function App() {
         if (currentUser?.id === u.id) await refreshMe();
       } catch (e: unknown) {
         setUserAdminFormErr(
-          e instanceof Error ? e.message : "更新角色失败"
+          e instanceof Error ? e.message : "改身份失败惹…"
         );
       } finally {
         setRowBusyId(null);
@@ -2153,7 +2288,7 @@ export default function App() {
     async (u: PublicUser) => {
       const pwd = (pwdResetByUser[u.id] ?? "").trim();
       if (pwd.length < 4) {
-        setUserAdminFormErr("新密码至少 4 位");
+        setUserAdminFormErr("新口令至少 4 位啦");
         return;
       }
       setRowBusyId(u.id);
@@ -2165,7 +2300,7 @@ export default function App() {
         await reloadAdminUsers();
       } catch (e: unknown) {
         setUserAdminFormErr(
-          e instanceof Error ? e.message : "重置密码失败"
+          e instanceof Error ? e.message : "换口令失败惹…"
         );
       } finally {
         setRowBusyId(null);
@@ -2215,12 +2350,12 @@ export default function App() {
       } else {
         if (writeRequiresLogin && currentUser) {
           setLoadError(
-            "无法加载您的笔记，请检查网络或重新登录。"
+            "笔记加载摔了一跤… 看看网络或重新登录试试？"
           );
           setCollections([]);
         } else {
           setLoadError(
-            "无法连接服务器，已使用本地示例；启动后端（见项目说明）后刷新即可同步。"
+            "连不上服务器喵～先用本地示例顶一顶，把后端开起来（见说明）再刷新就能同步啦。"
           );
           setApiOnline(online);
         }
@@ -2233,12 +2368,41 @@ export default function App() {
   }, [authReady, writeRequiresLogin, currentUser?.id]);
 
   useEffect(() => {
+    if (!authReady) return;
+    setFavoriteCollectionIds(loadFavoriteCollectionIds(favoriteStorageKey));
+  }, [authReady, favoriteStorageKey]);
+
+  useEffect(() => {
+    if (!authReady) return;
+    setTrashEntries(loadTrashedNoteEntries(trashStorageKey));
+  }, [authReady, trashStorageKey]);
+
+  useEffect(() => {
+    if (calendarDay) setTrashViewActive(false);
+  }, [calendarDay]);
+
+  useEffect(() => {
+    if (!remoteLoaded || !authReady) return;
+    const valid = new Set<string>();
+    walkCollections(collections, (c) => valid.add(c.id));
+    setFavoriteCollectionIds((prev) => {
+      const next = new Set<string>();
+      for (const id of prev) {
+        if (valid.has(id)) next.add(id);
+      }
+      if (next.size === prev.size) return prev;
+      saveFavoriteCollectionIds(favoriteStorageKey, next);
+      return next;
+    });
+  }, [collections, remoteLoaded, authReady, favoriteStorageKey]);
+
+  useEffect(() => {
     if (!remoteLoaded || !apiOnline || !authReady) return;
     if (writeRequiresLogin && !currentUser) return;
     const id = window.setTimeout(() => {
       void saveCollectionsToApi(collections).then((ok) => {
         setSaveError(
-          ok ? null : "保存到服务器失败，请检查网络或后端日志。"
+          ok ? null : "保存到服务器失败惹，网络和后端日志拜托瞄一眼～"
         );
       });
     }, 900);
@@ -2279,9 +2443,18 @@ export default function App() {
     [collections]
   );
 
+  const favoriteSidebarEntries = useMemo(() => {
+    const all = walkCollectionsWithPath(collections, []);
+    return all.filter(({ col }) => favoriteCollectionIds.has(col.id));
+  }, [collections, favoriteCollectionIds]);
+
   const searchTrim = searchQuery.trim();
   const searchActive = searchTrim.length > 0;
   const searchExpanded = searchBarOpen || searchActive;
+
+  useEffect(() => {
+    if (searchActive) setTrashViewActive(false);
+  }, [searchActive]);
 
   useLayoutEffect(() => {
     if (!searchExpanded) return;
@@ -2350,19 +2523,96 @@ export default function App() {
     []
   );
 
-  const deleteCard = useCallback((colId: string, cardId: string) => {
-    setCollections((prev) => {
-      const next = mapCollectionById(prev, colId, (col) => ({
-        ...col,
-        cards: col.cards.filter((c) => c.id !== cardId),
-      }));
-      return stripRelatedRefsToTarget(next, colId, cardId);
-    });
-    setCardMenuId(null);
-    setRelatedPanel((p) =>
-      p?.colId === colId && p?.cardId === cardId ? null : p
-    );
-  }, []);
+  const deleteCard = useCallback(
+    (colId: string, cardId: string) => {
+      const col = findCollectionById(collections, colId);
+      const card = col?.cards.find((c) => c.id === cardId);
+      if (card && canEdit) {
+        const entry: TrashedNoteEntry = {
+          trashId: `t-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+          colId,
+          colPathLabel: collectionPathLabel(collections, colId),
+          card: structuredClone(card) as NoteCard,
+          deletedAt: new Date().toISOString(),
+        };
+        setTrashEntries((te) => {
+          const next = [entry, ...te];
+          saveTrashedNoteEntries(trashStorageKey, next);
+          return next;
+        });
+      }
+      setCollections((prev) => {
+        const next = mapCollectionById(prev, colId, (c) => ({
+          ...c,
+          cards: c.cards.filter((c0) => c0.id !== cardId),
+        }));
+        return stripRelatedRefsToTarget(next, colId, cardId);
+      });
+      setCardMenuId(null);
+      setRelatedPanel((p) =>
+        p?.colId === colId && p?.cardId === cardId ? null : p
+      );
+    },
+    [canEdit, collections, trashStorageKey]
+  );
+
+  const restoreTrashedEntry = useCallback(
+    (entry: TrashedNoteEntry) => {
+      if (!canEdit) return;
+      if (!findCollectionById(collections, entry.colId)) {
+        setSidebarFlash("原合集不见啦，这条笔记捞不回去惹…");
+        return;
+      }
+      setTrashEntries((te) => {
+        const next = te.filter((t) => t.trashId !== entry.trashId);
+        saveTrashedNoteEntries(trashStorageKey, next);
+        return next;
+      });
+      setCollections((prev) =>
+        mapCollectionById(prev, entry.colId, (col) => ({
+          ...col,
+          cards: [...col.cards, structuredClone(entry.card) as NoteCard],
+        }))
+      );
+      setTrashViewActive(false);
+      setActiveId(entry.colId);
+      setCalendarDay(null);
+      setMobileNavOpen(false);
+    },
+    [canEdit, collections, trashStorageKey]
+  );
+
+  const purgeTrashedEntry = useCallback(
+    (trashId: string) => {
+      if (!canEdit) return;
+      if (
+        !window.confirm(
+          "真的要永久删掉这条小笔记吗？（回收站记录也会一起消失，回不去那种）"
+        )
+      ) {
+        return;
+      }
+      setTrashEntries((te) => {
+        const next = te.filter((t) => t.trashId !== trashId);
+        saveTrashedNoteEntries(trashStorageKey, next);
+        return next;
+      });
+    },
+    [canEdit, trashStorageKey]
+  );
+
+  const emptyTrash = useCallback(() => {
+    if (!canEdit || trashEntries.length === 0) return;
+    if (
+      !window.confirm(
+        `垃圾桶里一共 ${trashEntries.length} 条，要全部清空吗？会永久消失回不来的那种！`
+      )
+    ) {
+      return;
+    }
+    setTrashEntries([]);
+    saveTrashedNoteEntries(trashStorageKey, []);
+  }, [canEdit, trashEntries.length, trashStorageKey]);
 
   const removeRelatedPair = useCallback(
     (
@@ -2471,7 +2721,7 @@ export default function App() {
         }
       } catch (err) {
         window.alert(
-          err instanceof Error ? err.message : "上传失败"
+          err instanceof Error ? err.message : "附件上传翻车啦，再试一次？"
         );
       } finally {
         setUploadBusyCardId(null);
@@ -2552,6 +2802,7 @@ export default function App() {
    */
   const addSmallNote = useCallback(() => {
     if (!canEdit) return;
+    if (trashViewActive) return;
     if (calendarDay !== null) return;
     if (searchQuery.trim().length > 0) return;
     const targetColId = active?.id;
@@ -2578,7 +2829,7 @@ export default function App() {
     queueMicrotask(() => {
       document.getElementById(`card-text-${cardId}`)?.focus();
     });
-  }, [canEdit, calendarDay, active?.id, searchQuery]);
+  }, [canEdit, trashViewActive, calendarDay, active?.id, searchQuery]);
 
   const commitCollectionRename = useCallback(() => {
     if (!editingCollectionId) return;
@@ -2602,6 +2853,7 @@ export default function App() {
   }, [commitCollectionRename]);
 
   const addCollection = useCallback(() => {
+    setTrashViewActive(false);
     const id = `c-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
     const newCol: Collection = {
       id,
@@ -2616,6 +2868,7 @@ export default function App() {
   }, []);
 
   const addSubCollection = useCallback((parentId: string) => {
+    setTrashViewActive(false);
     const id = `c-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
     const child: Collection = {
       id,
@@ -2636,12 +2889,25 @@ export default function App() {
     setEditingCollectionId(id);
   }, []);
 
+  const toggleFavoriteCollection = useCallback(
+    (id: string) => {
+      setFavoriteCollectionIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        saveFavoriteCollectionIds(favoriteStorageKey, next);
+        return next;
+      });
+    },
+    [favoriteStorageKey]
+  );
+
   const removeCollection = useCallback(
     (id: string, displayName: string, hasSubtree: boolean) => {
       if (!canEdit) return;
       const msg = hasSubtree
-        ? `确定删除「${displayName}」及其所有子合集？其中笔记将一并删除，且不可恢复。`
-        : `确定删除「${displayName}」？其中笔记将一并删除，且不可恢复。`;
+        ? `要连「${displayName}」带子文件夹一锅端吗？里面的笔记也会一起蒸发，救不回喔。`
+        : `确定拆掉「${displayName}」这个合集？里面的笔记也会一起消失喔。`;
       if (!window.confirm(msg)) return;
       setCollectionCtxMenu(null);
       setDraggingCollectionId((d) => (d === id ? null : d));
@@ -2662,9 +2928,22 @@ export default function App() {
           for (const sid of subtreeIds) next.delete(sid);
           return next;
         });
+        setFavoriteCollectionIds((prev) => {
+          const next = new Set(prev);
+          let changed = false;
+          for (const sid of subtreeIds) {
+            if (next.has(sid)) {
+              next.delete(sid);
+              changed = true;
+            }
+          }
+          if (!changed) return prev;
+          saveFavoriteCollectionIds(favoriteStorageKey, next);
+          return next;
+        });
       }
     },
-    [canEdit]
+    [canEdit, favoriteStorageKey]
   );
 
   const toggleFolderCollapsed = useCallback((folderId: string) => {
@@ -2703,12 +2982,14 @@ export default function App() {
       e.dataTransfer.setData(COLLECTION_DRAG_MIME, id);
       e.dataTransfer.setData("text/plain", id);
       e.dataTransfer.effectAllowed = "move";
+      draggingCollectionIdRef.current = id;
       setDraggingCollectionId(id);
     },
     [canEdit]
   );
 
   const onCollectionRowDragEnd = useCallback(() => {
+    draggingCollectionIdRef.current = null;
     setDraggingCollectionId(null);
     setDropIndicator(null);
     setNoteCardDropCollectionId(null);
@@ -2726,7 +3007,7 @@ export default function App() {
         setNoteCardDropCollectionId(id);
         return;
       }
-      if (draggingCollectionId === null) return;
+      if (draggingCollectionIdRef.current === null) return;
       e.preventDefault();
       e.dataTransfer.dropEffect = "move";
       const el = e.currentTarget as HTMLElement;
@@ -2735,7 +3016,7 @@ export default function App() {
         position: dropPositionFromEvent(e, el),
       });
     },
-    [draggingCollectionId, canEdit]
+    [canEdit]
   );
 
   const onCollectionRowDrop = useCallback(
@@ -2760,9 +3041,10 @@ export default function App() {
         setDraggingNoteCardKey(null);
         return;
       }
-      const dragId =
+      const dragId = (
         e.dataTransfer.getData(COLLECTION_DRAG_MIME) ||
-        e.dataTransfer.getData("text/plain");
+        e.dataTransfer.getData("text/plain")
+      ).trim();
       if (!dragId) return;
       const el = e.currentTarget as HTMLElement;
       const position = dropPositionFromEvent(e, el);
@@ -2776,6 +3058,7 @@ export default function App() {
           return next;
         });
       }
+      draggingCollectionIdRef.current = null;
       setDraggingCollectionId(null);
       setDropIndicator(null);
     },
@@ -2864,6 +3147,10 @@ export default function App() {
     document.addEventListener("pointerdown", onDown, true);
     return () => document.removeEventListener("pointerdown", onDown, true);
   }, [cardMenuId]);
+
+  useEffect(() => {
+    setCardMenuId(null);
+  }, [trashViewActive]);
 
   const renderCard = (card: NoteCard, colId: string) => {
     const media = (card.media ?? []).filter((m) => m.url?.trim());
@@ -3129,21 +3416,15 @@ export default function App() {
                 </div>
               </div>
             </div>
-            <NoteCardBodyText
+            <NoteCardTiptap
               id={`card-text-${card.id}`}
               value={card.text}
               canEdit={canEdit}
-              minRows={3}
               ariaLabel="笔记正文"
               onChange={(next) => setCardText(colId, card.id, next)}
-              onPaste={
+              onPasteFiles={
                 canEdit && mediaUploadMode
-                  ? (e) => {
-                      const files = filesFromDataTransfer(
-                        e.clipboardData
-                      );
-                      if (files.length === 0) return;
-                      e.preventDefault();
+                  ? (files) => {
                       void uploadFilesToCard(colId, card.id, files);
                     }
                   : undefined
@@ -3166,6 +3447,118 @@ export default function App() {
                   : undefined
               }
             />
+          ) : null}
+        </div>
+      </li>
+    );
+  };
+
+  /** 垃圾桶内：与普通小笔记相同的卡片布局，仅菜单为恢复 / 永久删除 */
+  const renderTrashCard = (entry: TrashedNoteEntry) => {
+    const card = entry.card;
+    const media = (card.media ?? []).filter((m) => m.url?.trim());
+    const hasGallery = media.length > 0;
+    const menuId = `__trash__${entry.trashId}`;
+    const noteKey = `trash-${entry.trashId}`;
+    return (
+      <li
+        key={noteKey}
+        className={
+          "card card--in-trash" +
+          (cardMenuId === menuId ? " is-menu-open" : "")
+        }
+        title={
+          entry.colPathLabel
+            ? `原所在合集：${entry.colPathLabel}`
+            : undefined
+        }
+      >
+        <div
+          className={
+            "card__inner" + (hasGallery ? " card__inner--split" : "")
+          }
+        >
+          <div
+            className={
+              "card__paper" +
+              (hasGallery ? " card__paper--with-gallery" : "")
+            }
+          >
+            <div className="card__toolbar">
+              <span className="card__time">
+                {formatCardTimeLabel(card)}
+              </span>
+              <div className="card__toolbar-actions">
+                {canEdit ? (
+                  <div
+                    className="card__menu-root"
+                    data-card-menu-root={menuId}
+                  >
+                    <button
+                      type="button"
+                      className="card__more"
+                      aria-label="更多操作"
+                      aria-expanded={cardMenuId === menuId}
+                      onClick={() =>
+                        setCardMenuId((id) =>
+                          id === menuId ? null : menuId
+                        )
+                      }
+                    >
+                      …
+                    </button>
+                    {cardMenuId === menuId ? (
+                      <div
+                        className="card__menu"
+                        role="menu"
+                        aria-orientation="vertical"
+                      >
+                        <button
+                          type="button"
+                          className="card__menu-item"
+                          role="menuitem"
+                          onClick={() => {
+                            setCardMenuId(null);
+                            restoreTrashedEntry(entry);
+                          }}
+                        >
+                          恢复到原合集
+                        </button>
+                        <button
+                          type="button"
+                          className="card__menu-item card__menu-item--danger"
+                          role="menuitem"
+                          onClick={() => {
+                            setCardMenuId(null);
+                            purgeTrashedEntry(entry.trashId);
+                          }}
+                        >
+                          永久删除
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div className="card__toolbar-spacer" aria-hidden />
+                )}
+              </div>
+            </div>
+            <NoteCardTiptap
+              id={`trash-card-text-${entry.trashId}`}
+              value={card.text}
+              canEdit={false}
+              ariaLabel="笔记正文"
+              onChange={() => {}}
+            />
+            <CardTagsRow
+              colId={entry.colId}
+              card={card}
+              canEdit={false}
+              onCommit={() => {}}
+            />
+          </div>
+          {hasGallery ? (
+            <CardGallery items={media} />
           ) : null}
         </div>
       </li>
@@ -3198,7 +3591,9 @@ export default function App() {
           <div
             className={
               "sidebar__tree-row" +
-              (c.id === active?.id && !calendarDay ? " is-active" : "") +
+              (c.id === active?.id && !calendarDay && !trashViewActive
+                ? " is-active"
+                : "") +
               (c.id === draggingCollectionId
                 ? " sidebar__tree-row--dragging"
                 : "") +
@@ -3262,6 +3657,7 @@ export default function App() {
               className="sidebar__item-hit"
               onClick={() => {
                 if (editingCollectionId === c.id) return;
+                setTrashViewActive(false);
                 setCalendarDay(null);
                 expandAncestorsOf(c.id);
                 setActiveId(c.id);
@@ -3270,6 +3666,7 @@ export default function App() {
                 if (editingCollectionId === c.id) return;
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
+                  setTrashViewActive(false);
                   setCalendarDay(null);
                   expandAncestorsOf(c.id);
                   setActiveId(c.id);
@@ -3365,17 +3762,6 @@ export default function App() {
         onClick={() => setMobileNavOpen(false)}
       />
       <aside className="sidebar" id="app-mobile-sidebar">
-        <div className="sidebar__mobile-top">
-          <span className="sidebar__mobile-title">菜单</span>
-          <button
-            type="button"
-            className="sidebar__mobile-close"
-            aria-label="关闭菜单"
-            onClick={() => setMobileNavOpen(false)}
-          >
-            <span aria-hidden>×</span>
-          </button>
-        </div>
         <div className="sidebar__header">
           <div className="sidebar__header-row">
             <div className="sidebar__workspace">
@@ -3436,7 +3822,7 @@ export default function App() {
                     type="button"
                     className="sidebar__users-btn"
                     onClick={() => setUserAdminOpen(true)}
-                    title="用户管理"
+                    title="小伙伴管理台"
                   >
                     用户
                   </button>
@@ -3449,7 +3835,7 @@ export default function App() {
                   }
                   onClick={currentUser ? logout : openLogin}
                   aria-label={currentUser ? "退出登录" : "登录"}
-                  title={currentUser ? "退出登录" : "登录"}
+                  title={currentUser ? "下次再见啦～" : "开门登录～"}
                 >
                   <AdminHeaderIcon
                     mode={currentUser ? "logout" : "login"}
@@ -3457,6 +3843,14 @@ export default function App() {
                 </button>
               </div>
             ) : null}
+            <button
+              type="button"
+              className="sidebar__mobile-close"
+              aria-label="关闭菜单"
+              onClick={() => setMobileNavOpen(false)}
+            >
+              <span aria-hidden>×</span>
+            </button>
           </div>
           {sidebarFlash ? (
             <p className="sidebar__flash" role="status">
@@ -3481,10 +3875,10 @@ export default function App() {
             >
               ‹
             </button>
-            <span className="sidebar__cal-title">
-              {calendarViewMonth.getFullYear()}年
-              {calendarViewMonth.getMonth() + 1}月
-            </span>
+            <CalendarYearMonthFields
+              calendarViewMonth={calendarViewMonth}
+              setCalendarViewMonth={setCalendarViewMonth}
+            />
             <button
               type="button"
               className="sidebar__cal-nav-btn"
@@ -3541,6 +3935,80 @@ export default function App() {
         </div>
 
         <div className="sidebar__collections">
+          <div className="sidebar__favorites">
+            <div className="sidebar__section-row">
+              <p className="sidebar__section">收藏</p>
+            </div>
+            {favoriteSidebarEntries.length === 0 ? (
+              <p className="sidebar__favorites-empty">
+                还没有星标？去主标题旁点那颗黄星星，常逛的合集一键直达～
+              </p>
+            ) : (
+              <ul
+                className="sidebar__favorites-list"
+                aria-label="收藏的合集"
+              >
+                {favoriteSidebarEntries.map(({ col, path }) => (
+                  <li key={col.id} className="sidebar__favorites-item">
+                    <div
+                      className={
+                        "sidebar__favorites-row" +
+                        (col.id === active?.id &&
+                        !calendarDay &&
+                        !trashViewActive
+                          ? " is-active"
+                          : "")
+                      }
+                    >
+                      <button
+                        type="button"
+                        className="sidebar__favorites-hit"
+                        onClick={() => {
+                          setTrashViewActive(false);
+                          setSearchQuery("");
+                          setSearchBarOpen(false);
+                          setCalendarDay(null);
+                          expandAncestorsOf(col.id);
+                          setActiveId(col.id);
+                          setMobileNavOpen(false);
+                        }}
+                      >
+                        <span
+                          className="sidebar__dot"
+                          style={{ backgroundColor: col.dotColor }}
+                          aria-hidden
+                        />
+                        <span className="sidebar__name" title={path}>
+                          {col.name}
+                        </span>
+                        <span className="sidebar__count">
+                          {countSidebarCollectionCardBadge(col)}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        draggable={false}
+                        className="sidebar__favorites-remove"
+                        aria-label="取消收藏"
+                        title="取消收藏"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleFavoriteCollection(col.id);
+                        }}
+                      >
+                        <span
+                          className="sidebar__favorites-remove__icon"
+                          aria-hidden
+                        >
+                          ×
+                        </span>
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
           <div className="sidebar__section-row">
             <p className="sidebar__section">合集</p>
             {canEdit ? (
@@ -3571,6 +4039,7 @@ export default function App() {
                   type="button"
                   className="sidebar__tags-chip"
                   onClick={() => {
+                    setTrashViewActive(false);
                     setSearchQuery(tag);
                     setCalendarDay(null);
                     setMobileNavOpen(false);
@@ -3581,8 +4050,51 @@ export default function App() {
               ))}
             </div>
           ) : (
-            <p className="sidebar__tags-empty">暂无标签</p>
+            <p className="sidebar__tags-empty">
+              还没有标签出没，多写几条笔记就会长出来～
+            </p>
           )}
+        </div>
+
+        <div className="sidebar__trash" aria-label="垃圾桶">
+          <button
+            type="button"
+            className={
+              "sidebar__trash-hit" +
+              (trashViewActive && !searchActive ? " is-active" : "")
+            }
+            onClick={() => {
+              setTrashViewActive(true);
+              setSearchQuery("");
+              setSearchBarOpen(false);
+              setCalendarDay(null);
+              setMobileNavOpen(false);
+            }}
+          >
+            <svg
+              className="sidebar__trash-icon"
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden
+            >
+              <path d="M3 6h18" />
+              <path d="M8 6V4h8v2" />
+              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+              <path d="M10 11v6M14 11v6" />
+            </svg>
+            <span className="sidebar__trash-label">垃圾桶</span>
+            {trashEntries.length > 0 ? (
+              <span className="sidebar__trash-badge">
+                {trashEntries.length > 99 ? "99+" : trashEntries.length}
+              </span>
+            ) : null}
+          </button>
         </div>
       </aside>
 
@@ -3604,7 +4116,7 @@ export default function App() {
                   id="app-main-search"
                   type="search"
                   className="main__search-input"
-                  placeholder="搜索…"
+                  placeholder="搜搜笔记、合集、附件名～"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   onKeyDown={(e) => {
@@ -3653,13 +4165,48 @@ export default function App() {
                 />
               </svg>
             </button>
-            <h1 className="main__heading">
-              {searchActive
-                ? "搜索"
-                : calendarDay
-                  ? formatChineseDayTitle(calendarDay)
-                  : active?.name ?? "未选择合集"}
-            </h1>
+            <div className="main__heading-wrap">
+              <h1 className="main__heading">
+                {searchActive
+                  ? "搜索"
+                  : trashViewActive
+                    ? "垃圾桶"
+                    : calendarDay
+                      ? formatChineseDayTitle(calendarDay)
+                      : active?.name ?? "未选择合集"}
+              </h1>
+              {active &&
+              !calendarDay &&
+              !searchActive &&
+              !trashViewActive ? (
+                <button
+                  type="button"
+                  className={
+                    "main__heading-fav" +
+                    (favoriteCollectionIds.has(active.id)
+                      ? " is-on"
+                      : "")
+                  }
+                  aria-label={
+                    favoriteCollectionIds.has(active.id)
+                      ? "取消收藏此合集"
+                      : "收藏此合集"
+                  }
+                  aria-pressed={favoriteCollectionIds.has(active.id)}
+                  title={
+                    favoriteCollectionIds.has(active.id)
+                      ? "取消收藏"
+                      : "收藏"
+                  }
+                  onClick={() => toggleFavoriteCollection(active.id)}
+                >
+                  <CollectionStarIcon
+                    filled={favoriteCollectionIds.has(active.id)}
+                    className="main__heading-fav__svg"
+                  />
+                </button>
+              ) : null}
+            </div>
             <div className="main__header-actions">
               {!searchExpanded ? (
                 <button
@@ -3685,7 +4232,27 @@ export default function App() {
                   </svg>
                 </button>
               ) : null}
-              {canEdit && active && !calendarDay && !searchActive ? (
+              {canEdit &&
+              trashViewActive &&
+              !searchActive &&
+              trashEntries.length > 0 ? (
+                <button
+                  type="button"
+                  className="main__header-icon-btn main__header-icon-btn--danger-text"
+                  aria-label="清空垃圾桶"
+                  title="清空垃圾桶"
+                  onClick={emptyTrash}
+                >
+                  <span className="main__header-trash-empty-label">
+                    清空
+                  </span>
+                </button>
+              ) : null}
+              {canEdit &&
+              active &&
+              !calendarDay &&
+              !searchActive &&
+              !trashViewActive ? (
                 <button
                   type="button"
                   className="main__header-icon-btn"
@@ -3724,7 +4291,10 @@ export default function App() {
               ) : null}
             </div>
           )}
-          {active && !calendarDay && !searchActive && (
+          {active &&
+          !calendarDay &&
+          !searchActive &&
+          !trashViewActive && (
             <div className="main__hint-wrap">
               {editingHintCollectionId === active.id ? (
                 <textarea
@@ -3752,7 +4322,12 @@ export default function App() {
               ) : (
                 <p
                   className="main__hint"
-                  title={canEdit ? "双击修改说明" : undefined}
+                  title={
+                    (active.hint?.trim()
+                      ? active.hint!
+                      : DEFAULT_COLLECTION_HINT) +
+                    (canEdit ? " · 双击改成自己的话 ✨" : "")
+                  }
                   onDoubleClick={
                     canEdit
                       ? () => {
@@ -3780,13 +4355,17 @@ export default function App() {
           className="timeline"
           role="feed"
           aria-label={
-            searchActive ? "搜索结果" : "mikujar 时间线"
+            searchActive
+              ? "搜索结果"
+              : trashViewActive
+                ? "垃圾桶"
+                : "mikujar 时间线"
           }
         >
           {searchActive ? (
             !searchHasResults ? (
               <div className="timeline__empty">
-                未找到与「{searchTrim}」相关的笔记或合集。
+                唔…「{searchTrim}」什么也没搜到，换个词或换个姿势试试？
               </div>
             ) : (
               <>
@@ -3806,6 +4385,7 @@ export default function App() {
                             type="button"
                             className="search-col-list__open"
                             onClick={() => {
+                              setTrashViewActive(false);
                               setActiveId(col.id);
                               setCalendarDay(null);
                               setSearchQuery("");
@@ -3846,6 +4426,7 @@ export default function App() {
                             type="button"
                             className="search-card-group__open"
                             onClick={() => {
+                              setTrashViewActive(false);
                               setActiveId(col.id);
                               setCalendarDay(null);
                               setSearchQuery("");
@@ -3866,12 +4447,24 @@ export default function App() {
                 ) : null}
               </>
             )
+          ) : trashViewActive ? (
+            trashEntries.length === 0 ? (
+              <div className="timeline__empty trash-empty">
+                {canEdit
+                  ? "回收站空空如也～ 删掉的小卡片会乖乖躺在这，点「⋯」能捞回来或彻底粉碎。"
+                  : "暂时没有已删除的笔记哟。"}
+              </div>
+            ) : (
+              <ul className="cards" aria-label="已删除的笔记">
+                {trashEntries.map((entry) => renderTrashCard(entry))}
+              </ul>
+            )
           ) : calendarDay ? (
             dayPinned.length === 0 && dayRestCards.length === 0 ? (
               <div className="timeline__empty">
                 {canEdit
-                  ? "这一天还没有带日期的笔记。请在侧栏选中合集后再点顶部「加号」新建；未写日期的卡片不会出现在日历里。"
-                  : "这一天没有可显示的笔记。"}
+                  ? "这一天还没有带日期的小笔记～ 先选好合集，再用顶栏/底栏加号新建；没写日期的卡片不会出现在日历里哦。"
+                  : "这一天没有可以展示的笔记～"}
               </div>
             ) : (
               <>
@@ -3919,9 +4512,9 @@ export default function App() {
             <div className="timeline__empty">
               {timelineEmpty
                 ? canEdit
-                  ? "当前合集里还没有笔记。点顶部「加号」或底部「新建小笔记」会记在当前合集并打在今日日历上。"
-                  : "当前合集里还没有笔记。"
-                : "暂无笔记。"}
+                  ? "这里还光溜溜的！点顶栏「+」或底下罐子/「新建小笔记」，新卡会进当前合集并打上今天的日历～"
+                  : "这个合集还没有笔记～"
+                : "暂时没有任何小笔记～"}
             </div>
           ) : (
             <>
@@ -3950,7 +4543,11 @@ export default function App() {
               </ul>
             </>
           )}
-          {canEdit && active && !calendarDay && !searchActive ? (
+          {canEdit &&
+          active &&
+          !calendarDay &&
+          !searchActive &&
+          !trashViewActive ? (
             <div className="timeline__add-bottom">
               <button
                 type="button"
@@ -3964,6 +4561,85 @@ export default function App() {
           ) : null}
         </div>
       </main>
+      <nav className="mobile-dock" aria-label="底部快捷操作">
+        <button
+          type="button"
+          className="mobile-dock__btn mobile-dock__btn--icon"
+          aria-label={mobileNavOpen ? "关闭菜单" : "打开菜单"}
+          aria-expanded={mobileNavOpen}
+          aria-controls="app-mobile-sidebar"
+          onClick={() => setMobileNavOpen((o) => !o)}
+        >
+          <svg
+            width="22"
+            height="22"
+            viewBox="0 0 24 24"
+            aria-hidden
+          >
+            <path
+              fill="currentColor"
+              d="M4 6h16v2H4V6zm0 5h16v2H4v-2zm0 5h16v2H4v-2z"
+            />
+          </svg>
+        </button>
+        <button
+          type="button"
+          className="mobile-dock__btn mobile-dock__btn--fab"
+          aria-label={
+            writeRequiresLogin && !currentUser
+              ? "先登录再写笔记"
+              : "新建小笔记"
+          }
+          title={
+            writeRequiresLogin && !currentUser
+              ? "先登录再开罐写笔记～"
+              : "新建小笔记"
+          }
+          disabled={
+            trashViewActive ||
+            calendarDay !== null ||
+            searchQuery.trim().length > 0 ||
+            !active ||
+            (!(writeRequiresLogin && !currentUser) && !canEdit)
+          }
+          onClick={() => {
+            if (writeRequiresLogin && !currentUser) {
+              openLogin();
+              return;
+            }
+            addSmallNote();
+          }}
+        >
+          <MobileDockJarIcon className="mobile-dock__jar-svg" />
+        </button>
+        <button
+          type="button"
+          className="mobile-dock__btn mobile-dock__btn--icon"
+          aria-label="搜索"
+          title="搜索"
+          onClick={() => {
+            setSearchBarOpen(true);
+            requestAnimationFrame(() => {
+              mainSearchInputRef.current?.focus();
+            });
+          }}
+        >
+          <svg
+            width="22"
+            height="22"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            <circle cx="11" cy="11" r="8" />
+            <path d="m21 21-4.35-4.35" />
+          </svg>
+        </button>
+      </nav>
       <input
         ref={cardMediaFileInputRef}
         type="file"
@@ -4033,6 +4709,7 @@ export default function App() {
                 )
               }
               onNavigateToCard={(tgtCol, _tgtCard) => {
+                setTrashViewActive(false);
                 setActiveId(tgtCol);
                 setCalendarDay(null);
                 setSearchQuery("");
@@ -4059,10 +4736,10 @@ export default function App() {
                 onClick={(e) => e.stopPropagation()}
               >
                 <h2 id="user-admin-title" className="auth-modal__title">
-                  用户管理
+                  小伙伴管理台
                 </h2>
                 <p className="auth-modal__hint">
-                  手动创建账号。登录用户均可编辑自己的笔记与上传附件；管理员额外可在此管理用户。
+                  在这儿给新来的发入住许可～ 登录后每人都有自己的笔记小窝和附件格子；站长还能改身份、换口令、送走来访者。
                 </p>
                 {adminUsersErr || userAdminFormErr ? (
                   <p className="auth-modal__err" role="alert">
@@ -4070,12 +4747,12 @@ export default function App() {
                   </p>
                 ) : null}
                 <div className="user-admin__new">
-                  <p className="user-admin__new-title">新建用户</p>
+                  <p className="user-admin__new-title">拉新坑位</p>
                   <input
                     type="text"
                     className="auth-modal__input"
                     autoComplete="off"
-                    placeholder="用户名"
+                    placeholder="登录用小 ID"
                     value={newUserUsername}
                     disabled={newUserBusy}
                     onChange={(e) => setNewUserUsername(e.target.value)}
@@ -4084,7 +4761,7 @@ export default function App() {
                     type="password"
                     className="auth-modal__input"
                     autoComplete="new-password"
-                    placeholder="初始密码（至少 4 位）"
+                    placeholder="开局口令（至少 4 位）"
                     value={newUserPassword}
                     disabled={newUserBusy}
                     onChange={(e) => setNewUserPassword(e.target.value)}
@@ -4093,14 +4770,14 @@ export default function App() {
                     type="text"
                     className="auth-modal__input"
                     autoComplete="off"
-                    placeholder="显示名（可选，默认同用户名）"
+                    placeholder="对外昵称（可选，不填就用小 ID）"
                     value={newUserDisplayName}
                     disabled={newUserBusy}
                     onChange={(e) => setNewUserDisplayName(e.target.value)}
                   />
                   <div className="user-admin__new-row">
                     <label className="user-admin__role-label">
-                      角色
+                      身份
                       <select
                         className="user-admin__role-select"
                         value={newUserRole}
@@ -4111,8 +4788,8 @@ export default function App() {
                           )
                         }
                       >
-                        <option value="user">普通用户</option>
-                        <option value="admin">管理员</option>
+                        <option value="user">住民</option>
+                        <option value="admin">站长</option>
                       </select>
                     </label>
                     <button
@@ -4125,21 +4802,21 @@ export default function App() {
                       }
                       onClick={() => void submitNewUser()}
                     >
-                      {newUserBusy ? "…" : "添加"}
+                      {newUserBusy ? "…" : "发放入住许可"}
                     </button>
                   </div>
                 </div>
                 <div className="user-admin__table-wrap">
                   {adminUsersLoading ? (
-                    <p className="user-admin__loading">加载中…</p>
+                    <p className="user-admin__loading">名单抓抓中…</p>
                   ) : (
                     <table className="user-admin__table">
                       <thead>
                         <tr>
-                          <th>显示名</th>
-                          <th>用户名</th>
-                          <th>角色</th>
-                          <th>重置密码</th>
+                          <th>昵称</th>
+                          <th>登录 ID</th>
+                          <th>身份</th>
+                          <th>换口令</th>
                           <th />
                         </tr>
                       </thead>
@@ -4162,8 +4839,8 @@ export default function App() {
                                   )
                                 }
                               >
-                                <option value="user">普通</option>
-                                <option value="admin">管理</option>
+                                <option value="user">住民</option>
+                                <option value="admin">站长</option>
                               </select>
                             </td>
                             <td className="user-admin__pwd-cell">
@@ -4172,7 +4849,7 @@ export default function App() {
                                   type="password"
                                   className="user-admin__pwd-input"
                                   autoComplete="new-password"
-                                  placeholder="新密码"
+                                  placeholder="新口令（≥4）"
                                   value={pwdResetByUser[u.id] ?? ""}
                                   disabled={rowBusyId === u.id}
                                   onChange={(e) =>
@@ -4188,7 +4865,7 @@ export default function App() {
                                   disabled={rowBusyId === u.id}
                                   onClick={() => void applyPasswordReset(u)}
                                 >
-                                  应用
+                                  生效
                                 </button>
                               </div>
                             </td>
@@ -4199,7 +4876,7 @@ export default function App() {
                                 disabled={rowBusyId === u.id}
                                 onClick={() => void onDeleteUser(u)}
                               >
-                                删除
+                                送走
                               </button>
                             </td>
                           </tr>
@@ -4214,7 +4891,7 @@ export default function App() {
                     className="auth-modal__btn auth-modal__btn--ghost"
                     onClick={() => setUserAdminOpen(false)}
                   >
-                    关闭
+                    收工
                   </button>
                 </div>
               </div>

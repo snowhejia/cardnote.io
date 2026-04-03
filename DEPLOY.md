@@ -69,7 +69,8 @@ docker run -p 3002:3002 -v mikujar-data:/data mikujar
 | `COS_REGION` | 地域，如 `ap-guangzhou`、`ap-beijing`、`ap-shanghai` |
 | `COS_KEY` | 可选，合集 JSON 的对象键，默认 `mikujar/collections.json` |
 | `COS_MEDIA_PREFIX` | 可选，附件对象键目录前缀，默认 `mikujar/media`（勿以 `/` 结尾） |
-| `COS_PUBLIC_BASE` | 可选，附件公网访问基址（如 CDN `https://img.example.com`），不设置则使用 `https://{Bucket}.cos.{Region}.myqcloud.com` |
+| `COS_PUBLIC_BASE` | 可选，附件公网访问基址（如 CDN `https://img.example.com`）；不设置且未开全球加速时，使用 `https://{Bucket}.cos.{Region}.myqcloud.com` |
+| `COS_USE_ACCELERATE` | 设为 `true` / `1` / `yes` 时，SDK 与公网 URL 使用全球加速域名 `https://{Bucket}.cos.accelerate.myqcloud.com`（须先在控制台为该桶启用全球加速，见 [全球加速说明](https://cloud.tencent.com/document/product/436/55590)）；与 `COS_PUBLIC_BASE` 同时配置时以 `COS_PUBLIC_BASE` 为准 |
 | `UPLOAD_MAX_MB` | 可选，单文件大小上限，默认 `100`，最大 `500` |
 
 COS 说明：在 [腾讯云控制台](https://console.cloud.tencent.com/cos) 创建存储桶后，为运行本服务的账号或子用户授予该桶的 **GetObject / PutObject**（及首次写入可能需要的权限）。附件上传使用 **`ACL: public-read`**，请确保桶未开启「禁止公共访问」或改为通过桶策略/自定义域名提供匿名读，否则浏览器无法直接加载图片/视频/音频 URL。密钥仅配置在**服务端**环境变量中，勿写入前端 `.env`。`GET /api/health` 的 JSON 里会带 `storage`（合集 JSON 存储）与 `mediaUpload`（`cos` / `local` / 未开放时为 `null`）便于确认当前能力。

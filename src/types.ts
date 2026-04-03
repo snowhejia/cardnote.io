@@ -45,3 +45,13 @@ export type Collection = {
   /** 子合集（侧栏树形折叠展示） */
   children?: Collection[];
 };
+
+/** 侧栏垃圾桶：删除的小笔记快照（仅存本地 localStorage，不同步服务器 JSON） */
+export type TrashedNoteEntry = {
+  trashId: string;
+  colId: string;
+  /** 删除时的合集路径，用于恢复提示 */
+  colPathLabel: string;
+  card: NoteCard;
+  deletedAt: string;
+};

@@ -18,6 +18,11 @@
   --vp-c-brand-2: #35d399;
   --vp-c-brand-soft: rgba(66, 185, 131, 0.12);
   --vp-c-brand-mute: rgba(66, 185, 131, 0.08);
+  /* 与 public/favicon.svg 未来罐一致 */
+  --mikujar-logo-jar: #5e9fe8;
+  --mikujar-logo-jar-deep: #4a8fd8;
+  --mikujar-logo-lid: #37352f;
+  --mikujar-logo-tile: #ecece8;
   --vp-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.06);
   --vp-shadow-2: 0 3px 12px rgba(0, 0, 0, 0.07);
 }

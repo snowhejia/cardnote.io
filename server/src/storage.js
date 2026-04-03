@@ -17,11 +17,22 @@ export function storageMode() {
 
 let cosClient = null;
 
+/**
+ * 全球加速：须在控制台为存储桶启用「全球加速」后再打开，见
+ * https://cloud.tencent.com/document/product/436/55590
+ * 预签名 PUT、服务端 API、对外访问 URL 会统一走 *.cos.accelerate.myqcloud.com
+ */
+function cosUseAccelerate() {
+  const v = process.env.COS_USE_ACCELERATE?.trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes";
+}
+
 function getCos() {
   if (cosClient) return cosClient;
   cosClient = new COS({
     SecretId: process.env.COS_SECRET_ID.trim(),
     SecretKey: process.env.COS_SECRET_KEY.trim(),
+    UseAccelerate: cosUseAccelerate(),
   });
   return cosClient;
 }
@@ -209,7 +220,8 @@ export async function writeCollectionsForUser(
 
 export function storageLogHint() {
   if (storageMode() === "cos") {
-    return `cos: ${cosBucket()} / ${cosObjectKey()} legacy + ${collectionsCosPrefix()}/*.json per user (${cosRegion()})`;
+    const acc = cosUseAccelerate() ? " + accelerate" : "";
+    return `cos: ${cosBucket()} / ${cosObjectKey()} legacy + ${collectionsCosPrefix()}/*.json per user (${cosRegion()}${acc})`;
   }
   return null;
 }
@@ -230,6 +242,9 @@ export function buildObjectPublicUrl(objectKey) {
   const custom = process.env.COS_PUBLIC_BASE?.trim();
   if (custom) {
     return `${custom.replace(/\/$/, "")}/${encoded}`;
+  }
+  if (cosUseAccelerate()) {
+    return `https://${cosBucket()}.cos.accelerate.myqcloud.com/${encoded}`;
   }
   return `https://${cosBucket()}.cos.${cosRegion()}.myqcloud.com/${encoded}`;
 }

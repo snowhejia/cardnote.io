@@ -63,7 +63,7 @@ function LoginModal({
     setBusy(true);
     try {
       const r = await onLogin(username.trim(), password);
-      if (!r.ok) setError(r.error ?? "登录失败");
+      if (!r.ok) setError(r.error ?? "登录失败惹，再检查一下？");
       else {
         setPassword("");
         setUsername("");
@@ -87,16 +87,17 @@ function LoginModal({
         onClick={(e) => e.stopPropagation()}
       >
         <h2 id="auth-modal-title" className="auth-modal__title">
-          登录
+          回来啦～登录
         </h2>
         <p className="auth-modal__hint">
-          使用管理员分配的账号登录。登录后笔记与附件仅保存在您的账号下；未登录时界面为本地示例模板，不会读取他人数据。管理员还可管理用户。
+          用站长/管理员发你的账号口令开罐就好 ✨
+          登录后笔记和附件都存在你自己的小地盘；没登录时只是本地样例陈列，不会误闯别人家数据。管理员还能在这里招呼小伙伴～
         </p>
         <input
           type="text"
           className="auth-modal__input"
           autoComplete="username"
-          placeholder="用户名"
+          placeholder="用户名（发你的那个）"
           value={username}
           disabled={busy}
           onChange={(e) => setUsername(e.target.value)}
@@ -108,7 +109,7 @@ function LoginModal({
           type="password"
           className="auth-modal__input"
           autoComplete="current-password"
-          placeholder="密码"
+          placeholder="口令 / 密码"
           value={password}
           disabled={busy}
           onChange={(e) => setPassword(e.target.value)}
@@ -128,7 +129,7 @@ function LoginModal({
             onClick={onClose}
             disabled={busy}
           >
-            取消
+            稍后再说
           </button>
           <button
             type="button"
@@ -136,7 +137,7 @@ function LoginModal({
             onClick={() => void submit()}
             disabled={busy || !username.trim() || !password}
           >
-            {busy ? "…" : "登录"}
+            {busy ? "…" : "开罐！"}
           </button>
         </div>
       </div>
