@@ -5242,10 +5242,14 @@ export default function App() {
           disabled={
             calendarDay !== null
               ? false
-              : trashViewActive ||
-                searchQuery.trim().length > 0 ||
-                !active ||
-                !canEdit
+              : writeRequiresLogin &&
+                  !getAdminToken() &&
+                  !isTauri()
+                ? false
+                : trashViewActive ||
+                  searchQuery.trim().length > 0 ||
+                  !active ||
+                  !canEdit
           }
           onClick={() => {
             if (calendarDay !== null) {
