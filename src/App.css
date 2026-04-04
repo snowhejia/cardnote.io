@@ -191,7 +191,7 @@
   width: 100%;
   max-width: 100%;
   flex-shrink: 0;
-  padding: 0 0 env(safe-area-inset-bottom, 0px);
+  padding: 0;
   margin: 0;
   background: transparent;
   display: flex;
@@ -203,12 +203,11 @@
 
 /* 边框与圆角在外层，避免 WebKit 下 border + background-attachment:local 与行高错位成「宽窄相间」 */
 .mobile-quick-capture__field-wrap {
-  border-radius: 12px 12px 0 0;
+  border-radius: 12px;
   border: 1px solid rgba(60, 60, 67, 0.08);
-  border-bottom: none;
   box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.08);
   background: #ffffff;
-  overflow: visible;
+  overflow: hidden;
 }
 
 /* 第一行时刻 + 下方正文区，与卡片 .card__toolbar + 正文同款 30px 行栅 */
@@ -285,6 +284,37 @@
 
 .mobile-quick-capture__textarea:focus {
   outline: none;
+}
+
+/* 贴在输入区下缘、系统键盘上缘，用按钮提交（Enter 仅换行） */
+.mobile-quick-capture__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-shrink: 0;
+  gap: 8px;
+  padding: 8px 12px calc(10px + env(safe-area-inset-bottom, 0px));
+  background: #ffffff;
+  border-top: 1px solid rgba(60, 60, 67, 0.09);
+}
+
+.mobile-quick-capture__submit {
+  margin: 0;
+  padding: 9px 16px;
+  border: 1px solid rgba(55, 53, 47, 0.14);
+  border-radius: 8px;
+  font: inherit;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: rgba(55, 53, 47, 0.82);
+  background: #f2f1ef;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mobile-quick-capture__submit:active {
+  background: #e8e6e3;
+  border-color: rgba(55, 53, 47, 0.2);
 }
 
 /* —— 侧边栏（Notion 式：浅底、分区小标题、圆角选中、彩色圆点） —— */

@@ -3166,7 +3166,7 @@ export default function App() {
     const headSnap = mobileQuickCaptureHead;
     dismissMobileQuickCapture();
     if (!plain) return;
-    appendNoteCardWithHtml(
+    const cardId = appendNoteCardWithHtml(
       noteBodyToHtml(plain),
       headSnap
         ? {
@@ -3175,6 +3175,15 @@ export default function App() {
           }
         : undefined
     );
+    if (!cardId) return;
+    const scrollTimelineToEnd = () => {
+      const el = timelineRef.current;
+      if (!el) return;
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    };
+    requestAnimationFrame(() => {
+      requestAnimationFrame(scrollTimelineToEnd);
+    });
   }, [
     appendNoteCardWithHtml,
     dismissMobileQuickCapture,
@@ -5307,7 +5316,7 @@ export default function App() {
                       autoCapitalize="sentences"
                       autoCorrect="on"
                       spellCheck
-                      enterKeyHint="done"
+                      enterKeyHint="enter"
                       inputMode="text"
                       aria-label="笔记内容"
                       data-lpignore="true"
@@ -5318,6 +5327,15 @@ export default function App() {
                         setMobileQuickCaptureText(e.target.value);
                       }}
                     />
+                  </div>
+                  <div className="mobile-quick-capture__toolbar">
+                    <button
+                      type="button"
+                      className="mobile-quick-capture__submit"
+                      onClick={() => commitMobileQuickCapture()}
+                    >
+                      完成
+                    </button>
                   </div>
                 </div>
               </div>
