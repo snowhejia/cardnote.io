@@ -26,6 +26,7 @@ import {
 import { useAppDataMode } from "./appDataMode";
 import type { AppDataMode } from "./appDataModeStorage";
 import { useAuth } from "./auth/AuthContext";
+import { getAdminToken } from "./auth/token";
 import { collections as initialCollections } from "./data";
 import { loadLocalCollections, saveLocalCollections } from "./localCollectionsStorage";
 import { saveLocalMediaInlineInBrowser } from "./localMediaBrowser";
@@ -2064,13 +2065,14 @@ export default function App() {
 
   /**
    * 本地数据模式一律可编辑（合集/拖拽/删除仅依赖本地存储）。
-   * 云端模式：未登录且要求登录则只读；桌面壳在未登录时仍可改界面（不会误写服务器）。
+   * 云端模式：已带 JWT 即允许编辑（/me 偶发失败时仍可能暂无 currentUser）；桌面壳在未登录时仍可改界面。
    */
   const canEdit = useMemo(
     () =>
       dataMode === "local" ||
       !writeRequiresLogin ||
       Boolean(currentUser) ||
+      (writeRequiresLogin && Boolean(getAdminToken())) ||
       isTauri(),
     [dataMode, writeRequiresLogin, currentUser]
   );
@@ -2143,6 +2145,8 @@ export default function App() {
     position: CollectionDropPosition;
   } | null>(null);
   const [remoteLoaded, setRemoteLoaded] = useState(false);
+  /** 云端模式下仅在一次成功的 GET /collections 之后才允许自动 PUT，避免 JWT 已写入但内存仍是游客示例时把样例覆盖到用户存储 */
+  const [remoteSaveAllowed, setRemoteSaveAllowed] = useState(false);
   const [apiOnline, setApiOnline] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -2508,9 +2512,9 @@ export default function App() {
       return;
     }
 
-    // 已登录：在远程笔记拉取完成前保持 remoteLoaded=false，避免未登录时留下的示例数据
-    // 在 fetch 完成前触发自动保存（约 900ms），把默认示例 PUT 覆盖到该用户存储。
-    if (writeRequiresLogin && currentUser) {
+    setRemoteSaveAllowed(false);
+    // 已登录（含仅有 JWT、/me 尚未返回）：拉取完成前保持 remoteLoaded=false，避免示例数据被自动保存覆盖服务器
+    if (writeRequiresLogin && (currentUser || getAdminToken())) {
       setRemoteLoaded(false);
     }
     let cancelled = false;
@@ -2524,11 +2528,13 @@ export default function App() {
         setMediaUploadMode(null);
       }
       const online = Boolean(health?.ok);
-      if (writeRequiresLogin && !currentUser) {
+      /* 无 JWT 才当游客示例；仅有 token、/me 尚未成功时仍拉远程笔记，避免误显示未登录 */
+      if (writeRequiresLogin && !currentUser && !getAdminToken()) {
         setCollections(cloneInitialCollections());
         setLoadError(null);
         setSaveError(null);
         setApiOnline(online);
+        setRemoteSaveAllowed(false);
         setRemoteLoaded(true);
         return;
       }
@@ -2538,8 +2544,10 @@ export default function App() {
         setCollections(migrateCollectionTree(data));
         setApiOnline(true);
         setLoadError(null);
+        setRemoteSaveAllowed(true);
       } else {
-        if (writeRequiresLogin && currentUser) {
+        setRemoteSaveAllowed(false);
+        if (writeRequiresLogin && (currentUser || getAdminToken())) {
           setLoadError(
             "笔记加载摔了一跤… 看看网络或重新登录试试？"
           );
@@ -2611,7 +2619,8 @@ export default function App() {
     }
 
     if (!apiOnline) return;
-    if (writeRequiresLogin && !currentUser) return;
+    if (writeRequiresLogin && !currentUser && !getAdminToken()) return;
+    if (!remoteSaveAllowed) return;
     const id = window.setTimeout(() => {
       void saveCollectionsToApi(collections).then((ok) => {
         setSaveError(
@@ -2628,6 +2637,7 @@ export default function App() {
     authReady,
     writeRequiresLogin,
     currentUser?.id,
+    remoteSaveAllowed,
   ]);
 
   const active = useMemo(() => {
@@ -3190,21 +3200,10 @@ export default function App() {
     });
   }, [appendNoteCardWithHtml]);
 
-  /* 弹键盘 + 尽量不出键盘上方「密码/通行密钥」横条：先只读再 focus 再取消只读（iOS 常用） */
+  /* 勿对 textarea 做「先 readOnly 再下一帧取消」：iOS 会认为可编辑时机已脱离用户手势，键盘不再弹出 */
   useLayoutEffect(() => {
     if (!mobileQuickCaptureOpen) return;
-    const el = mobileQuickCaptureAreaRef.current;
-    if (!el) return;
-    el.readOnly = true;
-    el.focus({ preventScroll: true });
-    requestAnimationFrame(() => {
-      el.readOnly = false;
-      try {
-        el.setSelectionRange(0, 0);
-      } catch {
-        /* WebKit 空值时偶发 */
-      }
-    });
+    mobileQuickCaptureAreaRef.current?.focus({ preventScroll: true });
   }, [mobileQuickCaptureOpen]);
 
   useEffect(() => {
@@ -4317,6 +4316,15 @@ export default function App() {
                     </span>
                   </div>
                 </>
+              ) : writeRequiresLogin && getAdminToken() ? (
+                <>
+                  <span className="sidebar__workspace-dot" aria-hidden />
+                  <div className="sidebar__workspace-text">
+                    <span className="sidebar__workspace-name">
+                      恢复会话…
+                    </span>
+                  </div>
+                </>
               ) : (
                 <>
                   <span className="sidebar__workspace-dot" aria-hidden />
@@ -4377,14 +4385,26 @@ export default function App() {
                     type="button"
                     className={
                       "sidebar__admin-icon-btn" +
-                      (currentUser ? " sidebar__admin-icon-btn--on" : "")
+                      (currentUser || getAdminToken()
+                        ? " sidebar__admin-icon-btn--on"
+                        : "")
                     }
-                    onClick={currentUser ? logout : openLogin}
-                    aria-label={currentUser ? "退出登录" : "登录"}
-                    title={currentUser ? "下次再见啦～" : "开门登录～"}
+                    onClick={
+                      currentUser || getAdminToken() ? logout : openLogin
+                    }
+                    aria-label={
+                      currentUser || getAdminToken() ? "退出登录" : "登录"
+                    }
+                    title={
+                      currentUser || getAdminToken()
+                        ? "下次再见啦～"
+                        : "开门登录～"
+                    }
                   >
                     <AdminHeaderIcon
-                      mode={currentUser ? "logout" : "login"}
+                      mode={
+                        currentUser || getAdminToken() ? "logout" : "login"
+                      }
                     />
                   </button>
                 </>
@@ -5101,14 +5121,14 @@ export default function App() {
           aria-label={
             calendarDay !== null
               ? "回到合集"
-              : writeRequiresLogin && !currentUser && !isTauri()
+              : writeRequiresLogin && !getAdminToken() && !isTauri()
                 ? "先登录再写笔记"
                 : "新建小笔记"
           }
           title={
             calendarDay !== null
               ? "退出按日浏览，回到当前合集"
-              : writeRequiresLogin && !currentUser && !isTauri()
+              : writeRequiresLogin && !getAdminToken() && !isTauri()
                 ? "先登录再开罐写笔记～"
                 : "新建小笔记"
           }
@@ -5118,7 +5138,7 @@ export default function App() {
               : trashViewActive ||
                 searchQuery.trim().length > 0 ||
                 !active ||
-                (!(writeRequiresLogin && !currentUser) && !canEdit)
+                !canEdit
           }
           onClick={() => {
             if (calendarDay !== null) {
@@ -5128,7 +5148,7 @@ export default function App() {
               });
               return;
             }
-            if (writeRequiresLogin && !currentUser && !isTauri()) {
+            if (writeRequiresLogin && !getAdminToken() && !isTauri()) {
               openLogin();
               return;
             }
@@ -5152,7 +5172,9 @@ export default function App() {
                 mobileQuickCaptureDraftRef.current = "";
                 setMobileQuickCaptureOpen(true);
               });
-              /* focus 在下方 useLayoutEffect 内做（含 readOnly 技巧），避免与 iOS 抢手势 */
+              mobileQuickCaptureAreaRef.current?.focus({
+                preventScroll: true,
+              });
               return;
             }
             addSmallNote();
@@ -5279,6 +5301,7 @@ export default function App() {
                       ref={mobileQuickCaptureAreaRef}
                       className="mobile-quick-capture__textarea"
                       value={mobileQuickCaptureText}
+                      autoFocus
                       name="mikujar_quick_note_body"
                       autoComplete="off"
                       autoCapitalize="sentences"

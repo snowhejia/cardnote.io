@@ -7,7 +7,7 @@ import {
   type ReactNode,
 } from "react";
 import {
-  fetchAuthMe,
+  fetchAuthMeWithRetry,
   fetchAuthStatus,
   loginWithCredentials,
   type AuthUser,
@@ -155,7 +155,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refreshMe = useCallback(async () => {
     if (!writeRequiresLogin) return;
-    const me = await fetchAuthMe();
+    const me = await fetchAuthMeWithRetry();
     if (me.ok && me.user) {
       setCurrentUser(me.user);
       setIsAdmin(me.admin);
@@ -171,7 +171,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setWriteRequiresLogin(false);
       const token = getAdminToken();
       if (token) {
-        const me = await fetchAuthMe();
+        const me = await fetchAuthMeWithRetry();
         if (me.ok && me.user) {
           setCurrentUser(me.user);
           setIsAdmin(me.admin);
@@ -203,7 +203,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setAuthReady(true);
       return;
     }
-    const me = await fetchAuthMe();
+    const me = await fetchAuthMeWithRetry();
     if (me.ok && me.user) {
       setCurrentUser(me.user);
       setIsAdmin(me.admin);

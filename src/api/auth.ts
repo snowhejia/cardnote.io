@@ -126,3 +126,27 @@ export async function fetchAuthMe(): Promise<{
     return { ok: false, admin: false, user: null };
   }
 }
+
+const ME_RETRY_COUNT = 3;
+const ME_RETRY_DELAY_MS = 400;
+
+/** 校验会话时带重试，减轻弱网下 /me 偶发失败 → 误当成未登录 */
+export async function fetchAuthMeWithRetry(): Promise<{
+  ok: boolean;
+  admin: boolean;
+  user: AuthUser | null;
+  sessionInvalid?: boolean;
+}> {
+  let last = await fetchAuthMe();
+  if (last.ok && last.user) return last;
+  if (last.sessionInvalid) return last;
+  const token = getAdminToken();
+  if (!token) return last;
+  for (let i = 1; i < ME_RETRY_COUNT; i++) {
+    await new Promise((r) => setTimeout(r, ME_RETRY_DELAY_MS));
+    last = await fetchAuthMe();
+    if (last.ok && last.user) return last;
+    if (last.sessionInvalid) return last;
+  }
+  return last;
+}
