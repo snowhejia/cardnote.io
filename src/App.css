@@ -61,14 +61,230 @@
   display: block;
 }
 
+/* 手机顶栏「返回合集」：仅小屏显示，见 max-width 900px */
+.main__mobile-back {
+  display: none;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  margin: 0 0 0 -4px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--vp-c-text-2);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.main__mobile-back:hover {
+  background: rgba(55, 53, 47, 0.08);
+  color: var(--vp-c-text-1);
+}
+
+.main__mobile-back:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.45);
+  outline-offset: 2px;
+}
+
+.main__mobile-back-icon {
+  display: block;
+}
+
+/* 手机全屏浏览合集时的大标题栏（桌面始终隐藏，小屏仅 nav 打开时见 @media） */
+.sidebar__mobile-browse-bar {
+  display: none;
+}
+
 /* 抽屉关闭钮在 .sidebar__header-row 内，桌面端隐藏 */
 .sidebar__header-row .sidebar__mobile-close {
   display: none;
 }
 
-/* 手机端悬浮底栏：默认隐藏，见 max-width 720px */
+/* 手机端悬浮底栏：默认隐藏，见 max-width 900px（横屏/宽屏手机常 >720） */
 .mobile-dock {
   display: none;
+}
+
+/* 底栏「日历」：底部抽屉，高于底栏 z-index:35 */
+.mobile-cal-popup {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0;
+  margin: 0;
+}
+
+.mobile-cal-popup__backdrop {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: rgba(15, 15, 20, 0.42);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mobile-cal-popup__sheet {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 28rem;
+  max-height: min(520px, 82vh);
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  background: #fbfbfa;
+  border-radius: 16px 16px 0 0;
+  padding: 0 12px calc(12px + env(safe-area-inset-bottom, 0px));
+  box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.14);
+}
+
+.mobile-cal-popup__grab {
+  flex-shrink: 0;
+  width: 36px;
+  height: 5px;
+  margin: 10px auto 6px;
+  border-radius: 3px;
+  background: rgba(55, 53, 47, 0.14);
+}
+
+.mobile-cal-popup__calendar {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding: 4px 4px 8px;
+}
+
+/* 手机底栏罐子：自键盘上缘向上延伸的横格纸，与 .card__paper 同款线距与颜色 */
+.mobile-quick-capture {
+  position: fixed;
+  inset: 0;
+  z-index: 52;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0;
+  margin: 0;
+}
+
+.mobile-quick-capture__backdrop {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: rgba(15, 15, 20, 0.42);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mobile-quick-capture__sheet {
+  position: relative;
+  z-index: 1;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  flex-shrink: 0;
+  padding: 0 0 env(safe-area-inset-bottom, 0px);
+  margin: 0;
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  /* 键盘弹出时视口变矮，整块贴在可见底缘上方 */
+  max-height: min(72dvh, calc(100dvh - env(safe-area-inset-top, 0px)));
+}
+
+/* 边框与圆角在外层，避免 WebKit 下 border + background-attachment:local 与行高错位成「宽窄相间」 */
+.mobile-quick-capture__field-wrap {
+  border-radius: 12px 12px 0 0;
+  border: 1px solid rgba(60, 60, 67, 0.08);
+  border-bottom: none;
+  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.08);
+  background: #ffffff;
+  overflow: visible;
+}
+
+/* 第一行时刻 + 下方正文区，与卡片 .card__toolbar + 正文同款 30px 行栅 */
+.mobile-quick-capture__lined {
+  border-radius: 11px 11px 0 0;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.mobile-quick-capture__time-row {
+  display: flex;
+  align-items: center;
+  height: 30px;
+  min-height: 30px;
+  max-height: 30px;
+  box-sizing: border-box;
+  padding: 0 18px;
+  flex-shrink: 0;
+  border-bottom: 1px solid rgba(60, 60, 67, 0.09);
+}
+
+.mobile-quick-capture__time {
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  line-height: 30px;
+  color: var(--vp-c-text-3);
+}
+
+.mobile-quick-capture__textarea {
+  --note-line-height: 30px;
+  --note-line-color: rgba(60, 60, 67, 0.09);
+
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  /* 正文从第二行栅格起：少一行高度，总可视与原先接近 */
+  min-height: calc(8 * 30px + 15px);
+  max-height: min(70dvh, calc(20 * 30px + 15px));
+  margin: 0;
+  padding: 0 18px 15px;
+  border: none;
+  border-radius: 0;
+  resize: none;
+  font-family:
+    ui-sans-serif,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Inter",
+    "Segoe UI",
+    sans-serif;
+  font-size: 15px;
+  line-height: 30px;
+  color: #37352f;
+  background-color: #ffffff;
+  /* 每 30px 一条底边线（与 .card__paper 一致）；用 size+repeat 替代 repeating-linear-gradient，首行下那根在 iOS 上更稳 */
+  background-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent calc(var(--note-line-height) - 1px),
+    var(--note-line-color) calc(var(--note-line-height) - 1px),
+    var(--note-line-color) var(--note-line-height)
+  );
+  background-size: 100% var(--note-line-height);
+  background-repeat: repeat-y;
+  background-position: 0 0;
+  background-attachment: local;
+  overflow-y: auto;
+  transform: translateZ(0);
+  -webkit-appearance: none;
+  appearance: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.mobile-quick-capture__textarea:focus {
+  outline: none;
 }
 
 /* —— 侧边栏（Notion 式：浅底、分区小标题、圆角选中、彩色圆点） —— */
@@ -296,12 +512,17 @@
 
 .sidebar__cal-weekdays {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  /* minmax(0,1fr)：避免格子 min-width:auto 按内容撑列，与下方日期列错位 */
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 2px;
   margin-bottom: 4px;
 }
 
 .sidebar__cal-wd {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
   font-size: 0.625rem;
   font-weight: 600;
   text-align: center;
@@ -310,11 +531,18 @@
 
 .sidebar__cal-grid {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 2px;
 }
 
 .sidebar__cal-day {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
   aspect-ratio: 1;
   min-height: 28px;
   max-height: 32px;
@@ -325,9 +553,13 @@
   background: transparent;
   font-size: 0.75rem;
   font-weight: 500;
+  font-family: inherit;
+  line-height: 1;
   color: rgba(55, 53, 47, 0.82);
   cursor: pointer;
   position: relative;
+  -webkit-appearance: none;
+  appearance: none;
 }
 
 .sidebar__cal-day:hover {
@@ -357,6 +589,7 @@
 }
 
 .sidebar__cal-day--pad {
+  min-width: 0;
   pointer-events: none;
   visibility: hidden;
 }
@@ -387,7 +620,6 @@
   margin-top: 6px;
   padding-top: 8px;
   border-top: 1px solid rgba(55, 53, 47, 0.08);
-  max-height: min(200px, 32vh);
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -405,6 +637,9 @@
   gap: 6px;
   align-items: flex-start;
   justify-content: flex-start;
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: min(200px, 32vh);
   overflow-y: auto;
   padding: 0 8px 4px 10px;
   scrollbar-width: thin;
@@ -464,7 +699,7 @@
 .sidebar__trash {
   flex-shrink: 0;
   margin-top: 4px;
-  padding-top: 8px;
+  padding-top: 6px;
   border-top: 1px solid rgba(55, 53, 47, 0.08);
 }
 
@@ -1200,6 +1435,58 @@
   color: rgba(55, 53, 47, 0.55);
 }
 
+/* 与 .sidebar__add-sub 同大，内嵌 SVG 固定像素比避免被行高纵向拉长 */
+.sidebar__tree-row__tail {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.sidebar__tree-drag-handle {
+  flex-shrink: 0;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  padding: 0;
+  border-radius: 4px;
+  color: rgba(55, 53, 47, 0.38);
+  cursor: grab;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background 0.1s ease,
+    color 0.1s ease;
+}
+
+.sidebar__tree-drag-handle:active {
+  cursor: grabbing;
+}
+
+.sidebar__tree-drag-handle:hover {
+  background: rgba(55, 53, 47, 0.06);
+  color: rgba(55, 53, 47, 0.52);
+}
+
+.sidebar__tree-drag-handle__svg {
+  display: block;
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+}
+
+.sidebar__tree-drag-handle-spacer {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+}
+
 @media (hover: none) {
   .sidebar__add-sub {
     opacity: 1;
@@ -1419,11 +1706,11 @@
   margin-top: 0.55rem;
   margin-bottom: 0.08rem;
   padding: 0.12rem 0 0.22rem;
-  max-width: 42rem;
+  max-width: none;
   box-sizing: border-box;
 }
 
-/* 只读：单行省略；双击进入 textarea 后仍可多行编辑 */
+/* 只读：网页/平板多行完整；手机见 @media (max-width: 900px) 单行省略 */
 .main__hint {
   display: block;
   margin: 0;
@@ -1433,9 +1720,10 @@
   color: var(--vp-c-text-2);
   line-height: 1.55;
   cursor: text;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  word-break: break-word;
 }
 
 /* 与 .main__hint 同屏：无额外底/顶距、无白底、无边框 */
@@ -1882,6 +2170,14 @@ textarea.main__hint-editor:focus {
 
 .card__move-rail:active {
   cursor: grabbing;
+}
+
+.card__move-rail--readonly {
+  cursor: default;
+}
+
+.card__move-rail--readonly:active {
+  cursor: default;
 }
 
 .card--note-dragging {
@@ -2900,7 +3196,12 @@ div.card__text--readonly:not(.card__text--preview) {
   color: #fafaf9;
 }
 
-@media (max-width: 720px) {
+@media (max-width: 900px) {
+  /* scrollIntoView / 锚点滚动时预留刘海区，避免顶栏被状态栏挡住 */
+  html {
+    scroll-padding-top: calc(10px + env(safe-area-inset-top, 0px));
+  }
+
   .app {
     display: block;
     min-height: 100%;
@@ -2926,12 +3227,6 @@ div.card__text--readonly:not(.card__text--preview) {
       visibility 0.22s ease;
   }
 
-  .app--mobile-nav-open .app__mobile-backdrop {
-    opacity: 1;
-    visibility: visible;
-    pointer-events: auto;
-  }
-
   .sidebar {
     position: fixed;
     top: 0;
@@ -2945,8 +3240,11 @@ div.card__text--readonly:not(.card__text--preview) {
     align-items: stretch;
     border-right: 1px solid rgba(55, 53, 47, 0.12);
     border-bottom: none;
-    padding: max(0px, env(safe-area-inset-top, 0px)) 8px
-      max(16px, env(safe-area-inset-bottom, 0px));
+    padding-top: calc(constant(safe-area-inset-top) + 6px);
+    padding-top: calc(env(safe-area-inset-top, 0px) + 6px);
+    padding-left: 8px;
+    padding-right: 8px;
+    padding-bottom: max(16px, env(safe-area-inset-bottom, 0px));
     margin: 0;
     overflow-x: hidden;
     overflow-y: auto;
@@ -2958,6 +3256,201 @@ div.card__text--readonly:not(.card__text--preview) {
 
   .app--mobile-nav-open .sidebar {
     transform: translateX(0);
+    width: 100%;
+    max-width: none;
+    border-right: none;
+    box-shadow: none;
+    background: #f2f2f7;
+    padding-left: max(12px, env(safe-area-inset-left, 0px));
+    padding-right: max(12px, env(safe-area-inset-right, 0px));
+  }
+
+  /* 全屏「文件夹」页：不要遮罩、不显示主栏与底栏 */
+  .app--mobile-nav-open .app__mobile-backdrop {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  .app--mobile-nav-open .main {
+    display: none !important;
+  }
+
+  .app--mobile-nav-open .mobile-dock {
+    display: none !important;
+  }
+
+  .app--mobile-nav-open .sidebar__mobile-browse-bar {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    flex-shrink: 0;
+    padding: 2px 0 12px;
+    margin: 0;
+    border: none;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .sidebar__mobile-browse-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    flex-shrink: 1;
+    min-width: 0;
+    max-width: none;
+  }
+
+  .sidebar__mobile-browse-action {
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    margin: 0;
+    height: 36px;
+    padding: 0 12px;
+    border: 1px solid rgba(55, 53, 47, 0.14);
+    border-radius: 6px;
+    background: #fff;
+    font: inherit;
+    font-size: 0.75rem;
+    font-weight: 600;
+    line-height: 1;
+    color: rgba(55, 53, 47, 0.72);
+    cursor: pointer;
+    white-space: nowrap;
+    -webkit-tap-highlight-color: transparent;
+    transition:
+      background 0.1s ease,
+      border-color 0.1s ease,
+      color 0.1s ease;
+  }
+
+  .sidebar__mobile-browse-action:hover {
+    background: rgba(55, 53, 47, 0.06);
+    border-color: rgba(55, 53, 47, 0.22);
+    color: #37352f;
+  }
+
+  .sidebar__mobile-browse-action:focus-visible {
+    outline: 2px solid rgba(37, 99, 235, 0.45);
+    outline-offset: 2px;
+  }
+
+  .sidebar__mobile-browse-action:active {
+    background: rgba(55, 53, 47, 0.08);
+  }
+
+  .sidebar__mobile-browse-action--on {
+    background: rgba(55, 53, 47, 0.08);
+    border-color: rgba(55, 53, 47, 0.22);
+    color: #37352f;
+  }
+
+  .sidebar__mobile-browse-action--emph {
+    border-color: rgba(94, 159, 232, 0.35);
+    color: rgba(35, 80, 140, 0.92);
+  }
+
+  .sidebar__mobile-browse-action--emph:hover {
+    background: rgba(94, 159, 232, 0.1);
+    border-color: rgba(94, 159, 232, 0.48);
+  }
+
+  .sidebar__mobile-browse-action--icon {
+    width: 36px;
+    min-width: 36px;
+    padding: 0;
+    line-height: 0;
+  }
+
+  .sidebar__mobile-browse-action__svg {
+    display: block;
+    flex-shrink: 0;
+  }
+
+  /* 与新建加号同高，示意「可拖动排序」；不可点，避免误触 */
+  .app--mobile-nav-open .sidebar__header,
+  .app--mobile-nav-open .sidebar__calendar {
+    display: none !important;
+  }
+
+  .app--mobile-nav-open .sidebar__collections {
+    background: #fff;
+    border-radius: 12px;
+    margin: 0 0 12px;
+    padding: 4px 0 8px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    flex: 1 1 0;
+    min-height: 0;
+  }
+
+  .app--mobile-nav-open .sidebar__section-row {
+    padding-left: 14px;
+    padding-right: 12px;
+  }
+
+  /* 标签 + 垃圾桶同一张白卡片：云区可滚，垃圾桶底栏固定、高度与标签区协调 */
+  /* 顶留白与 .sidebar__collections（padding 4px 0 8px）+ 分区标题行一致 */
+  .app--mobile-nav-open .sidebar__tags {
+    flex: 0 1 auto;
+    max-height: min(280px, 44vh);
+    background: #fff;
+    border-radius: 12px;
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    margin: 0 0 12px;
+    padding-top: 4px;
+    padding-bottom: 0;
+    border-top: none;
+  }
+
+  /* 与上方 .sidebar__section-row 一致：左 14 / 右 12，勿再用 padding-left:2px 压窄标题 */
+  .app--mobile-nav-open .sidebar__tags-head {
+    padding-top: 4px;
+    flex-shrink: 0;
+  }
+
+  .app--mobile-nav-open .sidebar__tags-cloud {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    padding: 6px 12px 6px 14px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .app--mobile-nav-open .sidebar__tags-empty {
+    flex-shrink: 0;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    padding: 8px 12px 6px 14px;
+    margin: 0;
+  }
+
+  .app--mobile-nav-open .sidebar__trash {
+    flex-shrink: 0;
+    margin-top: 0;
+    margin-bottom: 0;
+    padding-top: 0;
+    padding-bottom: 2px;
+    border-top: 1px solid rgba(0, 0, 0, 0.06);
+  }
+
+  .app--mobile-nav-open .sidebar__trash-hit {
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    border-radius: 0 0 10px 10px;
+    padding: 6px 12px 6px 14px;
   }
 
   .sidebar__header-row .sidebar__mobile-close {
@@ -3012,6 +3505,11 @@ div.card__text--readonly:not(.card__text--preview) {
     flex-shrink: 0;
   }
 
+  /* 合集页：+ 与拖动手柄贴白卡片右缘，少留空 */
+  .app--mobile-nav-open .sidebar__tree-row {
+    padding-right: 2px;
+  }
+
   .sidebar__tags {
     flex-shrink: 0;
     position: relative;
@@ -3025,6 +3523,10 @@ div.card__text--readonly:not(.card__text--preview) {
     display: none !important;
   }
 
+  .main__mobile-back {
+    display: inline-flex !important;
+  }
+
   .main__header-actions > .main__header-icon-btn:not(.main__header-icon-btn--danger-text) {
     display: none;
   }
@@ -3036,10 +3538,16 @@ div.card__text--readonly:not(.card__text--preview) {
     column-gap: 0.75rem;
   }
 
+  .main__header-row--search-open .main__mobile-back {
+    order: -2;
+    flex: 0 0 auto;
+  }
+
   .main__header-row--search-open .main__search--row-slot {
     order: -1;
-    flex: 1 1 100%;
-    width: 100%;
+    flex: 1 1 0;
+    min-width: 0;
+    width: auto;
     max-width: none;
   }
 
@@ -3049,7 +3557,7 @@ div.card__text--readonly:not(.card__text--preview) {
 
   .main__header-row--search-open .main__heading-wrap {
     order: 2;
-    flex: 1 1 0;
+    flex: 1 1 100%;
     min-width: 0;
   }
 
@@ -3060,15 +3568,35 @@ div.card__text--readonly:not(.card__text--preview) {
   .main {
     width: 100%;
     min-height: 100dvh;
-    padding: 0.95rem 0.75rem 0.75rem;
+    /* 刘海 / 灵动岛：在原有边距上叠加安全区，避免顶栏被挡 */
+    padding-top: calc(1.05rem + constant(safe-area-inset-top));
+    padding-top: calc(1.05rem + env(safe-area-inset-top, 0px));
+    padding-right: max(0.75rem, constant(safe-area-inset-right));
+    padding-right: max(0.75rem, env(safe-area-inset-right, 0px));
+    padding-bottom: 0.75rem;
+    padding-left: max(0.75rem, constant(safe-area-inset-left));
+    padding-left: max(0.75rem, env(safe-area-inset-left, 0px));
   }
 
   .main__header {
     margin-bottom: 0.45rem;
+    scroll-margin-top: calc(10px + env(safe-area-inset-top, 0px));
   }
 
   .main__header-row {
     gap: 0.5rem;
+  }
+
+  /* 手机：合集说明单行省略省高（网页宽屏仍多行完整） */
+  .main__hint-wrap {
+    max-width: 42rem;
+  }
+
+  .main__hint {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    word-break: normal;
   }
 
   /* 手机端：主标题略小（合集说明仍显示） */
@@ -3089,7 +3617,7 @@ div.card__text--readonly:not(.card__text--preview) {
   }
 
   .timeline {
-    padding-bottom: calc(5.15rem + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(5.15rem + 12px + env(safe-area-inset-bottom, 0px));
   }
 
   .timeline__add-bottom {
@@ -3101,7 +3629,7 @@ div.card__text--readonly:not(.card__text--preview) {
     display: flex;
     position: fixed;
     left: 50%;
-    bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+    bottom: calc(22px + env(safe-area-inset-bottom, 0px));
     transform: translateX(-50%);
     z-index: 35;
     align-items: center;
@@ -3213,6 +3741,44 @@ div.card__text--readonly:not(.card__text--preview) {
   align-items: center;
   gap: 4px;
   flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  max-width: min(200px, 42vw);
+}
+
+.sidebar__data-mode {
+  display: inline-flex;
+  border-radius: 6px;
+  border: 1px solid rgba(55, 53, 47, 0.14);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.sidebar__data-mode-btn {
+  margin: 0;
+  padding: 4px 7px;
+  border: none;
+  background: #fff;
+  font: inherit;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: rgba(55, 53, 47, 0.55);
+  cursor: pointer;
+  transition: background 0.1s ease, color 0.1s ease;
+}
+
+.sidebar__data-mode-btn + .sidebar__data-mode-btn {
+  border-left: 1px solid rgba(55, 53, 47, 0.12);
+}
+
+.sidebar__data-mode-btn:hover {
+  background: rgba(55, 53, 47, 0.06);
+  color: rgba(55, 53, 47, 0.75);
+}
+
+.sidebar__data-mode-btn--active {
+  background: rgba(94, 159, 232, 0.16);
+  color: rgba(35, 80, 140, 0.95);
 }
 
 .sidebar__users-btn {
@@ -3237,18 +3803,8 @@ div.card__text--readonly:not(.card__text--preview) {
 .sidebar__workspace-text {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  justify-content: center;
   min-width: 0;
-}
-
-.sidebar__workspace-sub {
-  font-size: 0.6875rem;
-  font-weight: 500;
-  color: rgba(55, 53, 47, 0.45);
-  line-height: 1.25;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .sidebar__avatar-hit {

@@ -127,6 +127,11 @@ VITE_API_BASE=https://api.example.com npm run build
 - `JWT_SECRET`：随机长字符串（可用 `openssl rand -hex 32` 生成）。
 - `COS_SECRET_ID`、`COS_SECRET_KEY`、`COS_BUCKET`、`COS_REGION`：按上面腾讯云控制台填写。
 - `CORS_ORIGIN`：浏览器里**实际打开前端**的完整来源（协议 + 域名），多个用英文逗号分隔。例如 Vercel 默认域 `https://xxx.vercel.app`；若前端绑定备案子域 **`https://note.hejiac.com`**，则必须写上 `https://note.hejiac.com`（不要漏 `https://`，不要路径）。根域 `hejiac.com` 已做别的站也没关系，子域 **note** 可单独指向本笔记前端。
+- **Tauri 桌面版（macOS/Windows）**：打包后 WebView 的 `Origin` 常见为 **`https://tauri.localhost`**，少数环境会是 **`http://tauri.localhost`**（协议不同也算不同来源）。在 `CORS_ORIGIN` 里写上 **`https://tauri.localhost`** 即可；本仓库服务端会自动为 **`tauri.localhost` / `ipc.localhost`** 补全另一协议，避免只配 `https` 时桌面端仍被 CORS 拦。网页端与 Tauri 示例：  
+  `https://note.hejiac.com,https://tauri.localhost`  
+  **`tauri dev` / 浏览器直接跑 `npm run dev` 且前端直连线上 API（`VITE_API_BASE` 指向 `https://api.xxx`）时，浏览器发出的 `Origin` 是 `http://localhost:5173`（不是 `tauri.localhost`）。** 必须在 `CORS_ORIGIN` 里加上这一项，否则控制台会出现你截图里那种 CORS 报错。示例：  
+  `https://note.hejiac.com,https://tauri.localhost,http://localhost:5173`  
+  若仍失败，看开发者工具里失败请求的实际 **`Origin`**，原样追加进 `CORS_ORIGIN`。
 - 若 API 对外域名不是根路径，只要整站都是这一个 Node 提供 `/api` 即可；`PORT` 与 1Panel 反代端口保持一致。
 
 不要把含上述内容的文件提交到 Git；在 1Panel 界面里单独配置即可。

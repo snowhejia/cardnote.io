@@ -1,10 +1,6 @@
 import type { Collection } from "../types";
 import { getAdminToken } from "../auth/token";
-
-function apiBase(): string {
-  const b = import.meta.env.VITE_API_BASE as string | undefined;
-  return b?.replace(/\/$/, "") ?? "";
-}
+import { apiBase } from "./apiBase";
 
 /** GET：多用户模式下需携带登录 JWT（或脚本用的 API_TOKEN + 服务端要求的 userId） */
 function buildHeadersGet(): Record<string, string> {

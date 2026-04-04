@@ -10,9 +10,17 @@
     "export:collections": "tsx scripts/export-collections.ts",
     "server": "npm run start --prefix server",
     "server:dev": "npm run dev --prefix server",
-    "build:deploy": "npm run build && npm run export:collections && node scripts/copy-dist-to-server.mjs"
+    "build:deploy": "npm run build && npm run export:collections && node scripts/copy-dist-to-server.mjs",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build && node scripts/apply-dmg-finder-icon.mjs",
+    "ios:xcode": "tauri ios dev -o --no-dev-server-wait",
+    "ios:build": "tauri ios build",
+    "dmg:icon": "node scripts/apply-dmg-finder-icon.mjs"
   },
   "dependencies": {
+    "@tauri-apps/api": "^2.10.1",
+    "@tauri-apps/plugin-fs": "^2.4.5",
     "@tiptap/extension-highlight": "^3.22.1",
     "@tiptap/extension-link": "^3.22.1",
     "@tiptap/pm": "^3.22.1",
@@ -22,6 +30,7 @@
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.10.1",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.3",

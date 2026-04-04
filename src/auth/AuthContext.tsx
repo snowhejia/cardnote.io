@@ -12,6 +12,7 @@ import {
   loginWithCredentials,
   type AuthUser,
 } from "../api/auth";
+import { getAppDataMode } from "../appDataModeStorage";
 import { clearAdminToken, getAdminToken, setAdminToken } from "./token";
 
 type AuthContextValue = {
@@ -162,6 +163,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [writeRequiresLogin]);
 
   const refreshSession = useCallback(async () => {
+    if (getAppDataMode() === "local") {
+      setWriteRequiresLogin(false);
+      const token = getAdminToken();
+      if (token) {
+        const me = await fetchAuthMe();
+        if (me.ok && me.user) {
+          setCurrentUser(me.user);
+          setIsAdmin(me.admin);
+        } else {
+          clearAdminToken();
+          setCurrentUser(null);
+          setIsAdmin(false);
+        }
+      } else {
+        setCurrentUser(null);
+        setIsAdmin(false);
+      }
+      setAuthReady(true);
+      return;
+    }
+
     const status = await fetchAuthStatus();
     setWriteRequiresLogin(status.writeRequiresLogin);
     if (!status.writeRequiresLogin) {
@@ -208,12 +230,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(() => {
     clearAdminToken();
-    if (writeRequiresLogin) {
-      setIsAdmin(false);
-      setCurrentUser(null);
-    }
+    setIsAdmin(false);
+    setCurrentUser(null);
     setLoginOpen(false);
-  }, [writeRequiresLogin]);
+  }, []);
 
   const value: AuthContextValue = {
     authReady,

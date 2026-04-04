@@ -1,4 +1,5 @@
 import { getAdminToken } from "../auth/token";
+import { apiBase, remoteApiBase } from "./apiBase";
 
 export type AuthUser = {
   id: string;
@@ -8,32 +9,41 @@ export type AuthUser = {
   avatarUrl: string;
 };
 
-function apiBase(): string {
-  const b = import.meta.env.VITE_API_BASE as string | undefined;
-  return b?.replace(/\/$/, "") ?? "";
-}
-
-/** 头像/上传路径：分域部署时补全为 API 域名 */
+/**
+ * 媒体地址：绝对 URL 原样返回。
+ * - `/uploads/…` 由后端（或 COS 回写为绝对地址）提供，分域部署时补全为 API 根。
+ * - 其它以 `/` 开头的路径视为**前端静态资源**（Vite `public/` 等），与当前页面同源，
+ *   不可拼到 API 上，否则云端未登录示例图会 404，与本地模式不一致。
+ */
 export function resolveMediaUrl(pathOrUrl: string): string {
   const p = pathOrUrl.trim();
   if (!p) return "";
   if (/^https?:\/\//i.test(p)) return p;
+  if (/^data:/i.test(p)) return p;
+  if (/^blob:/i.test(p)) return p;
   const base = apiBase();
-  if (!base) return p.startsWith("/") ? p : `/${p}`;
-  return `${base}${p.startsWith("/") ? "" : "/"}${p}`;
+  const normalized = p.startsWith("/") ? p : `/${p}`;
+  if (base && normalized.startsWith("/uploads/")) {
+    return `${base}${normalized}`;
+  }
+  return normalized;
 }
 
 export async function fetchAuthStatus(): Promise<{
   writeRequiresLogin: boolean;
 }> {
   const base = apiBase();
+  const remoteBase = base.length > 0;
   try {
     const r = await fetch(`${base}/api/auth/status`);
-    if (!r.ok) return { writeRequiresLogin: false };
+    if (!r.ok) {
+      // 已指向绝对地址的云端却拿不到状态：按「需要登录」处理，避免既不显示登录又无法同步
+      return { writeRequiresLogin: remoteBase ? true : false };
+    }
     const j = (await r.json()) as { writeRequiresLogin?: unknown };
     return { writeRequiresLogin: Boolean(j.writeRequiresLogin) };
   } catch {
-    return { writeRequiresLogin: false };
+    return { writeRequiresLogin: remoteBase ? true : false };
   }
 }
 
@@ -44,7 +54,7 @@ export async function loginWithCredentials(
   | { ok: true; token: string; user: AuthUser }
   | { ok: false; error: string }
 > {
-  const base = apiBase();
+  const base = remoteApiBase();
   try {
     const r = await fetch(`${base}/api/auth/login`, {
       method: "POST",
@@ -84,7 +94,7 @@ export async function fetchAuthMe(): Promise<{
   if (!token) {
     return { ok: false, admin: false, user: null };
   }
-  const base = apiBase();
+  const base = remoteApiBase();
   try {
     const r = await fetch(`${base}/api/auth/me`, {
       headers: { Authorization: `Bearer ${token}` },

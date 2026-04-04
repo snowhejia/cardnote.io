@@ -1,7 +1,4 @@
-function apiBase(): string {
-  const b = import.meta.env.VITE_API_BASE as string | undefined;
-  return b?.replace(/\/$/, "") ?? "";
-}
+import { apiBase } from "./apiBase";
 
 export type ApiHealth = {
   ok?: boolean;

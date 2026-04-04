@@ -75,9 +75,36 @@ const app = express();
 app.use(express.json({ limit: "15mb" }));
 
 const corsOrigin = process.env.CORS_ORIGIN;
+
+/**
+ * Tauri 在不同平台/版本下可能发 `Origin: https://tauri.localhost` 或 `http://tauri.localhost`（无 s）。
+ * 只配其中一种时，另一类会被浏览器 CORS 拦截。对 tauri.localhost / ipc.localhost 自动补全另一协议。
+ */
+function buildCorsAllowedOrigins(envVal) {
+  if (!envVal?.trim()) return null;
+  const list = envVal
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const set = new Set(list);
+  const mirrorHosts = new Set(["tauri.localhost", "ipc.localhost"]);
+  for (const o of [...set]) {
+    try {
+      const u = new URL(o);
+      if (!mirrorHosts.has(u.host)) continue;
+      const altProto = u.protocol === "https:" ? "http:" : "https:";
+      set.add(`${altProto}//${u.host}`);
+    } catch {
+      /* 非 URL 则跳过 */
+    }
+  }
+  return [...set];
+}
+
+const corsAllowedList = buildCorsAllowedOrigins(corsOrigin);
 app.use(
   cors({
-    origin: corsOrigin ? corsOrigin.split(",").map((s) => s.trim()) : true,
+    origin: corsAllowedList ?? true,
   })
 );
 
