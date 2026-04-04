@@ -89,6 +89,8 @@ export async function fetchAuthMe(): Promise<{
   ok: boolean;
   admin: boolean;
   user: AuthUser | null;
+  /** 仅 true 时应清除本地 JWT（401/403）；网络抖动、5xx 勿清，避免误像「掉登录」 */
+  sessionInvalid?: boolean;
 }> {
   const token = getAdminToken();
   if (!token) {
@@ -99,7 +101,17 @@ export async function fetchAuthMe(): Promise<{
     const r = await fetch(`${base}/api/auth/me`, {
       headers: { Authorization: `Bearer ${token}` },
     });
-    if (!r.ok) return { ok: false, admin: false, user: null };
+    if (r.status === 401 || r.status === 403) {
+      return {
+        ok: false,
+        admin: false,
+        user: null,
+        sessionInvalid: true,
+      };
+    }
+    if (!r.ok) {
+      return { ok: false, admin: false, user: null };
+    }
     const j = (await r.json()) as {
       ok?: unknown;
       admin?: unknown;

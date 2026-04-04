@@ -159,6 +159,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (me.ok && me.user) {
       setCurrentUser(me.user);
       setIsAdmin(me.admin);
+    } else if (me.sessionInvalid) {
+      clearAdminToken();
+      setCurrentUser(null);
+      setIsAdmin(false);
     }
   }, [writeRequiresLogin]);
 
@@ -172,7 +176,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setCurrentUser(me.user);
           setIsAdmin(me.admin);
         } else {
-          clearAdminToken();
+          if (me.sessionInvalid) clearAdminToken();
           setCurrentUser(null);
           setIsAdmin(false);
         }
@@ -204,7 +208,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setCurrentUser(me.user);
       setIsAdmin(me.admin);
     } else {
-      clearAdminToken();
+      if (me.sessionInvalid) clearAdminToken();
       setCurrentUser(null);
       setIsAdmin(false);
     }

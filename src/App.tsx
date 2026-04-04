@@ -2543,7 +2543,9 @@ export default function App() {
           setLoadError(
             "笔记加载摔了一跤… 看看网络或重新登录试试？"
           );
-          setCollections([]);
+          /* 勿置空数组：无合集时 active 为空，底栏加号等会全部禁用，像「啥也点不了」 */
+          setCollections(cloneInitialCollections());
+          setApiOnline(false);
         } else {
           setLoadError(
             "连不上服务器喵～先用本地示例顶一顶，把后端开起来（见说明）再刷新就能同步啦。"
@@ -3188,10 +3190,21 @@ export default function App() {
     });
   }, [appendNoteCardWithHtml]);
 
-  /* flushSync 后若 ref 晚一帧就绪，再补一次 focus（仍在同一用户交互任务内） */
+  /* 弹键盘 + 尽量不出键盘上方「密码/通行密钥」横条：先只读再 focus 再取消只读（iOS 常用） */
   useLayoutEffect(() => {
     if (!mobileQuickCaptureOpen) return;
-    mobileQuickCaptureAreaRef.current?.focus({ preventScroll: true });
+    const el = mobileQuickCaptureAreaRef.current;
+    if (!el) return;
+    el.readOnly = true;
+    el.focus({ preventScroll: true });
+    requestAnimationFrame(() => {
+      el.readOnly = false;
+      try {
+        el.setSelectionRange(0, 0);
+      } catch {
+        /* WebKit 空值时偶发 */
+      }
+    });
   }, [mobileQuickCaptureOpen]);
 
   useEffect(() => {
@@ -5139,10 +5152,7 @@ export default function App() {
                 mobileQuickCaptureDraftRef.current = "";
                 setMobileQuickCaptureOpen(true);
               });
-              /* 与 flushSync 同一 tap 栈内 focus，避免 iOS Safari 拒弹键盘 */
-              mobileQuickCaptureAreaRef.current?.focus({
-                preventScroll: true,
-              });
+              /* focus 在下方 useLayoutEffect 内做（含 readOnly 技巧），避免与 iOS 抢手势 */
               return;
             }
             addSmallNote();
@@ -5269,11 +5279,17 @@ export default function App() {
                       ref={mobileQuickCaptureAreaRef}
                       className="mobile-quick-capture__textarea"
                       value={mobileQuickCaptureText}
-                      autoFocus
+                      name="mikujar_quick_note_body"
                       autoComplete="off"
+                      autoCapitalize="sentences"
                       autoCorrect="on"
+                      spellCheck
                       enterKeyHint="done"
+                      inputMode="text"
                       aria-label="笔记内容"
+                      data-lpignore="true"
+                      data-1p-ignore="true"
+                      data-form-type="other"
                       onChange={(e) => {
                         mobileQuickCaptureDraftRef.current = e.target.value;
                         setMobileQuickCaptureText(e.target.value);
