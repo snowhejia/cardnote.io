@@ -1082,6 +1082,18 @@ function AudioGlyphIcon({ className }: { className?: string }) {
   );
 }
 
+/** 未登录 / 恢复会话时：与浏览器标签页一致的软件图标 */
+function SidebarWorkspaceAppMark() {
+  return (
+    <img
+      src={`${import.meta.env.BASE_URL}favicon.svg`}
+      alt=""
+      className="sidebar__workspace-app-icon"
+      aria-hidden
+    />
+  );
+}
+
 /** 侧栏头像+昵称；手机合集顶栏用 attachAvatarUpload=false 避免与顶栏 input 抢同一 ref */
 function SidebarWorkspaceIdentity({
   writeRequiresLogin,
@@ -1131,10 +1143,7 @@ function SidebarWorkspaceIdentity({
                   className="sidebar__avatar-img"
                 />
               ) : (
-                <span
-                  className="sidebar__workspace-dot sidebar__workspace-dot--avatar"
-                  aria-hidden
-                />
+                <SidebarWorkspaceAppMark />
               )}
             </label>
           ) : (
@@ -1149,7 +1158,7 @@ function SidebarWorkspaceIdentity({
                   className="sidebar__avatar-img"
                 />
               ) : (
-                <span className="sidebar__workspace-dot sidebar__workspace-dot--avatar" />
+                <SidebarWorkspaceAppMark />
               )}
             </div>
           )}
@@ -1161,14 +1170,14 @@ function SidebarWorkspaceIdentity({
         </>
       ) : writeRequiresLogin && getAdminToken() ? (
         <>
-          <span className="sidebar__workspace-dot" aria-hidden />
+          <SidebarWorkspaceAppMark />
           <div className="sidebar__workspace-text">
             <span className="sidebar__workspace-name">恢复会话…</span>
           </div>
         </>
       ) : (
         <>
-          <span className="sidebar__workspace-dot" aria-hidden />
+          <SidebarWorkspaceAppMark />
           <span className="sidebar__workspace-name">mikujar</span>
         </>
       )}

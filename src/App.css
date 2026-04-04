@@ -396,6 +396,22 @@
   flex-shrink: 0;
 }
 
+/* 未登录：与 favicon 同源，桌面与侧栏灰点同尺寸 */
+.sidebar__workspace-app-icon {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  object-fit: contain;
+  display: block;
+}
+
+.sidebar__avatar-hit .sidebar__workspace-app-icon {
+  width: 100%;
+  height: 100%;
+  border-radius: 6px;
+}
+
 .sidebar__workspace-name {
   font-weight: 600;
   font-size: 0.875rem;
@@ -3346,6 +3362,12 @@ div.card__text--readonly:not(.card__text--preview) {
     max-width: 100%;
   }
 
+  .sidebar__mobile-browse-user .sidebar__workspace-app-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+  }
+
   .sidebar__admin-icon-btn--mobile-browse {
     flex-shrink: 0;
     width: 32px;
@@ -3916,12 +3938,6 @@ div.card__text--readonly:not(.card__text--preview) {
   object-fit: cover;
   display: block;
   pointer-events: none;
-}
-
-.sidebar__workspace-dot--avatar {
-  width: 32px;
-  height: 32px;
-  border-radius: 6px;
 }
 
 .sidebar__flash {
