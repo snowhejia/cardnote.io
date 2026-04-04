@@ -3311,7 +3311,7 @@ div.card__text--readonly:not(.card__text--preview) {
   .app--mobile-nav-open .sidebar__mobile-browse-bar {
     display: flex;
     align-items: center;
-    justify-content: flex-end;
+    justify-content: space-between;
     gap: 8px;
     flex-shrink: 0;
     padding: 2px 0 12px;
@@ -3321,12 +3321,43 @@ div.card__text--readonly:not(.card__text--preview) {
     box-shadow: none;
   }
 
+  .sidebar__mobile-browse-user {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .sidebar__mobile-browse-user .sidebar__workspace {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .sidebar__mobile-browse-user .sidebar__workspace-text {
+    min-width: 0;
+  }
+
+  .sidebar__mobile-browse-user .sidebar__workspace-name {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+  }
+
+  .sidebar__admin-icon-btn--mobile-browse {
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+  }
+
   .sidebar__mobile-browse-actions {
     display: flex;
     align-items: center;
     justify-content: flex-end;
     gap: 6px;
-    flex-shrink: 1;
+    flex-shrink: 0;
     min-width: 0;
     max-width: none;
   }
@@ -3857,6 +3888,12 @@ div.card__text--readonly:not(.card__text--preview) {
 .sidebar__avatar-hit:has(.sidebar__avatar-file:disabled) {
   cursor: not-allowed;
   opacity: 0.85;
+}
+
+/* 手机合集顶栏：只展示头像，不与桌面侧栏共用一个 file input */
+.sidebar__avatar-hit--static {
+  cursor: default;
+  pointer-events: none;
 }
 
 .sidebar__avatar-file {

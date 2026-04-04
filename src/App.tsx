@@ -7,14 +7,20 @@ import {
   useRef,
   useState,
 } from "react";
-import type { ChangeEvent, DragEvent, MouseEvent, ReactNode } from "react";
+import type {
+  ChangeEvent,
+  DragEvent,
+  MouseEvent,
+  ReactNode,
+  Ref,
+} from "react";
 import { createPortal, flushSync } from "react-dom";
 import { isTauri } from "@tauri-apps/api/core";
 import { DEFAULT_TAURI_REMOTE_API } from "./api/apiBase";
 import { fetchApiHealth } from "./api/health";
 import { fetchCollectionsFromApi, saveCollectionsToApi } from "./api/collections";
 import { uploadCardMedia } from "./api/upload";
-import { resolveMediaUrl } from "./api/auth";
+import { resolveMediaUrl, type AuthUser } from "./api/auth";
 import {
   createUserApi,
   deleteUserApi,
@@ -1068,6 +1074,100 @@ function AudioGlyphIcon({ className }: { className?: string }) {
       <circle cx="6" cy="18" r="3" />
       <circle cx="18" cy="16" r="3" />
     </svg>
+  );
+}
+
+/** 侧栏头像+昵称；手机合集顶栏用 attachAvatarUpload=false 避免与顶栏 input 抢同一 ref */
+function SidebarWorkspaceIdentity({
+  writeRequiresLogin,
+  currentUser,
+  avatarInputRef,
+  attachAvatarUpload,
+  mediaUploadMode,
+  avatarBusy,
+  onAvatarFileChange,
+}: {
+  writeRequiresLogin: boolean;
+  currentUser: AuthUser | null;
+  avatarInputRef: Ref<HTMLInputElement>;
+  attachAvatarUpload: boolean;
+  mediaUploadMode: "cos" | "local" | null;
+  avatarBusy: boolean;
+  onAvatarFileChange: (e: ChangeEvent<HTMLInputElement>) => void;
+}) {
+  return (
+    <div className="sidebar__workspace">
+      {writeRequiresLogin && currentUser ? (
+        <>
+          {attachAvatarUpload ? (
+            <label
+              className={
+                "sidebar__avatar-hit" +
+                (avatarBusy ? " sidebar__avatar-hit--busy" : "")
+              }
+              title={
+                mediaUploadMode
+                  ? "点击更换头像"
+                  : "头像上传需配置媒体存储"
+              }
+            >
+              <input
+                ref={avatarInputRef}
+                type="file"
+                accept="image/*"
+                className="sidebar__avatar-file"
+                disabled={!mediaUploadMode || avatarBusy}
+                onChange={onAvatarFileChange}
+              />
+              {currentUser.avatarUrl ? (
+                <img
+                  src={resolveMediaUrl(currentUser.avatarUrl)}
+                  alt=""
+                  className="sidebar__avatar-img"
+                />
+              ) : (
+                <span
+                  className="sidebar__workspace-dot sidebar__workspace-dot--avatar"
+                  aria-hidden
+                />
+              )}
+            </label>
+          ) : (
+            <div
+              className="sidebar__avatar-hit sidebar__avatar-hit--static"
+              aria-hidden
+            >
+              {currentUser.avatarUrl ? (
+                <img
+                  src={resolveMediaUrl(currentUser.avatarUrl)}
+                  alt=""
+                  className="sidebar__avatar-img"
+                />
+              ) : (
+                <span className="sidebar__workspace-dot sidebar__workspace-dot--avatar" />
+              )}
+            </div>
+          )}
+          <div className="sidebar__workspace-text">
+            <span className="sidebar__workspace-name">
+              {currentUser.displayName || currentUser.username}
+            </span>
+          </div>
+        </>
+      ) : writeRequiresLogin && getAdminToken() ? (
+        <>
+          <span className="sidebar__workspace-dot" aria-hidden />
+          <div className="sidebar__workspace-text">
+            <span className="sidebar__workspace-name">恢复会话…</span>
+          </div>
+        </>
+      ) : (
+        <>
+          <span className="sidebar__workspace-dot" aria-hidden />
+          <span className="sidebar__workspace-name">mikujar</span>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -4103,6 +4203,8 @@ export default function App() {
                 setCalendarDay(null);
                 expandAncestorsOf(c.id);
                 setActiveId(c.id);
+                /* 与收藏行一致：手机点当前已选合集时 activeId 不变，仅靠 effect 不会关抽屉 */
+                setMobileNavOpen(false);
               }}
               onKeyDown={(e) => {
                 if (editingCollectionId === c.id) return;
@@ -4112,6 +4214,7 @@ export default function App() {
                   setCalendarDay(null);
                   expandAncestorsOf(c.id);
                   setActiveId(c.id);
+                  setMobileNavOpen(false);
                 }
               }}
             >
@@ -4233,6 +4336,47 @@ export default function App() {
       />
       <aside className="sidebar" id="app-mobile-sidebar">
         <div className="sidebar__mobile-browse-bar">
+          {mobileNavOpen ? (
+            <div className="sidebar__mobile-browse-user">
+              <SidebarWorkspaceIdentity
+                writeRequiresLogin={writeRequiresLogin}
+                currentUser={currentUser}
+                avatarInputRef={avatarInputRef}
+                attachAvatarUpload={false}
+                mediaUploadMode={mediaUploadMode}
+                avatarBusy={avatarBusy}
+                onAvatarFileChange={onAvatarFileChange}
+              />
+              {dataMode === "remote" ? (
+                <button
+                  type="button"
+                  className={
+                    "sidebar__admin-icon-btn sidebar__admin-icon-btn--mobile-browse" +
+                    (currentUser || getAdminToken()
+                      ? " sidebar__admin-icon-btn--on"
+                      : "")
+                  }
+                  onClick={
+                    currentUser || getAdminToken() ? logout : openLogin
+                  }
+                  aria-label={
+                    currentUser || getAdminToken() ? "退出登录" : "登录"
+                  }
+                  title={
+                    currentUser || getAdminToken()
+                      ? "下次再见啦～"
+                      : "开门登录～"
+                  }
+                >
+                  <AdminHeaderIcon
+                    mode={
+                      currentUser || getAdminToken() ? "logout" : "login"
+                    }
+                  />
+                </button>
+              ) : null}
+            </div>
+          ) : null}
           <div className="sidebar__mobile-browse-actions">
             {canEdit ? (
               <>
@@ -4284,63 +4428,17 @@ export default function App() {
         </div>
         <div className="sidebar__header">
           <div className="sidebar__header-row">
-            <div className="sidebar__workspace">
-              {writeRequiresLogin && currentUser ? (
-                <>
-                  <label
-                    className={
-                      "sidebar__avatar-hit" +
-                      (avatarBusy ? " sidebar__avatar-hit--busy" : "")
-                    }
-                    title={
-                      mediaUploadMode
-                        ? "点击更换头像"
-                        : "头像上传需配置媒体存储"
-                    }
-                  >
-                    <input
-                      ref={avatarInputRef}
-                      type="file"
-                      accept="image/*"
-                      className="sidebar__avatar-file"
-                      disabled={!mediaUploadMode || avatarBusy}
-                      onChange={onAvatarFileChange}
-                    />
-                    {currentUser.avatarUrl ? (
-                      <img
-                        src={resolveMediaUrl(currentUser.avatarUrl)}
-                        alt=""
-                        className="sidebar__avatar-img"
-                      />
-                    ) : (
-                      <span
-                        className="sidebar__workspace-dot sidebar__workspace-dot--avatar"
-                        aria-hidden
-                      />
-                    )}
-                  </label>
-                  <div className="sidebar__workspace-text">
-                    <span className="sidebar__workspace-name">
-                      {currentUser.displayName || currentUser.username}
-                    </span>
-                  </div>
-                </>
-              ) : writeRequiresLogin && getAdminToken() ? (
-                <>
-                  <span className="sidebar__workspace-dot" aria-hidden />
-                  <div className="sidebar__workspace-text">
-                    <span className="sidebar__workspace-name">
-                      恢复会话…
-                    </span>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <span className="sidebar__workspace-dot" aria-hidden />
-                  <span className="sidebar__workspace-name">mikujar</span>
-                </>
-              )}
-            </div>
+            {!mobileNavOpen ? (
+              <SidebarWorkspaceIdentity
+                writeRequiresLogin={writeRequiresLogin}
+                currentUser={currentUser}
+                avatarInputRef={avatarInputRef}
+                attachAvatarUpload
+                mediaUploadMode={mediaUploadMode}
+                avatarBusy={avatarBusy}
+                onAvatarFileChange={onAvatarFileChange}
+              />
+            ) : null}
             <div className="sidebar__header-actions">
               <div
                 className="sidebar__data-mode"
