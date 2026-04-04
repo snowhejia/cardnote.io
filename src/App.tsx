@@ -8,7 +8,7 @@ import {
   useState,
 } from "react";
 import type { ChangeEvent, DragEvent, MouseEvent, ReactNode } from "react";
-import { createPortal } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 import { isTauri } from "@tauri-apps/api/core";
 import { DEFAULT_TAURI_REMOTE_API } from "./api/apiBase";
 import { fetchApiHealth } from "./api/health";
@@ -3188,12 +3188,10 @@ export default function App() {
     });
   }, [appendNoteCardWithHtml]);
 
-  useEffect(() => {
+  /* flushSync 后若 ref 晚一帧就绪，再补一次 focus（仍在同一用户交互任务内） */
+  useLayoutEffect(() => {
     if (!mobileQuickCaptureOpen) return;
-    const t = window.setTimeout(() => {
-      mobileQuickCaptureAreaRef.current?.focus();
-    }, 200);
-    return () => window.clearTimeout(t);
+    mobileQuickCaptureAreaRef.current?.focus({ preventScroll: true });
   }, [mobileQuickCaptureOpen]);
 
   useEffect(() => {
@@ -5132,13 +5130,19 @@ export default function App() {
               searchQuery.trim().length === 0
             ) {
               const t = new Date();
-              setMobileQuickCaptureHead({
-                minutesOfDay: t.getHours() * 60 + t.getMinutes(),
-                addedOn: localDateString(t),
+              flushSync(() => {
+                setMobileQuickCaptureHead({
+                  minutesOfDay: t.getHours() * 60 + t.getMinutes(),
+                  addedOn: localDateString(t),
+                });
+                setMobileQuickCaptureText("");
+                mobileQuickCaptureDraftRef.current = "";
+                setMobileQuickCaptureOpen(true);
               });
-              setMobileQuickCaptureText("");
-              mobileQuickCaptureDraftRef.current = "";
-              setMobileQuickCaptureOpen(true);
+              /* 与 flushSync 同一 tap 栈内 focus，避免 iOS Safari 拒弹键盘 */
+              mobileQuickCaptureAreaRef.current?.focus({
+                preventScroll: true,
+              });
               return;
             }
             addSmallNote();
@@ -5265,6 +5269,7 @@ export default function App() {
                       ref={mobileQuickCaptureAreaRef}
                       className="mobile-quick-capture__textarea"
                       value={mobileQuickCaptureText}
+                      autoFocus
                       autoComplete="off"
                       autoCorrect="on"
                       enterKeyHint="done"

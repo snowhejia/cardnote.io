@@ -197,8 +197,8 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
-  /* 键盘弹出时视口变矮，整块贴在可见底缘上方 */
-  max-height: min(72dvh, calc(100dvh - env(safe-area-inset-top, 0px)));
+  /* 略矮于半屏，键盘升起后输入区更贴近键盘、少留白 */
+  max-height: min(58dvh, calc(100dvh - env(safe-area-inset-top, 0px)));
 }
 
 /* 边框与圆角在外层，避免 WebKit 下 border + background-attachment:local 与行高错位成「宽窄相间」 */
@@ -245,9 +245,9 @@
   display: block;
   box-sizing: border-box;
   width: 100%;
-  /* 正文从第二行栅格起：少一行高度，总可视与原先接近 */
-  min-height: calc(8 * 30px + 15px);
-  max-height: min(70dvh, calc(20 * 30px + 15px));
+  /* 略减默认高度，给系统键盘让位，视觉更贴键盘 */
+  min-height: calc(5 * 30px + 15px);
+  max-height: min(48dvh, calc(14 * 30px + 15px));
   margin: 0;
   padding: 0 18px 15px;
   border: none;
