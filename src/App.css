@@ -2541,7 +2541,7 @@ textarea.main__hint-editor:focus {
   gap: 10px;
   padding: 12px 10px;
   box-sizing: border-box;
-  background: linear-gradient(160deg, #ede9fe 0%, #ddd6fe 45%, #c4b5fd 100%);
+  background: #f2f3f6;
   overflow: hidden;
 }
 
@@ -2567,7 +2567,7 @@ textarea.main__hint-editor:focus {
   width: 44px;
   height: 44px;
   flex-shrink: 0;
-  color: rgba(67, 56, 202, 0.72);
+  color: rgba(55, 53, 47, 0.38);
 }
 
 .card__gallery-audio-name {
@@ -2764,8 +2764,9 @@ video.image-lightbox__video {
   max-width: min(92vw, 480px);
   padding: 1.25rem 1.5rem 1.5rem;
   border-radius: 12px;
-  background: linear-gradient(165deg, #312e81 0%, #1e1b4b 100%);
-  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5);
+  background: #f2f3f6;
+  border: 1px solid rgba(60, 60, 67, 0.1);
+  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.32);
   cursor: default;
 }
 
@@ -2776,7 +2777,7 @@ video.image-lightbox__video {
   margin: 0 auto 1rem;
   object-fit: cover;
   border-radius: 10px;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.14);
 }
 
 .image-lightbox__audio-title {
@@ -2784,7 +2785,7 @@ video.image-lightbox__video {
   font-size: 0.875rem;
   font-weight: 500;
   line-height: 1.4;
-  color: rgba(255, 255, 255, 0.92);
+  color: rgba(55, 53, 47, 0.88);
   text-align: center;
   word-break: break-word;
 }
@@ -2798,7 +2799,7 @@ video.image-lightbox__video {
 }
 
 .image-lightbox__audio::-webkit-media-controls-panel {
-  background-color: rgba(255, 255, 255, 0.12);
+  background-color: rgba(255, 255, 255, 0.96);
 }
 
 .image-lightbox__file {
@@ -4621,6 +4622,8 @@ div.card__text--readonly:not(.card__text--preview) {
   min-height: 0;
   max-height: none;
   overflow: hidden;
+  /* 与右侧画廊无缝衔接，去掉竖向「白边」感 */
+  border-right: none;
 }
 
 .card--detail-modal--has-gallery .card__toolbar {
@@ -4674,6 +4677,9 @@ div.card__text--readonly:not(.card__text--preview) {
   min-height: 0;
   background: #f2f3f6;
   border-radius: 0 11px 11px 0;
+  /* 与左侧纸张同色底衔接，避免拼缝亮线 */
+  border-left: none;
+  box-shadow: none;
 }
 
 .card--detail-modal--has-gallery .card__gallery-viewport {
@@ -4729,7 +4735,7 @@ div.card__text--readonly:not(.card__text--preview) {
   flex-direction: column;
   align-items: stretch;
   justify-content: flex-start;
-  background: linear-gradient(160deg, #4c4f6a 0%, #383b52 100%);
+  background: #f2f3f6;
 }
 
 .card__gallery-audio-thumb--inline {
