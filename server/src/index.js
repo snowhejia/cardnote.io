@@ -74,6 +74,9 @@ async function fileExists(p) {
 const hasPublic = await fileExists(publicDir);
 
 const app = express();
+if (process.env.TRUST_PROXY === "1") {
+  app.set("trust proxy", 1);
+}
 app.use(express.json({ limit: "15mb" }));
 
 const corsOrigin = process.env.CORS_ORIGIN;
@@ -99,7 +102,11 @@ function buildCorsAllowedOrigins(envVal) {
 }
 
 const corsAllowedList = buildCorsAllowedOrigins(corsOrigin);
-app.use(cors({ origin: corsAllowedList ?? true }));
+const corsOptions =
+  corsAllowedList && corsAllowedList.length > 0
+    ? { origin: corsAllowedList, credentials: true }
+    : { origin: false };
+app.use(cors(corsOptions));
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 鉴权中间件
@@ -129,10 +136,96 @@ function putAuthMiddleware(req, res, next) {
   next();
 }
 
+/** httpOnly 会话 Cookie 名（与前端 credentials: include 配合） */
+const AUTH_COOKIE_NAME = "mikujar_at";
+
+function parseCookies(cookieHeader) {
+  const out = {};
+  if (!cookieHeader || typeof cookieHeader !== "string") return out;
+  for (const segment of cookieHeader.split(";")) {
+    const idx = segment.indexOf("=");
+    if (idx <= 0) continue;
+    const k = segment.slice(0, idx).trim();
+    const v = segment.slice(idx + 1).trim();
+    try {
+      out[k] = decodeURIComponent(v);
+    } catch {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
+function authCookieBaseOptions() {
+  const opts = { path: "/" };
+  const domain = process.env.AUTH_COOKIE_DOMAIN?.trim();
+  if (domain) opts.domain = domain;
+  const secure =
+    process.env.COOKIE_SECURE === "true" ||
+    (process.env.COOKIE_SECURE !== "false" && process.env.NODE_ENV === "production");
+  opts.secure = secure;
+  const s = process.env.COOKIE_SAMESITE?.trim().toLowerCase();
+  if (s === "none") opts.sameSite = "none";
+  else if (s === "strict") opts.sameSite = "strict";
+  else opts.sameSite = "lax";
+  return opts;
+}
+
+function authCookieSetOptions() {
+  return {
+    ...authCookieBaseOptions(),
+    httpOnly: true,
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+  };
+}
+
+// ─── 登录暴力破解：按 IP 累计失败次数 ─────────────────────────────────────────
+const loginFailByIp = new Map();
+const LOGIN_FAIL_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_FAIL_MAX = 15;
+
+function clientIp(req) {
+  const xf = req.headers["x-forwarded-for"];
+  if (typeof xf === "string" && xf.trim()) return xf.split(",")[0].trim();
+  return req.socket?.remoteAddress || "unknown";
+}
+
+function isLoginLockedOut(ip) {
+  const rec = loginFailByIp.get(ip);
+  if (!rec) return false;
+  if (Date.now() - rec.since > LOGIN_FAIL_WINDOW_MS) {
+    loginFailByIp.delete(ip);
+    return false;
+  }
+  return rec.count >= LOGIN_FAIL_MAX;
+}
+
+function registerLoginFailure(ip) {
+  const now = Date.now();
+  let rec = loginFailByIp.get(ip);
+  if (!rec || now - rec.since > LOGIN_FAIL_WINDOW_MS) {
+    rec = { count: 0, since: now };
+    loginFailByIp.set(ip, rec);
+  }
+  rec.count += 1;
+}
+
+function clearLoginFailures(ip) {
+  loginFailByIp.delete(ip);
+}
+
 function getJwtSession(req) {
+  let token = null;
   const auth = req.headers.authorization;
-  if (!auth?.startsWith("Bearer ")) return null;
-  const token = auth.slice(7);
+  if (auth?.startsWith("Bearer ")) {
+    token = auth.slice(7);
+  }
+  if (!token) {
+    const cookies = parseCookies(req.headers.cookie);
+    const c = cookies[AUTH_COOKIE_NAME];
+    if (typeof c === "string" && c.trim()) token = c.trim();
+  }
+  if (!token) return null;
   if (API_TOKEN && token === API_TOKEN) return { sub: null, role: "admin", apiToken: true };
   if (!JWT_SECRET) return null;
   try {
@@ -258,15 +351,31 @@ app.post("/api/auth/login", async (req, res) => {
   const username = typeof req.body?.username === "string" ? req.body.username.trim() : "";
   const password = typeof req.body?.password === "string" ? req.body.password : "";
   if (!username || !password) return res.status(400).json({ error: "请输入用户名与密码" });
+  const ip = clientIp(req);
+  if (isLoginLockedOut(ip)) {
+    return res.status(429).json({ error: "登录尝试过多，请约 15 分钟后再试", code: "RATE_LIMIT" });
+  }
   try {
     const user = await verifyLogin(null, username, password);
-    if (!user) return res.status(401).json({ error: "用户名或密码错误" });
+    if (!user) {
+      registerLoginFailure(ip);
+      return res.status(401).json({ error: "用户名或密码错误" });
+    }
+    clearLoginFailures(ip);
     const token = jwt.sign({ sub: user.id, role: user.role, u: user.username }, JWT_SECRET, { expiresIn: "7d" });
+    if (process.env.AUTH_HTTPONLY_COOKIE !== "false") {
+      res.cookie(AUTH_COOKIE_NAME, token, authCookieSetOptions());
+    }
     res.json({ token, user: toPublicUser(user) });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: e.message || "登录失败" });
   }
+});
+
+app.post("/api/auth/logout", (_req, res) => {
+  res.clearCookie(AUTH_COOKIE_NAME, authCookieBaseOptions());
+  res.json({ ok: true });
 });
 
 app.get("/api/auth/me", async (req, res) => {

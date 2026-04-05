@@ -12,10 +12,16 @@ import {
   fetchAuthMeWithRetry,
   fetchAuthStatus,
   loginWithCredentials,
+  logoutRemoteSession,
   type AuthUser,
 } from "../api/auth";
 import { getAppDataMode } from "../appDataModeStorage";
-import { clearAdminToken, getAdminToken, setAdminToken } from "./token";
+import {
+  authUsesHttpOnlyCookie,
+  clearAdminToken,
+  getAdminToken,
+  setAdminToken,
+} from "./token";
 
 type AuthContextValue = {
   authReady: boolean;
@@ -229,7 +235,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
     const token = getAdminToken();
-    if (!token) {
+    if (!token && !authUsesHttpOnlyCookie()) {
       setIsAdmin(false);
       setCurrentUser(null);
       setAuthReady(true);
@@ -255,7 +261,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (username: string, password: string) => {
       const r = await loginWithCredentials(username, password);
       if (!r.ok) return { ok: false, error: r.error };
-      setAdminToken(r.token);
+      if (authUsesHttpOnlyCookie()) {
+        clearAdminToken();
+      } else {
+        setAdminToken(r.token);
+      }
       setCurrentUser(r.user);
       setIsAdmin(r.user.role === "admin");
       setLoginOpen(false);
@@ -265,16 +275,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const logout = useCallback(() => {
-    clearAdminToken();
-    setIsAdmin(false);
-    setCurrentUser(null);
-    setLoginOpen(false);
+    void (async () => {
+      await logoutRemoteSession();
+      clearAdminToken();
+      setIsAdmin(false);
+      setCurrentUser(null);
+      setLoginOpen(false);
+    })();
   }, []);
 
   const loginWallBlocking = useMemo(() => {
     if (!authReady || !writeRequiresLogin) return false;
     if (getAppDataMode() !== "remote") return false;
     if (isTauri()) return false;
+    if (currentUser) return false;
     if (getAdminToken()) return false;
     return true;
   }, [authReady, writeRequiresLogin, currentUser?.id]);

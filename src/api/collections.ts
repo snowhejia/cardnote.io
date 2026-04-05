@@ -1,6 +1,6 @@
 import type { Collection, NoteCard } from "../types";
 import { getAdminToken } from "../auth/token";
-import { apiBase } from "./apiBase";
+import { apiBase, apiFetchInit } from "./apiBase";
 
 /** GET：多用户模式下需携带登录 JWT（或脚本用的 API_TOKEN + 服务端要求的 userId） */
 export function buildHeadersGet(): Record<string, string> {
@@ -35,9 +35,10 @@ export function buildHeadersPut(
 export async function fetchCollectionsFromApi(): Promise<Collection[] | null> {
   const base = apiBase();
   try {
-    const r = await fetch(`${base}/api/collections`, {
-      headers: buildHeadersGet(),
-    });
+    const r = await fetch(
+      `${base}/api/collections`,
+      apiFetchInit({ headers: buildHeadersGet() })
+    );
     if (!r.ok) return null;
     const data = (await r.json()) as unknown;
     if (!Array.isArray(data)) return null;
@@ -51,11 +52,14 @@ export async function fetchCollectionsFromApi(): Promise<Collection[] | null> {
 export async function saveCollectionsToApi(data: Collection[]): Promise<boolean> {
   const base = apiBase();
   try {
-    const r = await fetch(`${base}/api/collections`, {
-      method: "PUT",
-      headers: buildHeadersPut({ "Content-Type": "application/json" }),
-      body: JSON.stringify(data),
-    });
+    const r = await fetch(
+      `${base}/api/collections`,
+      apiFetchInit({
+        method: "PUT",
+        headers: buildHeadersPut({ "Content-Type": "application/json" }),
+        body: JSON.stringify(data),
+      })
+    );
     return r.ok;
   } catch {
     return false;
@@ -76,11 +80,14 @@ export async function createCollectionApi(data: {
 }): Promise<Collection | null> {
   const base = apiBase();
   try {
-    const r = await fetch(`${base}/api/collections`, {
-      method: "POST",
-      headers: buildHeadersPut({ "Content-Type": "application/json" }),
-      body: JSON.stringify(data),
-    });
+    const r = await fetch(
+      `${base}/api/collections`,
+      apiFetchInit({
+        method: "POST",
+        headers: buildHeadersPut({ "Content-Type": "application/json" }),
+        body: JSON.stringify(data),
+      })
+    );
     if (!r.ok) return null;
     return (await r.json()) as Collection;
   } catch {
@@ -98,11 +105,14 @@ export async function updateCollectionApi(
 ): Promise<boolean> {
   const base = apiBase();
   try {
-    const r = await fetch(`${base}/api/collections/${encodeURIComponent(id)}`, {
-      method: "PATCH",
-      headers: buildHeadersPut({ "Content-Type": "application/json" }),
-      body: JSON.stringify(patch),
-    });
+    const r = await fetch(
+      `${base}/api/collections/${encodeURIComponent(id)}`,
+      apiFetchInit({
+        method: "PATCH",
+        headers: buildHeadersPut({ "Content-Type": "application/json" }),
+        body: JSON.stringify(patch),
+      })
+    );
     return r.ok;
   } catch {
     return false;
@@ -113,10 +123,10 @@ export async function updateCollectionApi(
 export async function deleteCollectionApi(id: string): Promise<boolean> {
   const base = apiBase();
   try {
-    const r = await fetch(`${base}/api/collections/${encodeURIComponent(id)}`, {
-      method: "DELETE",
-      headers: buildHeadersPut(),
-    });
+    const r = await fetch(
+      `${base}/api/collections/${encodeURIComponent(id)}`,
+      apiFetchInit({ method: "DELETE", headers: buildHeadersPut() })
+    );
     return r.ok;
   } catch {
     return false;
@@ -134,11 +144,11 @@ export async function createCardApi(
   try {
     const r = await fetch(
       `${base}/api/collections/${encodeURIComponent(collectionId)}/cards`,
-      {
+      apiFetchInit({
         method: "POST",
         headers: buildHeadersPut({ "Content-Type": "application/json" }),
         body: JSON.stringify(card),
-      }
+      })
     );
     if (!r.ok) return null;
     return (await r.json()) as NoteCard;
@@ -165,11 +175,14 @@ export async function updateCardApi(
 ): Promise<boolean> {
   const base = apiBase();
   try {
-    const r = await fetch(`${base}/api/cards/${encodeURIComponent(cardId)}`, {
-      method: "PATCH",
-      headers: buildHeadersPut({ "Content-Type": "application/json" }),
-      body: JSON.stringify(patch),
-    });
+    const r = await fetch(
+      `${base}/api/cards/${encodeURIComponent(cardId)}`,
+      apiFetchInit({
+        method: "PATCH",
+        headers: buildHeadersPut({ "Content-Type": "application/json" }),
+        body: JSON.stringify(patch),
+      })
+    );
     return r.ok;
   } catch {
     return false;
@@ -180,10 +193,10 @@ export async function updateCardApi(
 export async function deleteCardApi(cardId: string): Promise<boolean> {
   const base = apiBase();
   try {
-    const r = await fetch(`${base}/api/cards/${encodeURIComponent(cardId)}`, {
-      method: "DELETE",
-      headers: buildHeadersPut(),
-    });
+    const r = await fetch(
+      `${base}/api/cards/${encodeURIComponent(cardId)}`,
+      apiFetchInit({ method: "DELETE", headers: buildHeadersPut() })
+    );
     return r.ok;
   } catch {
     return false;

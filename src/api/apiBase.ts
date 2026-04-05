@@ -37,3 +37,24 @@ export function apiBase(): string {
   if (getAppDataMode() === "local") return "";
   return remoteApiBaseResolved();
 }
+
+/**
+ * 跨域访问绝对地址的 API 时须 `include` 才会带上 httpOnly 登录 Cookie。
+ * 走 Vite 同源代理时保持 same-origin 即可。
+ */
+export function apiFetchCredentials(): RequestCredentials {
+  const raw = (import.meta.env.VITE_API_BASE as string | undefined)?.trim();
+  if (raw && /^https?:\/\//i.test(raw)) return "include";
+  if (typeof __TAURI_BUILD__ !== "undefined" && __TAURI_BUILD__) {
+    return "include";
+  }
+  return "same-origin";
+}
+
+/** 合并 fetch 第二参数，默认带上 {@link apiFetchCredentials} */
+export function apiFetchInit(extra?: RequestInit): RequestInit {
+  return {
+    ...extra,
+    credentials: extra?.credentials ?? apiFetchCredentials(),
+  };
+}

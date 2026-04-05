@@ -1,6 +1,6 @@
 import { getAdminToken } from "../auth/token";
 import type { NoteMediaKind } from "../types";
-import { apiBase } from "./apiBase";
+import { apiBase, apiFetchInit } from "./apiBase";
 
 function authHeaders(): Record<string, string> {
   const h: Record<string, string> = {};
@@ -27,18 +27,21 @@ export type UploadMediaResult = {
  */
 export async function uploadCardMedia(file: File): Promise<UploadMediaResult> {
   const base = apiBase();
-  const pres = await fetch(`${base}/api/upload/presign`, {
-    method: "POST",
-    headers: {
-      ...authHeaders(),
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      filename: file.name,
-      contentType: file.type || "application/octet-stream",
-      fileSize: file.size,
-    }),
-  });
+  const pres = await fetch(
+    `${base}/api/upload/presign`,
+    apiFetchInit({
+      method: "POST",
+      headers: {
+        ...authHeaders(),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        filename: file.name,
+        contentType: file.type || "application/octet-stream",
+        fileSize: file.size,
+      }),
+    })
+  );
 
   const pj = (await pres.json().catch(() => ({}))) as {
     direct?: unknown;
@@ -87,14 +90,17 @@ export async function uploadCardMedia(file: File): Promise<UploadMediaResult> {
   // 音频：提取内嵌封面
   let coverUrl: string | undefined;
   if (kind === "audio" && typeof pj.key === "string") {
-    const fin = await fetch(`${base}/api/upload/finalize-audio`, {
-      method: "POST",
-      headers: {
-        ...authHeaders(),
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ key: pj.key }),
-    });
+    const fin = await fetch(
+      `${base}/api/upload/finalize-audio`,
+      apiFetchInit({
+        method: "POST",
+        headers: {
+          ...authHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ key: pj.key }),
+      })
+    );
     const fj = (await fin.json().catch(() => ({}))) as {
       coverUrl?: unknown;
       error?: unknown;

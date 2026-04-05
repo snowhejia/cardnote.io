@@ -1,4 +1,4 @@
-import { apiBase } from "./apiBase";
+import { apiBase, apiFetchInit } from "./apiBase";
 
 export type ApiHealth = {
   ok?: boolean;
@@ -9,7 +9,7 @@ export type ApiHealth = {
 export async function fetchApiHealth(): Promise<ApiHealth | null> {
   const base = apiBase();
   try {
-    const r = await fetch(`${base}/api/health`);
+    const r = await fetch(`${base}/api/health`, apiFetchInit());
     if (!r.ok) return null;
     return (await r.json()) as ApiHealth;
   } catch {

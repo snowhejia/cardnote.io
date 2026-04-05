@@ -1,9 +1,12 @@
 import { getAdminToken } from "../auth/token";
-import { apiBase } from "./apiBase";
+import { apiBase, apiFetchInit } from "./apiBase";
 
 function authHeaders(): Record<string, string> {
   const t = getAdminToken();
-  return t ? { Authorization: `Bearer ${t}` } : {};
+  if (t) return { Authorization: `Bearer ${t}` };
+  const vt = (import.meta.env.VITE_API_TOKEN as string | undefined)?.trim();
+  if (vt) return { Authorization: `Bearer ${vt}` };
+  return {};
 }
 
 export type PublicUser = {
@@ -16,7 +19,10 @@ export type PublicUser = {
 
 export async function fetchUsersList(): Promise<PublicUser[]> {
   const base = apiBase();
-  const r = await fetch(`${base}/api/users`, { headers: authHeaders() });
+  const r = await fetch(
+    `${base}/api/users`,
+    apiFetchInit({ headers: authHeaders() })
+  );
   if (!r.ok) throw new Error("无法加载用户列表");
   return (await r.json()) as PublicUser[];
 }
@@ -28,11 +34,14 @@ export async function createUserApi(body: {
   role: "admin" | "user";
 }): Promise<PublicUser> {
   const base = apiBase();
-  const r = await fetch(`${base}/api/users`, {
-    method: "POST",
-    headers: { ...authHeaders(), "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  const r = await fetch(
+    `${base}/api/users`,
+    apiFetchInit({
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+  );
   const j = (await r.json().catch(() => ({}))) as PublicUser & {
     error?: string;
   };
@@ -46,11 +55,14 @@ export async function updateMyProfileApi(body: {
   password?: string;
 }): Promise<PublicUser> {
   const base = apiBase();
-  const r = await fetch(`${base}/api/users/me`, {
-    method: "PATCH",
-    headers: { ...authHeaders(), "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  const r = await fetch(
+    `${base}/api/users/me`,
+    apiFetchInit({
+      method: "PATCH",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+  );
   const j = (await r.json().catch(() => ({}))) as PublicUser & {
     error?: string;
   };
@@ -67,11 +79,14 @@ export async function updateUserApi(
   }>
 ): Promise<PublicUser> {
   const base = apiBase();
-  const r = await fetch(`${base}/api/users/${encodeURIComponent(id)}`, {
-    method: "PATCH",
-    headers: { ...authHeaders(), "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  const r = await fetch(
+    `${base}/api/users/${encodeURIComponent(id)}`,
+    apiFetchInit({
+      method: "PATCH",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+  );
   const j = (await r.json().catch(() => ({}))) as { error?: string };
   if (!r.ok) throw new Error(j.error ?? "更新失败");
   return j as PublicUser;
@@ -79,27 +94,30 @@ export async function updateUserApi(
 
 export async function deleteUserApi(id: string): Promise<void> {
   const base = apiBase();
-  const r = await fetch(`${base}/api/users/${encodeURIComponent(id)}`, {
-    method: "DELETE",
-    headers: authHeaders(),
-  });
+  const r = await fetch(
+    `${base}/api/users/${encodeURIComponent(id)}`,
+    apiFetchInit({ method: "DELETE", headers: authHeaders() })
+  );
   const j = (await r.json().catch(() => ({}))) as { error?: string };
   if (!r.ok) throw new Error(j.error ?? "删除失败");
 }
 
 export async function uploadMyAvatar(file: File): Promise<string> {
   const base = apiBase();
-  const pres = await fetch(`${base}/api/users/me/avatar/presign`, {
-    method: "POST",
-    headers: {
-      ...authHeaders(),
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      contentType: file.type || "application/octet-stream",
-      fileSize: file.size,
-    }),
-  });
+  const pres = await fetch(
+    `${base}/api/users/me/avatar/presign`,
+    apiFetchInit({
+      method: "POST",
+      headers: {
+        ...authHeaders(),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        contentType: file.type || "application/octet-stream",
+        fileSize: file.size,
+      }),
+    })
+  );
   const pj = (await pres.json().catch(() => ({}))) as {
     direct?: unknown;
     putUrl?: unknown;
@@ -122,14 +140,17 @@ export async function uploadMyAvatar(file: File): Promise<string> {
     if (typeof pj.key !== "string" || !pj.key) {
       throw new Error("头像上传响应无效");
     }
-    const c = await fetch(`${base}/api/users/me/avatar/confirm`, {
-      method: "POST",
-      headers: {
-        ...authHeaders(),
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ key: pj.key }),
-    });
+    const c = await fetch(
+      `${base}/api/users/me/avatar/confirm`,
+      apiFetchInit({
+        method: "POST",
+        headers: {
+          ...authHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ key: pj.key }),
+      })
+    );
     const cj = (await c.json().catch(() => ({}))) as {
       avatarUrl?: string;
       error?: string;
@@ -142,11 +163,10 @@ export async function uploadMyAvatar(file: File): Promise<string> {
 
   const fd = new FormData();
   fd.append("file", file);
-  const r = await fetch(`${base}/api/users/me/avatar`, {
-    method: "POST",
-    headers: authHeaders(),
-    body: fd,
-  });
+  const r = await fetch(
+    `${base}/api/users/me/avatar`,
+    apiFetchInit({ method: "POST", headers: authHeaders(), body: fd })
+  );
   const j = (await r.json().catch(() => ({}))) as {
     avatarUrl?: string;
     error?: string;

@@ -36,21 +36,26 @@ npm install && npm run dev
 
 Vite 会把 `/api` 与 `/uploads` 代理到 `http://127.0.0.1:3002`（本地上传的静态文件）。
 
-**PostgreSQL 已有库升级**：若部署过多用户 + PG 模式，且表是旧版 `schema`（无 `collections.hint`），请在库里执行一次：
+**PostgreSQL 已有库升级**（`hint`、星标、回收站表）：在 **`server` 目录**执行，无需安装 `psql`：
 
 ```bash
-psql "$DATABASE_URL" -f server/scripts/add-collection-hint-column.sql
+cd server && npm run db:migrate
 ```
 
-（新库直接跑 `server/scripts/schema.sql` 已含 `hint` 列。）
+脚本读取 `server/.env` 中的 `DATABASE_URL`（与 `PG_SSL`），幂等可重复跑。
 
-**星标合集与云端回收站表**：若已有库是在此功能之前创建的，请执行：
+（可选）若服务器已安装 `psql`，仍可用等价 SQL 文件：`server/scripts/add-collection-hint-column.sql`、`server/scripts/add-favorites-trash-tables.sql`。
 
-```bash
-psql "$DATABASE_URL" -f server/scripts/add-favorites-trash-tables.sql
-```
+**新库**：直接执行完整 `server/scripts/schema.sql` 已含上述结构，一般不必再跑 `db:migrate`。
 
-（新库执行完整 `server/scripts/schema.sql` 已含 `user_favorite_collections` 与 `trashed_notes`。）
+### 不做历史迁移、只要往后能保存
+
+若**没有**旧版 `collections.json` / COS 里的数据要导入，**不要运行** `npm run migrate`（`migrate-json-to-pg.js`）。只需：
+
+1. **PostgreSQL** 可连：`server/.env` 里 `DATABASE_URL` 的**主机名**必须是「跑 Node 的那台机器」能解析的地址（例如 `127.0.0.1` 或云数据库公网/内网 IP），不要用仅在 Docker 网络里有效的容器名。
+2. **表结构**：新库执行一次 **`server/scripts/schema.sql`**；若库较旧缺表/缺列，在 `server` 目录执行 **`npm run db:migrate`** 即可（与 JSON 迁移无关）。
+3. **多用户生产**：配置 `JWT_SECRET`、`ADMIN_PASSWORD`（首次启动会建管理员账号）。
+4. 启动 API + 前端，登录后合集若为空，前端会用内置示例并在**首次同步**时写入 PG。
 
 ## 生产：同一进程（静态 + API）
 
@@ -78,7 +83,10 @@ docker run -p 3002:3002 -v mikujar-data:/data mikujar
 | `ADMIN_PASSWORD` | 与 `JWT_SECRET` 同时设置时启用管理员登录；`PUT` 需 JWT（或见 `API_TOKEN`） |
 | `JWT_SECRET` | 签发/校验登录 JWT，生产请使用足够长的随机串 |
 | `API_TOKEN` | 可选静态 Bearer：在启用管理员模式时仍可用于脚本调用 `PUT`；未启用管理员时仅保护 `PUT`（`GET` 始终公开） |
-| `CORS_ORIGIN` | 多个用逗号分隔；不设置则反射任意 Origin（仅建议在信任网络或配 Token 时使用） |
+| `CORS_ORIGIN` | **分域 / 浏览器跨域访问 API 时必填**（逗号分隔允许的前端 Origin）。未设置时**不**允许任意站跨域；同源部署或仅 curl 不受影响 |
+| `TRUST_PROXY` | 设为 `1` 时信任 `X-Forwarded-For`（反代后登录限流按真实 IP） |
+| `AUTH_COOKIE_DOMAIN` / `COOKIE_SAMESITE` / `COOKIE_SECURE` | httpOnly 登录 Cookie；子域跨站 API 时常需 `AUTH_COOKIE_DOMAIN=.父域`、`COOKIE_SAMESITE=none` 且 HTTPS 下 `COOKIE_SECURE=true` |
+| `AUTH_HTTPONLY_COOKIE` | 设为 `false` 可关闭登录 Set-Cookie（不推荐） |
 | `COS_SECRET_ID` | 腾讯云 API 密钥 SecretId；与下面三项同时设置即启用 COS 存储 |
 | `COS_SECRET_KEY` | 腾讯云 API 密钥 SecretKey |
 | `COS_BUCKET` | 存储桶名称，格式如 `bucketname-1250000000`（含 APPID） |

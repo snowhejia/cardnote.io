@@ -7,11 +7,13 @@
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
     "migrate": "node scripts/migrate-json-to-pg.js",
+    "migrate:cos": "node scripts/migrate-json-to-pg.js --from-cos",
     "import-users": "node scripts/import-users-json-to-pg.js",
     "db:up": "docker compose up -d",
     "db:down": "docker compose down",
     "db:logs": "docker compose logs -f postgres",
-    "db:test": "node scripts/pg-connection-test.js"
+    "db:test": "node scripts/pg-connection-test.js",
+    "db:migrate": "node scripts/pg-migrate-incremental.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

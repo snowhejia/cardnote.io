@@ -1,5 +1,5 @@
-import { getAdminToken } from "../auth/token";
-import { apiBase, remoteApiBase } from "./apiBase";
+import { authUsesHttpOnlyCookie, getAdminToken } from "../auth/token";
+import { apiBase, apiFetchInit, remoteApiBase } from "./apiBase";
 
 export type AuthUser = {
   id: string;
@@ -35,7 +35,7 @@ export async function fetchAuthStatus(): Promise<{
   const base = apiBase();
   const remoteBase = base.length > 0;
   try {
-    const r = await fetch(`${base}/api/auth/status`);
+    const r = await fetch(`${base}/api/auth/status`, apiFetchInit());
     if (!r.ok) {
       // 已指向绝对地址的云端却拿不到状态：按「需要登录」处理，避免既不显示登录又无法同步
       return { writeRequiresLogin: remoteBase ? true : false };
@@ -56,11 +56,14 @@ export async function loginWithCredentials(
 > {
   const base = remoteApiBase();
   try {
-    const r = await fetch(`${base}/api/auth/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: username.trim(), password }),
-    });
+    const r = await fetch(
+      `${base}/api/auth/login`,
+      apiFetchInit({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: username.trim(), password }),
+      })
+    );
     const j = (await r.json().catch(() => ({}))) as {
       token?: unknown;
       user?: unknown;
@@ -93,14 +96,18 @@ export async function fetchAuthMe(): Promise<{
   sessionInvalid?: boolean;
 }> {
   const token = getAdminToken();
-  if (!token) {
+  const cookieMode = authUsesHttpOnlyCookie();
+  if (!token && !cookieMode) {
     return { ok: false, admin: false, user: null };
   }
   const base = remoteApiBase();
   try {
-    const r = await fetch(`${base}/api/auth/me`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const headers: Record<string, string> = {};
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const r = await fetch(
+      `${base}/api/auth/me`,
+      apiFetchInit({ headers })
+    );
     if (r.status === 401 || r.status === 403) {
       return {
         ok: false,
@@ -141,7 +148,7 @@ export async function fetchAuthMeWithRetry(): Promise<{
   if (last.ok && last.user) return last;
   if (last.sessionInvalid) return last;
   const token = getAdminToken();
-  if (!token) return last;
+  if (!token && !authUsesHttpOnlyCookie()) return last;
   for (let i = 1; i < ME_RETRY_COUNT; i++) {
     await new Promise((r) => setTimeout(r, ME_RETRY_DELAY_MS));
     last = await fetchAuthMe();
@@ -149,4 +156,21 @@ export async function fetchAuthMeWithRetry(): Promise<{
     if (last.sessionInvalid) return last;
   }
   return last;
+}
+
+/** 清除服务端 httpOnly 会话 Cookie（失败静默） */
+export async function logoutRemoteSession(): Promise<void> {
+  const base = remoteApiBase();
+  if (!base) return;
+  try {
+    const token = getAdminToken();
+    const headers: Record<string, string> = {};
+    if (token) headers.Authorization = `Bearer ${token}`;
+    await fetch(
+      `${base}/api/auth/logout`,
+      apiFetchInit({ method: "POST", headers })
+    );
+  } catch {
+    /* ignore */
+  }
 }

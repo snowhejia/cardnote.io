@@ -1,14 +1,15 @@
 import type { TrashedNoteEntry } from "../types";
-import { apiBase } from "./apiBase";
+import { apiBase, apiFetchInit } from "./apiBase";
 import { buildHeadersGet, buildHeadersPut } from "./collections";
 
 /** 拉取星标合集 id；null 表示失败 */
 export async function fetchMeFavorites(): Promise<string[] | null> {
   const base = apiBase();
   try {
-    const r = await fetch(`${base}/api/me/favorites`, {
-      headers: buildHeadersGet(),
-    });
+    const r = await fetch(
+      `${base}/api/me/favorites`,
+      apiFetchInit({ headers: buildHeadersGet() })
+    );
     if (!r.ok) return null;
     const j = (await r.json()) as { collectionIds?: unknown };
     if (!Array.isArray(j.collectionIds)) return null;
@@ -22,11 +23,14 @@ export async function fetchMeFavorites(): Promise<string[] | null> {
 export async function putMeFavorites(collectionIds: string[]): Promise<boolean> {
   const base = apiBase();
   try {
-    const r = await fetch(`${base}/api/me/favorites`, {
-      method: "PUT",
-      headers: buildHeadersPut({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ collectionIds }),
-    });
+    const r = await fetch(
+      `${base}/api/me/favorites`,
+      apiFetchInit({
+        method: "PUT",
+        headers: buildHeadersPut({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ collectionIds }),
+      })
+    );
     return r.ok;
   } catch {
     return false;
@@ -37,7 +41,10 @@ export async function putMeFavorites(collectionIds: string[]): Promise<boolean> 
 export async function fetchMeTrash(): Promise<TrashedNoteEntry[] | null> {
   const base = apiBase();
   try {
-    const r = await fetch(`${base}/api/me/trash`, { headers: buildHeadersGet() });
+    const r = await fetch(
+      `${base}/api/me/trash`,
+      apiFetchInit({ headers: buildHeadersGet() })
+    );
     if (!r.ok) return null;
     const j = (await r.json()) as { entries?: unknown };
     if (!Array.isArray(j.entries)) return null;
@@ -71,11 +78,14 @@ export async function fetchMeTrash(): Promise<TrashedNoteEntry[] | null> {
 export async function postMeTrashEntry(entry: TrashedNoteEntry): Promise<boolean> {
   const base = apiBase();
   try {
-    const r = await fetch(`${base}/api/me/trash`, {
-      method: "POST",
-      headers: buildHeadersPut({ "Content-Type": "application/json" }),
-      body: JSON.stringify(entry),
-    });
+    const r = await fetch(
+      `${base}/api/me/trash`,
+      apiFetchInit({
+        method: "POST",
+        headers: buildHeadersPut({ "Content-Type": "application/json" }),
+        body: JSON.stringify(entry),
+      })
+    );
     return r.ok;
   } catch {
     return false;
@@ -87,7 +97,7 @@ export async function deleteMeTrashEntry(trashId: string): Promise<boolean> {
   try {
     const r = await fetch(
       `${base}/api/me/trash/${encodeURIComponent(trashId)}`,
-      { method: "DELETE", headers: buildHeadersPut() }
+      apiFetchInit({ method: "DELETE", headers: buildHeadersPut() })
     );
     return r.ok;
   } catch {
@@ -98,10 +108,10 @@ export async function deleteMeTrashEntry(trashId: string): Promise<boolean> {
 export async function clearMeTrash(): Promise<boolean> {
   const base = apiBase();
   try {
-    const r = await fetch(`${base}/api/me/trash`, {
-      method: "DELETE",
-      headers: buildHeadersPut(),
-    });
+    const r = await fetch(
+      `${base}/api/me/trash`,
+      apiFetchInit({ method: "DELETE", headers: buildHeadersPut() })
+    );
     return r.ok;
   } catch {
     return false;

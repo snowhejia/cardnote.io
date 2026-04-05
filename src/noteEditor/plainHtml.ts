@@ -19,7 +19,10 @@ export function htmlToPlainText(html: string | undefined): string {
   if (typeof document === "undefined") {
     return t.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
   }
-  const d = document.createElement("div");
-  d.innerHTML = t;
-  return (d.textContent ?? "").replace(/\s+/g, " ").trim();
+  try {
+    const doc = new DOMParser().parseFromString(t, "text/html");
+    return (doc.body?.textContent ?? "").replace(/\s+/g, " ").trim();
+  } catch {
+    return t.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+  }
 }
