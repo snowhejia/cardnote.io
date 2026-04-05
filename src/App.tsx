@@ -2808,13 +2808,26 @@ export default function App() {
    * 侧栏选中合集时：新卡片带当前时刻与今日 addedOn，便于日历聚合。
    * 选中日历某日（按日浏览）时不允许新建小笔记。
    */
-  const addSmallNote = useCallback(() => {
-    const cardId = appendNoteCardWithHtml("");
-    if (!cardId) return;
-    queueMicrotask(() => {
-      document.getElementById(`card-text-${cardId}`)?.focus();
-    });
-  }, [appendNoteCardWithHtml]);
+  const addSmallNote = useCallback(
+    (opts?: { scrollTimelineToEnd?: boolean }) => {
+      const cardId = appendNoteCardWithHtml("");
+      if (!cardId) return;
+      if (opts?.scrollTimelineToEnd) {
+        const scrollEnd = () => {
+          const el = timelineRef.current;
+          if (!el) return;
+          el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+        };
+        requestAnimationFrame(() => {
+          requestAnimationFrame(scrollEnd);
+        });
+      }
+      queueMicrotask(() => {
+        document.getElementById(`card-text-${cardId}`)?.focus();
+      });
+    },
+    [appendNoteCardWithHtml]
+  );
 
   /* 勿对 textarea 做「先 readOnly 再下一帧取消」：iOS 会认为可编辑时机已脱离用户手势，键盘不再弹出 */
   useLayoutEffect(() => {
@@ -4468,7 +4481,7 @@ export default function App() {
                   type="button"
                   className="main__header-icon-btn"
                   aria-label="新建小笔记"
-                  onClick={addSmallNote}
+                  onClick={() => addSmallNote()}
                 >
                   <svg
                     className="main__header-icon-btn__svg"
@@ -4765,7 +4778,7 @@ export default function App() {
                 type="button"
                 className="timeline__add-bottom-btn"
                 aria-label="新建小笔记"
-                onClick={addSmallNote}
+                onClick={() => addSmallNote()}
               >
                 ＋ 新建小笔记
               </button>
@@ -4850,19 +4863,24 @@ export default function App() {
               !trashViewActive &&
               searchQuery.trim().length === 0
             ) {
-              const t = new Date();
-              flushSync(() => {
-                setMobileQuickCaptureHead({
-                  minutesOfDay: t.getHours() * 60 + t.getMinutes(),
-                  addedOn: localDateString(t),
+              /* 桌面网页：与时间线底部「新建」一致；Tauri 客户端仍用快速输入层 */
+              if (isTauri()) {
+                const t = new Date();
+                flushSync(() => {
+                  setMobileQuickCaptureHead({
+                    minutesOfDay: t.getHours() * 60 + t.getMinutes(),
+                    addedOn: localDateString(t),
+                  });
+                  setMobileQuickCaptureText("");
+                  mobileQuickCaptureDraftRef.current = "";
+                  setMobileQuickCaptureOpen(true);
                 });
-                setMobileQuickCaptureText("");
-                mobileQuickCaptureDraftRef.current = "";
-                setMobileQuickCaptureOpen(true);
-              });
-              mobileQuickCaptureAreaRef.current?.focus({
-                preventScroll: true,
-              });
+                mobileQuickCaptureAreaRef.current?.focus({
+                  preventScroll: true,
+                });
+                return;
+              }
+              addSmallNote({ scrollTimelineToEnd: true });
               return;
             }
             addSmallNote();
