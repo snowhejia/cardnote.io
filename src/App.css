@@ -2297,6 +2297,9 @@ textarea.main__hint-editor:focus {
 
 .card__inner--split {
   align-items: stretch;
+  gap: 0;
+  /* 与 .card__gallery 同色，flex 亚像素缝不露卡片白底 */
+  background: #e8e6e1;
 }
 
 .card__move-rail {
@@ -2478,7 +2481,7 @@ textarea.main__hint-editor:focus {
 
 .card__paper--with-gallery {
   border-radius: 12px 0 0 12px;
-  border-right: 1px solid rgba(60, 60, 67, 0.08);
+  border-right: none;
 }
 
 /* 右侧轮播：包在卡片内；与左侧正文等高铺满（长文时轮播区随卡片变高） */
@@ -2489,10 +2492,17 @@ textarea.main__hint-editor:focus {
   min-height: 0;
   align-self: stretch;
   background: #e8e6e1;
-  border-radius: 0 11px 11px 0;
+  /* 与 .card 的 12px 圆角一致，避免右上/右下比卡片少 1px 露出白边 */
+  border-radius: 0 12px 12px 0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
+}
+
+/* 左右各叠 1px，盖住与纸张、卡片边缘的亚像素缝（竖排布局见下方覆盖） */
+.card__inner--split:not(.card__inner--mobile-gallery-stack) > .card__gallery {
+  margin-left: -1px;
+  margin-right: -1px;
 }
 
 .card__gallery-viewport {
@@ -2558,8 +2568,10 @@ textarea.main__hint-editor:focus {
   left: 0;
   right: 0;
   bottom: 0;
-  height: 48%;
-  background: rgba(0, 0, 0, 0.5);
+  /* 仅盖住底部歌名带，避免遮掉大半张封面 */
+  height: 28%;
+  min-height: 2.75rem;
+  background: rgba(0, 0, 0, 0.55);
   pointer-events: none;
 }
 
@@ -4616,6 +4628,10 @@ div.card__text--readonly:not(.card__text--preview) {
   flex: 1;
   min-height: 0;
   align-items: stretch;
+  gap: 0;
+  /* 与右侧附件区同色底，flex 50%+50% 亚像素缝不露出卡片白底形成「细白线」 */
+  background: #f2f3f6;
+  border-radius: inherit;
 }
 
 .card--detail-modal--has-gallery .card__paper--with-gallery {
@@ -4680,10 +4696,11 @@ div.card__text--readonly:not(.card__text--preview) {
   align-self: stretch;
   min-height: 0;
   background: #f2f3f6;
-  border-radius: 0 11px 11px 0;
-  /* 与左侧纸张同色底衔接，避免拼缝亮线 */
+  border-radius: 0 12px 12px 0;
   border-left: none;
   box-shadow: none;
+  margin-left: -1px;
+  margin-right: -1px;
 }
 
 .card--detail-modal--has-gallery .card__gallery-viewport {
@@ -4820,6 +4837,11 @@ div.card__text--readonly:not(.card__text--preview) {
     width: 100%;
     min-height: min(52vw, 280px);
     border-radius: 0 0 12px 12px;
+  }
+
+  .card--detail-modal--has-gallery .card__gallery {
+    margin-left: 0;
+    margin-right: 0;
   }
 
   .card--detail-modal--has-gallery .card__gallery-viewport {
