@@ -20,6 +20,9 @@ import { fetchApiHealth } from "./api/health";
 import {
   fetchCollectionsFromApi,
   saveCollectionsToApi,
+  createCollectionApi,
+  updateCollectionApi,
+  deleteCollectionApi,
   createCardApi,
   updateCardApi,
   deleteCardApi,
@@ -2908,18 +2911,25 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [mobileQuickCaptureOpen, dismissMobileQuickCapture]);
 
-  const commitCollectionRename = useCallback(() => {
+  const commitCollectionRename = useCallback(async () => {
     if (!editingCollectionId) return;
+    const colId = editingCollectionId;
     const trimmed = draftCollectionName.trim();
     const name = trimmed.length > 0 ? trimmed : "新合集";
     setCollections((prev) =>
-      mapCollectionById(prev, editingCollectionId, (col) => ({
+      mapCollectionById(prev, colId, (col) => ({
         ...col,
         name,
       }))
     );
     setEditingCollectionId(null);
-  }, [editingCollectionId, draftCollectionName]);
+    if (dataMode === "remote" && canEdit) {
+      const ok = await updateCollectionApi(colId, { name });
+      if (!ok) {
+        window.alert("名称同步到服务器失败，刷新后可能恢复旧名称。");
+      }
+    }
+  }, [editingCollectionId, draftCollectionName, dataMode, canEdit]);
 
   const onCollectionNameBlur = useCallback(() => {
     if (skipCollectionBlurCommitRef.current) {
@@ -2929,7 +2939,8 @@ export default function App() {
     commitCollectionRename();
   }, [commitCollectionRename]);
 
-  const addCollection = useCallback(() => {
+  const addCollection = useCallback(async () => {
+    if (!canEdit) return;
     skipCloseMobileNavOnActiveChangeRef.current = true;
     setTrashViewActive(false);
     const id = `c-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -2939,34 +2950,79 @@ export default function App() {
       dotColor: randomDotColor(),
       cards: [],
     };
-    setCollections((prev) => [...prev, newCol]);
+    if (dataMode === "remote") {
+      const created = await createCollectionApi({
+        id,
+        name: newCol.name,
+        dotColor: newCol.dotColor,
+      });
+      if (!created) {
+        window.alert("新建合集失败，请检查网络或登录状态后重试。");
+        return;
+      }
+      const merged: Collection = {
+        ...newCol,
+        ...created,
+        cards: [],
+        children: undefined,
+      };
+      setCollections((prev) => [...prev, merged]);
+    } else {
+      setCollections((prev) => [...prev, newCol]);
+    }
     setActiveId(id);
     setDraftCollectionName("新合集");
     setEditingCollectionId(id);
-  }, []);
+  }, [canEdit, dataMode]);
 
-  const addSubCollection = useCallback((parentId: string) => {
-    skipCloseMobileNavOnActiveChangeRef.current = true;
-    setTrashViewActive(false);
-    const id = `c-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-    const child: Collection = {
-      id,
-      name: "新子合集",
-      dotColor: randomDotColor(),
-      cards: [],
-    };
-    setCollections((prev) =>
-      insertChildCollection(prev, parentId, child)
-    );
-    setCollapsedFolderIds((prev) => {
-      const next = new Set(prev);
-      next.delete(parentId);
-      return next;
-    });
-    setActiveId(id);
-    setDraftCollectionName("新子合集");
-    setEditingCollectionId(id);
-  }, []);
+  const addSubCollection = useCallback(
+    async (parentId: string) => {
+      if (!canEdit) return;
+      skipCloseMobileNavOnActiveChangeRef.current = true;
+      setTrashViewActive(false);
+      const id = `c-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+      const child: Collection = {
+        id,
+        name: "新子合集",
+        dotColor: randomDotColor(),
+        cards: [],
+      };
+      if (dataMode === "remote") {
+        const created = await createCollectionApi({
+          id,
+          name: child.name,
+          dotColor: child.dotColor,
+          parentId,
+        });
+        if (!created) {
+          window.alert("新建子合集失败，请检查网络或登录状态后重试。");
+          return;
+        }
+        const merged: Collection = {
+          ...child,
+          ...created,
+          cards: [],
+          children: undefined,
+        };
+        setCollections((prev) =>
+          insertChildCollection(prev, parentId, merged)
+        );
+      } else {
+        setCollections((prev) =>
+          insertChildCollection(prev, parentId, child)
+        );
+      }
+      setCollapsedFolderIds((prev) => {
+        const next = new Set(prev);
+        next.delete(parentId);
+        return next;
+      });
+      setActiveId(id);
+      setDraftCollectionName("新子合集");
+      setEditingCollectionId(id);
+    },
+    [canEdit, dataMode]
+  );
 
   const toggleFavoriteCollection = useCallback(
     (id: string) => {
@@ -2982,8 +3038,15 @@ export default function App() {
   );
 
   const performRemoveCollection = useCallback(
-    (id: string) => {
+    async (id: string) => {
       if (!canEdit) return;
+      if (dataMode === "remote") {
+        const ok = await deleteCollectionApi(id);
+        if (!ok) {
+          window.alert("删除合集失败，请检查网络或权限后重试。");
+          return;
+        }
+      }
       setDraggingCollectionId((d) => (d === id ? null : d));
       setDropIndicator((di) => (di?.targetId === id ? null : di));
       setEditingCollectionId((e) => (e === id ? null : e));
@@ -3017,7 +3080,7 @@ export default function App() {
         });
       }
     },
-    [canEdit, favoriteStorageKey]
+    [canEdit, dataMode, favoriteStorageKey]
   );
 
   const openRemoveCollectionDialog = useCallback(
