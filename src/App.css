@@ -2298,15 +2298,16 @@ textarea.main__hint-editor:focus {
 .card__inner--split {
   align-items: stretch;
   gap: 0;
-  /* 与 .card__gallery 同色，flex 亚像素缝不露卡片白底 */
-  background: #e8e6e1;
+  /* 与 .card 同色；勿铺附件区灰底，否则半透明拖拽条会叠色，与无附件卡片侧栏不一致 */
+  background: #ffffff;
 }
 
 .card__move-rail {
   flex: 0 0 30px;
   align-self: stretch;
   min-height: 100%;
-  background: rgba(55, 53, 47, 0.04);
+  /* 实色等价于 rgba(55,53,47,0.04) 叠在白底上，有无分栏、底层何色都一致 */
+  background: #f6f5f4;
   border-right: 1px solid rgba(60, 60, 67, 0.08);
   border-radius: 12px 0 0 12px;
   cursor: grab;
