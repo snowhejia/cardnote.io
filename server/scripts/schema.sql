@@ -65,8 +65,8 @@ DROP TRIGGER IF EXISTS trg_card_upd ON cards;
 
 CREATE TRIGGER trg_col_upd
   BEFORE UPDATE ON collections
-  FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+  FOR EACH ROW EXECUTE PROCEDURE touch_updated_at();
 
 CREATE TRIGGER trg_card_upd
   BEFORE UPDATE ON cards
-  FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+  FOR EACH ROW EXECUTE PROCEDURE touch_updated_at();

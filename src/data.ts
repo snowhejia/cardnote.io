@@ -29,8 +29,8 @@ const D5 = ymdLocal(addDays(now, -5));
 const D7 = ymdLocal(addDays(now, -7));
 
 /**
- * 内置示例：每张卡讲清一个功能；置顶为卷首语。
- * 侧栏另有「学习笔记 / 摘抄本 / 今日小记 / 兴趣爱好」示意用法。
+ * 内置导览数据：每张卡讲清一个功能；置顶为卷首语。
+ * 本地模式首启、或云端新账号首次拉取到空库时写入用户数据（不再作为未登录游客预览）。
  */
 export const collections: Collection[] = [
   {

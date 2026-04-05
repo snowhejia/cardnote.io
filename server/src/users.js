@@ -90,12 +90,21 @@ export async function confirmAvatarCosUpload(_filePath, userId, key) {
 
 export function toPublicUser(u) {
   if (!u) return null;
+  /** readUsersList / verifyLogin 已转成 camelCase；少数路径仍传 PG 行（snake_case） */
+  const displayNameRaw =
+    (u.display_name != null && String(u.display_name).trim()) ||
+    (u.displayName != null && String(u.displayName).trim()) ||
+    "";
+  const avatarRaw =
+    (u.avatar_url != null && String(u.avatar_url).trim()) ||
+    (u.avatarUrl != null && String(u.avatarUrl).trim()) ||
+    "";
   return {
     id: u.id,
     username: u.username,
-    displayName: (u.display_name && String(u.display_name).trim()) || u.username,
+    displayName: displayNameRaw || u.username,
     role: u.role,
-    avatarUrl: u.avatar_url ? String(u.avatar_url) : "",
+    avatarUrl: avatarRaw,
   };
 }
 

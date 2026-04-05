@@ -614,7 +614,7 @@ if (hasPublic) {
 async function main() {
   // 校验 DATABASE_URL（getPool() 内部会抛，提前给出友好错误）
   if (!process.env.DATABASE_URL?.trim()) {
-    console.error("❌ 缺少环境变量 DATABASE_URL，请配置腾讯云 PostgreSQL 连接串后重启");
+    console.error("❌ 缺少环境变量 DATABASE_URL，请配置 PostgreSQL 连接串后重启（本地测试见 server/.env.example 与 docker-compose.yml）");
     process.exit(1);
   }
 

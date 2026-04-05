@@ -9,7 +9,7 @@ let pool = null;
 export function getPool() {
   if (pool) return pool;
   const url = process.env.DATABASE_URL?.trim();
-  if (!url) throw new Error("DATABASE_URL 未配置，请在环境变量中设置腾讯云 PostgreSQL 连接串");
+  if (!url) throw new Error("DATABASE_URL 未配置，请在环境变量中设置 PostgreSQL 连接串（见 server/.env.example）");
 
   pool = new pg.Pool({
     connectionString: url,

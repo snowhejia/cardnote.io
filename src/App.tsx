@@ -10,7 +10,6 @@ import {
 import type {
   ChangeEvent,
   DragEvent,
-  MouseEvent,
   ReactNode,
   Ref,
 } from "react";
@@ -20,6 +19,7 @@ import { DEFAULT_TAURI_REMOTE_API } from "./api/apiBase";
 import { fetchApiHealth } from "./api/health";
 import {
   fetchCollectionsFromApi,
+  saveCollectionsToApi,
   createCardApi,
   updateCardApi,
   deleteCardApi,
@@ -35,7 +35,7 @@ import {
   type PublicUser,
 } from "./api/users";
 import { useAppDataMode } from "./appDataMode";
-import type { AppDataMode } from "./appDataModeStorage";
+import { getAppDataMode, type AppDataMode } from "./appDataModeStorage";
 import { useAuth } from "./auth/AuthContext";
 import { getAdminToken } from "./auth/token";
 import { collections as initialCollections } from "./data";
@@ -43,19 +43,13 @@ import { loadLocalCollections, saveLocalCollections } from "./localCollectionsSt
 import { saveLocalMediaInlineInBrowser } from "./localMediaBrowser";
 import {
   deleteLocalMediaFile,
-  LOCAL_MEDIA_PREFIX,
   saveLocalMediaToAppFolder,
 } from "./localMediaTauri";
-import {
-  MediaLightboxAudio,
-  MediaLightboxCover,
-  MediaLightboxImage,
-  MediaLightboxVideo,
-  MediaOpenLink,
-  MediaThumbImage,
-  MediaThumbVideo,
-} from "./mediaDisplay";
 import { migrateCollectionTree } from "./migrateCollections";
+import { CardDetail } from "./CardDetail";
+import { CardTagsRow } from "./CardTagsRow";
+import { CardGallery } from "./CardGallery";
+import { formatCardTimeLabel } from "./cardTimeLabel";
 import { filesFromDataTransfer } from "./filesFromDataTransfer";
 import { NoteCardTiptap } from "./noteEditor/NoteCardTiptap";
 import { htmlToPlainText, noteBodyToHtml } from "./noteEditor/plainHtml";
@@ -160,6 +154,18 @@ function CollectionStarIcon({
 
 function cloneInitialCollections(): Collection[] {
   return structuredClone(initialCollections) as Collection[];
+}
+
+/** 首屏：本地模式读缓存/内置；云端模式不预填示例，避免未登录时闪一下样例 */
+function initialWorkspaceFromStorage(): {
+  collections: Collection[];
+  activeId: string;
+} {
+  if (getAppDataMode() === "local") {
+    const cols = loadLocalCollections(cloneInitialCollections);
+    return { collections: cols, activeId: cols[0]?.id ?? "" };
+  }
+  return { collections: [], activeId: "" };
 }
 
 function localDateString(d = new Date()): string {
@@ -404,27 +410,6 @@ function buildCalendarCells(viewMonth: Date): (null | { day: number; dateStr: st
     });
   }
   return cells;
-}
-
-/** HH:mm，与横格行高无关，仅用于卡片角标 */
-function formatClock(minutesOfDay: number) {
-  const h = Math.floor(minutesOfDay / 60);
-  const m = minutesOfDay % 60;
-  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-}
-
-/** 卡片左上角：按 addedOn 显示「今天 / 昨天 / M月D日」+ 时刻 */
-function formatCardTimeLabel(card: NoteCard) {
-  const clock = formatClock(card.minutesOfDay);
-  const added = card.addedOn;
-  if (!added) return `今天 ${clock}`;
-  const today = localDateString();
-  if (added === today) return `今天 ${clock}`;
-  const yest = new Date();
-  yest.setDate(yest.getDate() - 1);
-  if (added === localDateString(yest)) return `昨天 ${clock}`;
-  const [, mm, dd] = added.split("-");
-  return `${Number(mm)}月${Number(dd)}日 ${clock}`;
 }
 
 /** 新建合集侧栏圆点：随机色相，饱和度与亮度控制在易辨认、不过分刺眼 */
@@ -965,123 +950,6 @@ function mediaItemFromUploadResult(r: {
   };
 }
 
-function formatTagsForInput(tags: string[] | undefined): string {
-  return (tags ?? []).join("，");
-}
-
-function parseTagsFromInput(raw: string): string[] {
-  return raw
-    .split(/[,，]/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
-
-function CardTagsRow({
-  colId,
-  card,
-  canEdit,
-  onCommit,
-}: {
-  colId: string;
-  card: NoteCard;
-  canEdit: boolean;
-  onCommit: (colId: string, cardId: string, tags: string[]) => void;
-}) {
-  const tags = card.tags ?? [];
-  const tagsKey = tags.join("\u0001");
-  const [draft, setDraft] = useState(() => formatTagsForInput(tags));
-
-  useEffect(() => {
-    setDraft(formatTagsForInput(tags));
-  }, [card.id, tagsKey]);
-
-  return (
-    <div className="card__tags-row">
-      <span className="card__tags-label">标签：</span>
-      {canEdit ? (
-        <input
-          type="text"
-          className="card__tags-input"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={() =>
-            onCommit(colId, card.id, parseTagsFromInput(draft))
-          }
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              (e.target as HTMLInputElement).blur();
-            }
-          }}
-          aria-label="标签"
-        />
-      ) : (
-        <span className="card__tags-view">{formatTagsForInput(tags)}</span>
-      )}
-    </div>
-  );
-}
-
-function fileLabelFromUrl(url: string): string {
-  if (url.startsWith(LOCAL_MEDIA_PREFIX)) {
-    const seg =
-      url.slice(LOCAL_MEDIA_PREFIX.length).split("/").pop() ?? "";
-    const i = seg.indexOf("_");
-    if (i >= 0 && i < seg.length - 1) {
-      return decodeURIComponent(seg.slice(i + 1).replace(/\+/g, " "));
-    }
-    return seg || "文件";
-  }
-  try {
-    const u = new URL(url);
-    const parts = u.pathname.split("/").filter(Boolean);
-    const last = parts[parts.length - 1];
-    if (!last) return "文件";
-    return decodeURIComponent(last.replace(/\+/g, " "));
-  } catch {
-    return "文件";
-  }
-}
-
-function FileDocIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.65"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-      <polyline points="14 2 14 8 20 8" />
-      <line x1="8" y1="13" x2="16" y2="13" />
-      <line x1="8" y1="17" x2="14" y2="17" />
-    </svg>
-  );
-}
-
-function AudioGlyphIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.65"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <path d="M9 18V5l12-2v13" />
-      <circle cx="6" cy="18" r="3" />
-      <circle cx="18" cy="16" r="3" />
-    </svg>
-  );
-}
-
 /** 未登录 / 恢复会话时：与浏览器标签页一致的软件图标 */
 function SidebarWorkspaceAppMark() {
   return (
@@ -1220,441 +1088,6 @@ function AdminHeaderIcon({ mode }: { mode: "login" | "logout" }) {
       <polyline points="16 17 21 12 16 7" />
       <line x1="21" y1="12" x2="9" y2="12" />
     </svg>
-  );
-}
-
-type LightboxState = {
-  url: string;
-  kind: NoteMediaKind;
-  name?: string;
-  coverUrl?: string;
-};
-
-/** 卡片右侧媒体轮播：悬停箭头；多段时角标与圆点；单击全屏查看/播放；右键删除单项 */
-function CardGallery({
-  items,
-  onRemoveItem,
-}: {
-  items: NoteMediaItem[];
-  onRemoveItem?: (item: NoteMediaItem) => void;
-}) {
-  const [i, setI] = useState(0);
-  const [lightbox, setLightbox] = useState<LightboxState | null>(null);
-  const [attachMenu, setAttachMenu] = useState<{
-    x: number;
-    y: number;
-    item: NoteMediaItem;
-  } | null>(null);
-  const n = items.length;
-
-  const itemsKey = items
-    .map(
-      (x) =>
-        `${x.kind}:${x.url}:${x.name ?? ""}:${x.coverUrl ?? ""}`
-    )
-    .join("|");
-  useEffect(() => {
-    setI((prev) => {
-      if (n === 0) return 0;
-      return Math.min(prev, n - 1);
-    });
-  }, [n, itemsKey]);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      if (attachMenu) {
-        e.preventDefault();
-        setAttachMenu(null);
-        return;
-      }
-      if (lightbox) setLightbox(null);
-    };
-    if (!attachMenu && !lightbox) return;
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [attachMenu, lightbox]);
-
-  useEffect(() => {
-    if (!attachMenu) return;
-    const onDown = (e: PointerEvent) => {
-      const el = document.querySelector("[data-attachment-ctx-menu]");
-      if (el?.contains(e.target as Node)) return;
-      setAttachMenu(null);
-    };
-    const t = window.setTimeout(() => {
-      document.addEventListener("pointerdown", onDown, true);
-    }, 0);
-    return () => {
-      clearTimeout(t);
-      document.removeEventListener("pointerdown", onDown, true);
-    };
-  }, [attachMenu]);
-
-  useEffect(() => {
-    if (!lightbox) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = prev;
-    };
-  }, [lightbox]);
-
-  if (n === 0) return null;
-
-  const safeI = ((i % n) + n) % n;
-  const current = items[safeI];
-  const go = (delta: number) => {
-    setI((x) => (x + delta + n * 100) % n);
-  };
-
-  const openCurrentLightbox = () => {
-    setLightbox({
-      url: current.url,
-      kind: current.kind,
-      name: current.name ?? fileLabelFromUrl(current.url),
-      ...(current.kind === "audio" && current.coverUrl
-        ? { coverUrl: current.coverUrl }
-        : {}),
-    });
-  };
-
-  const openAttachmentMenu = (
-    e: MouseEvent<HTMLElement>,
-    item: NoteMediaItem
-  ) => {
-    if (!onRemoveItem) return;
-    e.preventDefault();
-    e.stopPropagation();
-    setAttachMenu({ x: e.clientX, y: e.clientY, item });
-  };
-
-  const lightboxAsItem = (): NoteMediaItem | null => {
-    if (!lightbox) return null;
-    if (lightbox.kind === "file") {
-      return {
-        kind: "file",
-        url: lightbox.url,
-        name: lightbox.name ?? fileLabelFromUrl(lightbox.url),
-      };
-    }
-    if (lightbox.kind === "audio") {
-      const name = lightbox.name ?? fileLabelFromUrl(lightbox.url);
-      return {
-        kind: "audio",
-        url: lightbox.url,
-        name,
-        ...(lightbox.coverUrl ? { coverUrl: lightbox.coverUrl } : {}),
-      };
-    }
-    if (lightbox.kind === "image" || lightbox.kind === "video") {
-      const name = lightbox.name ?? fileLabelFromUrl(lightbox.url);
-      return { kind: lightbox.kind, url: lightbox.url, name };
-    }
-    return { kind: lightbox.kind, url: lightbox.url };
-  };
-
-  const lightboxPortal =
-    lightbox &&
-    createPortal(
-      <div
-        className="image-lightbox"
-        role="dialog"
-        aria-modal="true"
-        aria-label="预览"
-        onClick={() => setLightbox(null)}
-      >
-        <button
-          type="button"
-          className="image-lightbox__close"
-          aria-label="关闭"
-          onClick={(e) => {
-            e.stopPropagation();
-            setLightbox(null);
-          }}
-        >
-          ×
-        </button>
-        {lightbox.kind === "image" ? (
-          <div
-            className="image-lightbox__media-stack"
-            onClick={(e) => e.stopPropagation()}
-            onContextMenu={(e) => {
-              const it = lightboxAsItem();
-              if (it) openAttachmentMenu(e, it);
-            }}
-          >
-            <MediaLightboxImage
-              url={lightbox.url}
-              className="image-lightbox__img"
-            />
-            <p className="image-lightbox__media-caption">
-              {lightbox.name ?? fileLabelFromUrl(lightbox.url)}
-            </p>
-          </div>
-        ) : lightbox.kind === "video" ? (
-          <div
-            className="image-lightbox__media-stack"
-            onClick={(e) => e.stopPropagation()}
-            onContextMenu={(e) => {
-              const it = lightboxAsItem();
-              if (it) openAttachmentMenu(e, it);
-            }}
-          >
-            <MediaLightboxVideo
-              url={lightbox.url}
-              className="image-lightbox__img image-lightbox__video"
-            />
-            <p className="image-lightbox__media-caption">
-              {lightbox.name ?? fileLabelFromUrl(lightbox.url)}
-            </p>
-          </div>
-        ) : lightbox.kind === "audio" ? (
-          <div
-            className="image-lightbox__audio-wrap"
-            onClick={(e) => e.stopPropagation()}
-            onContextMenu={(e) => {
-              const it = lightboxAsItem();
-              if (it) openAttachmentMenu(e, it);
-            }}
-          >
-            {lightbox.coverUrl ? (
-              <MediaLightboxCover
-                url={lightbox.coverUrl}
-                className="image-lightbox__audio-cover"
-              />
-            ) : null}
-            <p className="image-lightbox__audio-title">
-              {lightbox.name ?? fileLabelFromUrl(lightbox.url)}
-            </p>
-            <MediaLightboxAudio
-              url={lightbox.url}
-              className="image-lightbox__audio"
-            />
-          </div>
-        ) : (
-          <div
-            className="image-lightbox__file"
-            onClick={(e) => e.stopPropagation()}
-            onContextMenu={(e) => {
-              const it = lightboxAsItem();
-              if (it) openAttachmentMenu(e, it);
-            }}
-          >
-            <FileDocIcon className="image-lightbox__file-icon" />
-            <p className="image-lightbox__file-name">
-              {lightbox.name ?? fileLabelFromUrl(lightbox.url)}
-            </p>
-            <MediaOpenLink
-              url={lightbox.url}
-              className="image-lightbox__file-link"
-            >
-              在新窗口打开
-            </MediaOpenLink>
-          </div>
-        )}
-      </div>,
-      document.body
-    );
-
-  const attachMenuPortal =
-    attachMenu &&
-    onRemoveItem &&
-    createPortal(
-      <div
-        data-attachment-ctx-menu
-        className="attachment-ctx-menu"
-        style={{
-          position: "fixed",
-          left: Math.min(
-            attachMenu.x,
-            typeof window !== "undefined"
-              ? window.innerWidth - 148
-              : attachMenu.x
-          ),
-          top: attachMenu.y,
-          zIndex: 10001,
-        }}
-        role="menu"
-      >
-        <button
-          type="button"
-          className="attachment-ctx-menu__item"
-          role="menuitem"
-          onClick={() => {
-            onRemoveItem(attachMenu.item);
-            setAttachMenu(null);
-            setLightbox(null);
-          }}
-        >
-          删除附件
-        </button>
-      </div>,
-      document.body
-    );
-
-  return (
-    <div className="card__gallery">
-      {lightboxPortal}
-      {attachMenuPortal}
-      <div className="card__gallery-viewport">
-        <div
-          className={
-            "card__gallery-thumb-hit" +
-            (current.kind === "file"
-              ? " card__gallery-thumb-hit--file"
-              : current.kind === "audio"
-                ? " card__gallery-thumb-hit--audio"
-                : "")
-          }
-          role="button"
-          tabIndex={0}
-          title={
-            onRemoveItem
-              ? current.kind === "file"
-                ? "点击查看，右键可删除"
-                : current.kind === "audio"
-                  ? "点击放大播放音频，右键可删除"
-                  : "点击放大，右键可删除"
-              : current.kind === "file"
-                ? "点击查看"
-                : current.kind === "audio"
-                  ? "点击放大播放音频"
-                  : "点击放大"
-          }
-          aria-label={
-            current.kind === "video"
-              ? "点击放大播放视频"
-              : current.kind === "image"
-                ? "点击放大查看图片"
-                : current.kind === "audio"
-                  ? "点击放大播放音频"
-                  : "查看文件"
-          }
-          onClick={(e) => {
-            e.stopPropagation();
-            openCurrentLightbox();
-          }}
-          onContextMenu={(e) => {
-            if (onRemoveItem) openAttachmentMenu(e, current);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") {
-              e.preventDefault();
-              e.stopPropagation();
-              openCurrentLightbox();
-            }
-          }}
-        >
-          {current.kind === "image" ? (
-            <MediaThumbImage
-              url={current.url}
-              className="card__gallery-thumb"
-              alt=""
-            />
-          ) : current.kind === "audio" ? (
-            <>
-              <div className="card__gallery-audio-thumb">
-                {current.coverUrl ? (
-                  <>
-                    <MediaThumbImage
-                      url={current.coverUrl}
-                      className="card__gallery-audio-cover"
-                      alt=""
-                    />
-                    <div
-                      className="card__gallery-audio-cover-scrim"
-                      aria-hidden
-                    />
-                    <span className="card__gallery-audio-name card__gallery-audio-name--on-cover">
-                      {current.name ?? fileLabelFromUrl(current.url)}
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    <AudioGlyphIcon className="card__gallery-audio-icon" />
-                    <span className="card__gallery-audio-name">
-                      {current.name ?? fileLabelFromUrl(current.url)}
-                    </span>
-                  </>
-                )}
-              </div>
-              <span className="card__gallery-play-badge" aria-hidden>
-                ▶
-              </span>
-            </>
-          ) : current.kind === "video" ? (
-            <>
-              <MediaThumbVideo
-                url={current.url}
-                className="card__gallery-thumb card__gallery-thumb--video"
-              />
-              <span className="card__gallery-play-badge" aria-hidden>
-                ▶
-              </span>
-            </>
-          ) : (
-            <div className="card__gallery-file">
-              <FileDocIcon className="card__gallery-file-icon" />
-              <span className="card__gallery-file-name">
-                {current.name ?? fileLabelFromUrl(current.url)}
-              </span>
-            </div>
-          )}
-        </div>
-        {n > 1 ? (
-          <span className="card__gallery-count">
-            {safeI + 1}/{n}
-          </span>
-        ) : null}
-        {n > 1 ? (
-          <>
-            <button
-              type="button"
-              className="card__gallery-arrow card__gallery-arrow--prev"
-              aria-label="上一项"
-              onClick={(e) => {
-                e.stopPropagation();
-                go(-1);
-              }}
-            />
-            <button
-              type="button"
-              className="card__gallery-arrow card__gallery-arrow--next"
-              aria-label="下一项"
-              onClick={(e) => {
-                e.stopPropagation();
-                go(1);
-              }}
-            />
-          </>
-        ) : null}
-        {n > 1 ? (
-          <div
-            className="card__gallery-dots"
-            role="tablist"
-            aria-label="分页"
-          >
-            {items.map((_, idx) => (
-              <button
-                key={idx}
-                type="button"
-                role="tab"
-                aria-selected={idx === safeI}
-                className={
-                  "card__gallery-dot" +
-                  (idx === safeI ? " is-active" : "")
-                }
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setI(idx);
-                }}
-              />
-            ))}
-          </div>
-        ) : null}
-      </div>
-    </div>
   );
 }
 
@@ -2019,7 +1452,7 @@ function RelatedCardsSidePanel({
         <div
           className={
             "related-panel__body" +
-            (canEdit && source ? " related-panel__body--with-pick" : "")
+            (source ? " related-panel__body--with-pick" : "")
           }
         >
           {!source ? (
@@ -2029,7 +1462,9 @@ function RelatedCardsSidePanel({
               <div className="related-panel__upper">
                 {relatedList.length === 0 ? (
                   <p className="related-panel__hint">
-                    还没有贴上羁绊卡片，去下面搜一只来贴贴～
+                    {canEdit
+                      ? "还没有关联笔记，可在下方按相似度搜索并粘贴关联～"
+                      : "还没有关联笔记。"}
                   </p>
                 ) : (
                   <ul className="related-panel__list">
@@ -2099,11 +1534,11 @@ function RelatedCardsSidePanel({
               </div>
               {canEdit ? (
                 <div className="related-panel__add related-panel__add--fill">
-                  <p className="related-panel__add-label">贴贴关联</p>
+                  <p className="related-panel__add-label">粘贴关联</p>
                   <input
                     type="text"
                     className="related-panel__add-input"
-                    placeholder="搜一只笔记来贴贴…"
+                    placeholder="搜索笔记（按与当前内容的相似度排序）…"
                     value={pickQuery}
                     onChange={(e) => setPickQuery(e.target.value)}
                     autoComplete="off"
@@ -2113,41 +1548,27 @@ function RelatedCardsSidePanel({
                     className="related-panel__pick-grow"
                   >
                     {pickCandidatesShown.length > 0 ? (
-                      <>
-                        <ul className="related-panel__pick-list">
-                          {pickCandidatesShown.map(({ col, card, path }) => (
-                            <li key={`${col.id}-${card.id}`}>
-                              <button
-                                type="button"
-                                className="related-panel__pick-row"
-                                onClick={() => {
-                                  onAddRelation(col.id, card.id);
-                                  setPickQuery("");
-                                }}
-                              >
-                                <span className="related-panel__pick-path">
-                                  {path}
-                                </span>
-                                <span className="related-panel__pick-text">
-                                  {previewCardTextOneLine(card.text, 48)}
-                                </span>
-                              </button>
-                            </li>
-                          ))}
-                        </ul>
-                        {pickCandidatesSorted.length >
-                        pickCandidatesShown.length ? (
-                          <p className="related-panel__pick-truncate-hint">
-                            窗口里先塞得下相似度最高的{" "}
-                            {pickCandidatesShown.length}{" "}
-                            条，搜一搜可以缩圈～
-                          </p>
-                        ) : null}
-                        <div
-                          className="related-panel__pick-spacer"
-                          aria-hidden
-                        />
-                      </>
+                      <ul className="related-panel__pick-list">
+                        {pickCandidatesShown.map(({ col, card, path }) => (
+                          <li key={`${col.id}-${card.id}`}>
+                            <button
+                              type="button"
+                              className="related-panel__pick-row"
+                              onClick={() => {
+                                onAddRelation(col.id, card.id);
+                                setPickQuery("");
+                              }}
+                            >
+                              <span className="related-panel__pick-path">
+                                {path}
+                              </span>
+                              <span className="related-panel__pick-text">
+                                {previewCardTextOneLine(card.text, 48)}
+                              </span>
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
                     ) : pickQuery.trim() ? (
                       <p className="related-panel__hint related-panel__hint--pick">
                         没找到合拍笔记，换个关键词试试？
@@ -2155,7 +1576,16 @@ function RelatedCardsSidePanel({
                     ) : null}
                   </div>
                 </div>
-              ) : null}
+              ) : (
+                <div className="related-panel__add related-panel__add--fill related-panel__add--readonly">
+                  <p className="related-panel__add-label">粘贴关联</p>
+                  <div className="related-panel__readonly-lower-body">
+                    <p className="related-panel__hint">
+                      只读模式下无法搜索或添加关联。
+                    </p>
+                  </div>
+                </div>
+              )}
             </>
           )}
         </div>
@@ -2170,6 +1600,7 @@ export default function App() {
     authReady,
     writeRequiresLogin,
     openLogin,
+    setLoginOpen,
     logout,
     currentUser,
     refreshMe,
@@ -2201,11 +1632,11 @@ export default function App() {
     [dataMode, currentUser?.id]
   );
 
-  const [collections, setCollections] = useState<Collection[]>(() =>
-    cloneInitialCollections()
+  const [collections, setCollections] = useState<Collection[]>(
+    () => initialWorkspaceFromStorage().collections
   );
   const [activeId, setActiveId] = useState(
-    () => initialCollections[0]?.id ?? ""
+    () => initialWorkspaceFromStorage().activeId
   );
   const [calendarDay, setCalendarDay] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -2219,6 +1650,10 @@ export default function App() {
     return new Date(d.getFullYear(), d.getMonth(), 1);
   });
   const [cardMenuId, setCardMenuId] = useState<string | null>(null);
+  const [detailCard, setDetailCard] = useState<{
+    card: NoteCard;
+    colId: string;
+  } | null>(null);
   const [collectionCtxMenu, setCollectionCtxMenu] = useState<{
     x: number;
     y: number;
@@ -2647,9 +2082,9 @@ export default function App() {
         setMediaUploadMode(null);
       }
       const online = Boolean(health?.ok);
-      /* 无 JWT 才当游客示例；仅有 token、/me 尚未成功时仍拉远程笔记，避免误显示未登录 */
+      /* 要求登录且未带 JWT：不加载示例数据，仅就绪；登录框由单独 effect 自动打开 */
       if (writeRequiresLogin && !currentUser && !getAdminToken()) {
-        setCollections(cloneInitialCollections());
+        setCollections([]);
         setLoadError(null);
         setSaveError(null);
         setApiOnline(online);
@@ -2660,7 +2095,18 @@ export default function App() {
       const data = await fetchCollectionsFromApi();
       if (cancelled) return;
       if (data !== null) {
-        setCollections(migrateCollectionTree(data));
+        let tree = migrateCollectionTree(data);
+        const authed = Boolean(currentUser || getAdminToken());
+        if (tree.length === 0 && authed && writeRequiresLogin) {
+          tree = cloneInitialCollections();
+          const seeded = await saveCollectionsToApi(tree);
+          if (!seeded) {
+            setSidebarFlash(
+              "新账号内置笔记已就绪，但首次同步到服务器失败，可稍后再试或联系管理员"
+            );
+          }
+        }
+        setCollections(tree);
         setApiOnline(true);
         setLoadError(null);
         setRemoteSaveAllowed(true);
@@ -2670,13 +2116,13 @@ export default function App() {
           setLoadError(
             "笔记加载摔了一跤… 看看网络或重新登录试试？"
           );
-          /* 勿置空数组：无合集时 active 为空，底栏加号等会全部禁用，像「啥也点不了」 */
-          setCollections(cloneInitialCollections());
+          setCollections([]);
           setApiOnline(false);
         } else {
           setLoadError(
-            "连不上服务器喵～先用本地示例顶一顶，把后端开起来（见说明）再刷新就能同步啦。"
+            "连不上服务器喵～请检查网络或稍后再刷新。"
           );
+          setCollections([]);
           setApiOnline(online);
         }
       }
@@ -2686,6 +2132,19 @@ export default function App() {
       cancelled = true;
     };
   }, [authReady, dataMode, writeRequiresLogin, currentUser?.id]);
+
+  /** 浏览器 + 云端 + 要求登录：首屏直接弹出登录，不出现示例笔记 */
+  useEffect(() => {
+    if (!authReady || dataMode !== "remote" || !writeRequiresLogin) return;
+    if (getAdminToken() || isTauri()) return;
+    setLoginOpen(true);
+  }, [authReady, dataMode, writeRequiresLogin, setLoginOpen]);
+
+  /** 云端模式下在首次 remote 就绪前盖住主区（含未登录时等健康检查、登录后等 GET 合集） */
+  const showRemoteLoading = useMemo(
+    () => authReady && dataMode === "remote" && !remoteLoaded,
+    [authReady, dataMode, remoteLoaded]
+  );
 
   useEffect(() => {
     if (!authReady) return;
@@ -2930,6 +2389,9 @@ export default function App() {
       setCardMenuId(null);
       setRelatedPanel((p) =>
         p?.colId === colId && p?.cardId === cardId ? null : p
+      );
+      setDetailCard((d) =>
+        d && d.colId === colId && d.card.id === cardId ? null : d
       );
       if (dataMode !== "local") {
         void deleteCardApi(cardId);
@@ -3722,6 +3184,17 @@ export default function App() {
     setCardMenuId(null);
   }, [trashViewActive]);
 
+  const detailCardLive = useMemo(() => {
+    if (!detailCard) return null;
+    const col = findCollectionById(collections, detailCard.colId);
+    const c = col?.cards.find((x) => x.id === detailCard.card.id);
+    return c ? { colId: detailCard.colId, card: c } : null;
+  }, [detailCard, collections]);
+
+  useEffect(() => {
+    if (detailCard && !detailCardLive) setDetailCard(null);
+  }, [detailCard, detailCardLive]);
+
   const renderCard = (card: NoteCard, colId: string) => {
     const media = (card.media ?? []).filter((m) => m.url?.trim());
     const hasGallery = media.length > 0;
@@ -3902,6 +3375,28 @@ export default function App() {
                 {formatCardTimeLabel(card)}
               </span>
               <div className="card__toolbar-actions">
+                <button
+                  type="button"
+                  className="card__icon-btn card__detail-btn"
+                  title="查看详情"
+                  aria-label="查看详情"
+                  onClick={() =>
+                    setDetailCard({
+                      card,
+                      colId,
+                    })
+                  }
+                >
+                  <svg
+                    viewBox="0 0 16 16"
+                    width="13"
+                    height="13"
+                    fill="currentColor"
+                    aria-hidden="true"
+                  >
+                    <path d="M1 1h5v1.5H2.5V5H1V1zm9 0h5v4h-1.5V2.5H10V1zM1 10h1.5v2.5H5V14H1v-4zM15 10h-1.5v2.5H11V14H15v-4z" />
+                  </svg>
+                </button>
                 <div
                   className="card__menu-root"
                   data-card-menu-root={card.id}
@@ -4378,12 +3873,35 @@ export default function App() {
       );
     });
 
+  if (!authReady) {
+    return (
+      <div className="app app--boot" aria-busy="true">
+        <div className="app-boot-screen">
+          <span className="app-boot-spinner" aria-hidden />
+          <p>正在准备…</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       className={
         "app" + (mobileNavOpen ? " app--mobile-nav-open" : "")
       }
     >
+      {showRemoteLoading ? (
+        <div
+          className="app-remote-loading-overlay"
+          aria-busy="true"
+          aria-live="polite"
+        >
+          <div className="app-remote-loading-inner">
+            <span className="app-remote-loading-spinner" aria-hidden />
+            <p>正在同步笔记…</p>
+          </div>
+        </div>
+      ) : null}
       <div
         className="app__mobile-backdrop"
         aria-hidden
@@ -5807,6 +5325,80 @@ export default function App() {
             document.body
           )
         : null}
+      {detailCardLive ? (
+        <CardDetail
+          card={detailCardLive.card}
+          colId={detailCardLive.colId}
+          onClose={() => {
+            setDetailCard(null);
+            setCardMenuId(null);
+          }}
+          canEdit={canEdit}
+          canAttachMedia={canAttachMedia}
+          relatedPanelOpen={
+            relatedPanel?.colId === detailCardLive.colId &&
+            relatedPanel?.cardId === detailCardLive.card.id
+          }
+          uploadBusy={uploadBusyCardId === detailCardLive.card.id}
+          cardMenuId={cardMenuId}
+          setCardMenuId={setCardMenuId}
+          onToggleRelatedPanel={() =>
+            setRelatedPanel((p) =>
+              p?.colId === detailCardLive.colId &&
+              p?.cardId === detailCardLive.card.id
+                ? null
+                : {
+                    colId: detailCardLive.colId,
+                    cardId: detailCardLive.card.id,
+                  }
+            )
+          }
+          onBeginMediaUpload={() =>
+            beginCardMediaUpload(
+              detailCardLive.colId,
+              detailCardLive.card.id
+            )
+          }
+          onClearMedia={() =>
+            clearCardMedia(detailCardLive.colId, detailCardLive.card.id)
+          }
+          onTogglePin={() =>
+            togglePin(detailCardLive.colId, detailCardLive.card.id)
+          }
+          onDelete={() =>
+            deleteCard(detailCardLive.colId, detailCardLive.card.id)
+          }
+          onChangeText={(next) =>
+            setCardText(
+              detailCardLive.colId,
+              detailCardLive.card.id,
+              next
+            )
+          }
+          onTagsCommit={setCardTags}
+          onPasteFiles={
+            canEdit && canAttachMedia
+              ? (files) => {
+                  void uploadFilesToCard(
+                    detailCardLive.colId,
+                    detailCardLive.card.id,
+                    files
+                  );
+                }
+              : undefined
+          }
+          onRemoveGalleryItem={
+            canEdit
+              ? (item) =>
+                  removeCardMediaItem(
+                    detailCardLive.colId,
+                    detailCardLive.card.id,
+                    item
+                  )
+              : undefined
+          }
+        />
+      ) : null}
     </div>
   );
 }

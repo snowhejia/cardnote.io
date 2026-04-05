@@ -1,0 +1,26 @@
+# 本地开发 / 连接测试用 PostgreSQL（与生产腾讯云实例无关）
+# 使用：cd server && docker compose up -d
+# 连接串见 .env.example
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: mikujar-pg-local
+    restart: unless-stopped
+    ports:
+      # 避免与本机已安装的 PostgreSQL 默认 5432 冲突
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: mikujar
+      POSTGRES_PASSWORD: mikujar_local_test
+      POSTGRES_DB: mikujar
+    volumes:
+      - mikujar_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mikujar -d mikujar"]
+      interval: 3s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  mikujar_pg_data:

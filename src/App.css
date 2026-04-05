@@ -10,6 +10,59 @@
   background: var(--page-bg, var(--vp-c-bg-soft));
 }
 
+/* 鉴权就绪前：不渲染主界面，避免空数据/示例闪屏 */
+.app--boot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+.app-boot-screen,
+.app-remote-loading-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  color: var(--vp-c-text-2);
+  font-size: 0.875rem;
+}
+
+.app-boot-screen p,
+.app-remote-loading-inner p {
+  margin: 0;
+}
+
+.app-boot-spinner,
+.app-remote-loading-spinner {
+  width: 36px;
+  height: 36px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  border: 3px solid rgba(55, 53, 47, 0.12);
+  border-top-color: rgba(37, 99, 235, 0.65);
+  animation: app-auth-spin 0.75s linear infinite;
+}
+
+/* 低于登录层 z-index(20000)，登录成功后盖住主界面直至拉取完成 */
+.app-remote-loading-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 15000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(250, 250, 249, 0.92);
+  backdrop-filter: blur(6px);
+}
+
+@keyframes app-auth-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .app__hidden-file-input {
   position: absolute;
   width: 0.01px;
@@ -886,18 +939,22 @@
   -webkit-overflow-scrolling: touch;
 }
 
-/* 可编辑时：上部关联列表限高，「添加关联」占满剩余高度到底 */
+/* 可编辑时：上半固定为已关联列表，下半为粘贴关联（各约 50% 高度） */
 .related-panel__body.related-panel__body--with-pick {
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
 
-.related-panel__upper {
-  flex-shrink: 0;
-  max-height: min(38vh, 300px);
+.related-panel__body--with-pick .related-panel__upper {
+  flex: 1 1 50%;
+  min-height: 0;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+}
+
+.related-panel__body--with-pick .related-panel__upper .related-panel__list {
+  margin-bottom: 0;
 }
 
 .related-panel__add--fill {
@@ -907,26 +964,36 @@
   flex-direction: column;
 }
 
+.related-panel__body--with-pick .related-panel__add.related-panel__add--fill {
+  flex: 1 1 50%;
+  margin-top: 0;
+  padding-top: 10px;
+}
+
+/* 只读：下半与可编辑时同高，仅占位说明 */
+.related-panel__add--readonly .related-panel__readonly-lower-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 6px;
+}
+
+.related-panel__add--readonly .related-panel__readonly-lower-body .related-panel__hint {
+  text-align: center;
+  padding: 0 8px;
+}
+
+/* 列表区可滚动：避免最后一行被 overflow:hidden 半截裁切；min-height:0 让 flex 子项能正确收缩以出现滚动条 */
 .related-panel__pick-grow {
   flex: 1;
-  min-height: 72px;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-
-.related-panel__pick-spacer {
-  flex: 1 1 auto;
   min-height: 0;
-}
-
-.related-panel__pick-truncate-hint {
-  margin: 10px 0 0;
-  padding: 0 2px;
-  font-size: 0.6875rem;
-  line-height: 1.4;
-  color: rgba(55, 53, 47, 0.42);
-  flex-shrink: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 12px;
+  box-sizing: border-box;
 }
 
 .related-panel__hint--pick {
@@ -2968,6 +3035,9 @@ div.card__text--readonly:not(.card__text--preview) {
 .card__text.ProseMirror {
   white-space: normal;
   outline: none;
+  /* 与 .card__text 一致，避免继承链上字号/行高偏差 */
+  font-size: 15px;
+  line-height: var(--note-line-height);
 }
 
 .card__text-editor--readonly .ProseMirror {
@@ -2979,20 +3049,46 @@ div.card__text--readonly:not(.card__text--preview) {
   margin: 0;
 }
 
+/* 段间距会破坏 30px 横线周期，笔记里换行多为单格一行，段与段之间不加额外 margin */
 .card__text.ProseMirror p + p {
-  margin-top: 0.35em;
+  margin-top: 0;
 }
 
 .card__text.ProseMirror ul,
 .card__text.ProseMirror ol {
-  margin: 0.2em 0;
+  margin: 0;
   padding-left: 1.35em;
 }
 
+.card__text.ProseMirror li {
+  margin: 0;
+  line-height: var(--note-line-height);
+}
+
+.card__text.ProseMirror li p {
+  margin: 0;
+}
+
 .card__text.ProseMirror blockquote {
-  margin: 0.25em 0;
+  margin: 0;
   padding-left: 0.75em;
   border-left: 3px solid rgba(55, 53, 47, 0.2);
+}
+
+.card__text.ProseMirror code {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: inherit;
+  line-height: inherit;
+  vertical-align: baseline;
+  padding: 0 0.12em;
+  border-radius: 3px;
+  background: rgba(55, 53, 47, 0.07);
+}
+
+.card__text.ProseMirror hr {
+  margin: 0;
+  border: none;
+  border-top: 1px solid var(--note-line-color);
 }
 
 .card__text.ProseMirror a {
@@ -4102,4 +4198,342 @@ div.card__text--readonly:not(.card__text--preview) {
   margin-top: 0.35rem;
   padding-top: 0.45rem;
   border-top: none;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   卡片详情展开按钮
+   ═══════════════════════════════════════════════════════════════ */
+
+.card__icon-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  min-height: var(--note-line-height);
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--vp-c-text-3);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.card__icon-btn:hover {
+  background: rgba(60, 60, 67, 0.06);
+  color: var(--vp-c-text-2);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   卡片详情覆层（复用 .card 结构）
+   ═══════════════════════════════════════════════════════════════ */
+
+.card-detail-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  background: rgba(0, 0, 0, 0.52);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  box-sizing: border-box;
+}
+
+/* 与主界面同结构的卡片；内层即 .card */
+.card-detail-wrap {
+  position: relative;
+  width: 100%;
+  max-width: min(920px, calc(100vw - 32px));
+  max-height: min(90vh, 880px);
+  display: flex;
+  flex-direction: column;
+  filter: drop-shadow(0 12px 40px rgba(0, 0, 0, 0.2));
+}
+
+/* 详情卡片整体正方形；有附件时左文右图，无附件时整面横格纸 */
+.card-detail-wrap--square {
+  --detail-square: min(94vmin, 720px, calc(100vw - 24px), calc(100vh - 40px));
+  width: var(--detail-square);
+  height: var(--detail-square);
+  max-width: 100%;
+  /* 避免与 .card-detail-wrap 的 max-height 冲突导致非正方形 */
+  max-height: var(--detail-square);
+}
+
+.card-detail-wrap--square .card--detail-modal {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.card--detail-modal {
+  max-height: min(90vh - 40px, 840px);
+  overflow: auto;
+  margin: 0;
+}
+
+/* ⋯ 下拉在多层 overflow:hidden 下会被裁切，菜单打开时放开 */
+.card-detail-wrap--square .card--detail-modal.is-menu-open {
+  overflow: visible;
+}
+
+.card-detail-wrap--square
+  .card--detail-modal.is-menu-open
+  .card__inner:not(.card__inner--split)
+  .card__paper {
+  overflow: visible;
+}
+
+.card--detail-modal--has-gallery.is-menu-open .card__paper--with-gallery {
+  overflow: visible;
+}
+
+.card--detail-modal .card__inner {
+  min-height: 0;
+}
+
+.card-detail-wrap--square .card__inner {
+  flex: 1;
+  min-height: 0;
+}
+
+/* 无附件：单栏纸面铺满正方形，正文滚、标签贴底 */
+.card-detail-wrap--square .card__inner:not(.card__inner--split) .card__paper {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 12px;
+}
+
+.card-detail-wrap--square
+  .card__inner:not(.card__inner--split)
+  .card__toolbar {
+  flex-shrink: 0;
+}
+
+.card-detail-wrap--square
+  .card__inner:not(.card__inner--split)
+  .card__text-editor {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.card-detail-wrap--square
+  .card__inner:not(.card__inner--split)
+  .card__tags-row {
+  flex-shrink: 0;
+  margin-top: auto;
+}
+
+/* 左半：横格纸 + 正文滚动 + 标签贴底 */
+.card--detail-modal--has-gallery .card__inner--split {
+  flex: 1;
+  min-height: 0;
+  align-items: stretch;
+}
+
+.card--detail-modal--has-gallery .card__paper--with-gallery {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 50%;
+  min-width: 0;
+  min-height: 0;
+  max-height: none;
+  overflow: hidden;
+}
+
+.card--detail-modal--has-gallery .card__toolbar {
+  flex-shrink: 0;
+}
+
+.card--detail-modal--has-gallery .card__text-editor {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.card--detail-modal--has-gallery .card__tags-row {
+  flex-shrink: 0;
+  margin-top: auto;
+}
+
+/* 详情正方形：标签贴在纸张最底一行；去掉底部内边距；正文在 ProseMirror 内滚动 */
+.card-detail-wrap--square .card__paper {
+  padding-bottom: 0;
+  min-height: 0;
+}
+
+.card-detail-wrap--square .card__paper .card__text-editor {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.card-detail-wrap--square .card__paper .card__text-editor > div {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.card-detail-wrap--square .card__paper .card__text-editor .ProseMirror {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* 右半：淡灰底，图片/视频原比例居中（contain），余白为灰 */
+.card--detail-modal--has-gallery .card__gallery {
+  flex: 0 0 50%;
+  width: 50%;
+  max-width: none;
+  min-width: 0;
+  align-self: stretch;
+  min-height: 0;
+  background: #f2f3f6;
+  border-radius: 0 11px 11px 0;
+}
+
+.card--detail-modal--has-gallery .card__gallery-viewport {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  background: #f2f3f6;
+}
+
+.card--detail-modal--has-gallery .card__gallery-thumb-hit:not(.card__gallery-thumb-hit--audio-inline) {
+  background: #f2f3f6;
+}
+
+.card--detail-modal--has-gallery img.card__gallery-thumb {
+  object-fit: contain;
+  object-position: center;
+}
+
+.card--detail-modal--has-gallery
+  .card__gallery-thumb-hit--inline-av
+  video.card__gallery-thumb {
+  object-fit: contain;
+  object-position: center;
+  background: #f2f3f6;
+}
+
+.card--detail-modal--has-gallery .card__gallery-audio-thumb .card__gallery-audio-cover {
+  object-fit: contain;
+  object-position: center;
+}
+
+.card-detail-col-pill {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: rgba(55, 53, 47, 0.48);
+  max-width: 11rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 详情内联播放：可点控件 */
+.card__gallery-thumb-hit--inline-av {
+  cursor: default;
+}
+
+.card__gallery-thumb-hit--inline-av video.card__gallery-thumb {
+  pointer-events: auto;
+}
+
+.card__gallery-thumb-hit--audio-inline {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  background: linear-gradient(160deg, #4c4f6a 0%, #383b52 100%);
+}
+
+.card__gallery-audio-thumb--inline {
+  flex: 1 1 auto;
+  min-height: 72px;
+  position: relative;
+}
+
+.card__gallery-inline-audio {
+  flex-shrink: 0;
+  width: 100%;
+  height: 40px;
+  margin: 0;
+  padding: 0 8px 8px;
+  box-sizing: border-box;
+}
+
+/* 响应式：窄屏底栏抽屉式；正方形改为全宽可滚，附件仍 contain + 灰底 */
+@media (max-width: 640px) {
+  .card-detail-overlay {
+    padding: 0;
+    align-items: flex-end;
+  }
+
+  .card-detail-wrap {
+    max-width: 100%;
+    max-height: 95vh;
+    filter: none;
+    padding-bottom: env(safe-area-inset-bottom, 0);
+  }
+
+  .card-detail-wrap--square {
+    width: 100%;
+    height: auto;
+    min-height: 0;
+    max-height: 92vh;
+    aspect-ratio: unset;
+  }
+
+  .card-detail-wrap--square .card--detail-modal {
+    height: auto;
+    max-height: 92vh;
+    overflow-y: auto;
+  }
+
+  .card--detail-modal {
+    border-radius: 18px 18px 0 0;
+    max-height: 95vh;
+  }
+
+  .card--detail-modal .card__inner--split {
+    flex-direction: column;
+  }
+
+  .card--detail-modal .card__paper--with-gallery {
+    border-radius: 12px 12px 0 0;
+    border-right: none;
+    border-bottom: 1px solid rgba(60, 60, 67, 0.08);
+  }
+
+  .card--detail-modal--has-gallery .card__paper--with-gallery {
+    flex: 0 0 auto;
+    max-height: min(40vh, 280px);
+  }
+
+  .card--detail-modal .card__gallery {
+    flex: 0 0 auto;
+    max-width: none;
+    width: 100%;
+    min-height: min(52vw, 280px);
+    border-radius: 0 0 12px 12px;
+  }
+
+  .card--detail-modal--has-gallery .card__gallery-viewport {
+    flex: 1 1 auto;
+    min-height: min(52vw, 280px);
+  }
 }
