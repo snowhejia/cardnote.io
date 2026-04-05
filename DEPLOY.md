@@ -36,6 +36,22 @@ npm install && npm run dev
 
 Vite 会把 `/api` 与 `/uploads` 代理到 `http://127.0.0.1:3002`（本地上传的静态文件）。
 
+**PostgreSQL 已有库升级**：若部署过多用户 + PG 模式，且表是旧版 `schema`（无 `collections.hint`），请在库里执行一次：
+
+```bash
+psql "$DATABASE_URL" -f server/scripts/add-collection-hint-column.sql
+```
+
+（新库直接跑 `server/scripts/schema.sql` 已含 `hint` 列。）
+
+**星标合集与云端回收站表**：若已有库是在此功能之前创建的，请执行：
+
+```bash
+psql "$DATABASE_URL" -f server/scripts/add-favorites-trash-tables.sql
+```
+
+（新库执行完整 `server/scripts/schema.sql` 已含 `user_favorite_collections` 与 `trashed_notes`。）
+
 ## 生产：同一进程（静态 + API）
 
 ```bash

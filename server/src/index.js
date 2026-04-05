@@ -42,6 +42,12 @@ import {
   createCard,
   updateCard,
   deleteCard,
+  listFavoriteCollectionIds,
+  replaceFavoriteCollectionIds,
+  listTrashedNotes,
+  insertTrashedNote,
+  deleteTrashedNote,
+  clearTrashedNotes,
 } from "./storage-pg.js";
 import { pingDb, closePool } from "./db.js";
 
@@ -477,12 +483,34 @@ function getUserId(req) {
   return adminGateEnabled ? (req.collectionsUserId ?? null) : null;
 }
 
+/** 星标 / 垃圾桶 行级隔离键：多用户为 JWT sub；单用户库固定 __single__ */
+function preferencesOwnerKey(req) {
+  return adminGateEnabled ? String(req.collectionsUserId ?? "") : "__single__";
+}
+
+function preferencesReaderMw(req, res, next) {
+  if (adminGateEnabled) return requireCollectionsReader(req, res, next);
+  next();
+}
+
+function preferencesWriterMw(req, res, next) {
+  if (adminGateEnabled) return requireCollectionsWriter(req, res, next);
+  return putAuthMiddleware(req, res, next);
+}
+
 /** POST /api/collections — 创建合集 */
 app.post("/api/collections", collectionsWriterMw, async (req, res) => {
   try {
-    const { id, name, dotColor, parentId, sortOrder } = req.body ?? {};
+    const { id, name, dotColor, hint, parentId, sortOrder } = req.body ?? {};
     if (!id || !name) return res.status(400).json({ error: "id 和 name 为必填项" });
-    const col = await createCollection(getUserId(req), { id, name, dotColor, parentId, sortOrder });
+    const col = await createCollection(getUserId(req), {
+      id,
+      name,
+      dotColor,
+      hint,
+      parentId,
+      sortOrder,
+    });
     res.status(201).json(col);
   } catch (e) {
     console.error(e);
@@ -543,6 +571,119 @@ app.patch("/api/cards/:id", collectionsWriterMw, async (req, res) => {
 app.delete("/api/cards/:id", collectionsWriterMw, async (req, res) => {
   try {
     await deleteCard(getUserId(req), req.params.id);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    const status = e.message?.includes("不存在") ? 404 : 400;
+    res.status(status).json({ error: e.message || "删除失败" });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 星标合集 + 垃圾桶（与合集树同一套鉴权）
+// ─────────────────────────────────────────────────────────────────────────────
+
+app.get("/api/me/favorites", preferencesReaderMw, async (req, res) => {
+  try {
+    const key = preferencesOwnerKey(req);
+    if (adminGateEnabled && !key) {
+      return res.status(401).json({ error: "未授权", code: "AUTH" });
+    }
+    const collectionIds = await listFavoriteCollectionIds(key);
+    res.json({ collectionIds });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: e.message || "读取失败" });
+  }
+});
+
+app.put("/api/me/favorites", preferencesWriterMw, async (req, res) => {
+  try {
+    const raw = req.body?.collectionIds;
+    if (!Array.isArray(raw)) {
+      return res.status(400).json({ error: "collectionIds 须为字符串数组" });
+    }
+    const key = preferencesOwnerKey(req);
+    if (adminGateEnabled && !key) {
+      return res.status(401).json({ error: "未授权", code: "PUT_AUTH" });
+    }
+    const collectionIds = raw.filter((x) => typeof x === "string");
+    await replaceFavoriteCollectionIds(key, collectionIds, getUserId(req));
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: e.message || "保存失败" });
+  }
+});
+
+app.get("/api/me/trash", preferencesReaderMw, async (req, res) => {
+  try {
+    const key = preferencesOwnerKey(req);
+    if (adminGateEnabled && !key) {
+      return res.status(401).json({ error: "未授权", code: "AUTH" });
+    }
+    const entries = await listTrashedNotes(key);
+    res.json({ entries });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: e.message || "读取失败" });
+  }
+});
+
+app.post("/api/me/trash", preferencesWriterMw, async (req, res) => {
+  try {
+    const b = req.body ?? {};
+    const trashId = typeof b.trashId === "string" ? b.trashId.trim() : "";
+    const colId = typeof b.colId === "string" ? b.colId.trim() : "";
+    const colPathLabel = typeof b.colPathLabel === "string" ? b.colPathLabel : "";
+    const card = b.card;
+    const deletedAt = typeof b.deletedAt === "string" ? b.deletedAt : undefined;
+    if (!trashId || !colId || !card || typeof card !== "object") {
+      return res.status(400).json({ error: "无效的回收站条目" });
+    }
+    const key = preferencesOwnerKey(req);
+    if (adminGateEnabled && !key) {
+      return res.status(401).json({ error: "未授权", code: "PUT_AUTH" });
+    }
+    await insertTrashedNote(key, {
+      trashId,
+      colId,
+      colPathLabel,
+      card,
+      deletedAt,
+    });
+    res.status(201).json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    const dup = e.code === "23505";
+    const status = dup ? 409 : 400;
+    res.status(status).json({ error: e.message || "写入失败" });
+  }
+});
+
+app.delete("/api/me/trash", preferencesWriterMw, async (req, res) => {
+  try {
+    const key = preferencesOwnerKey(req);
+    if (adminGateEnabled && !key) {
+      return res.status(401).json({ error: "未授权", code: "PUT_AUTH" });
+    }
+    await clearTrashedNotes(key);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: e.message || "清空失败" });
+  }
+});
+
+app.delete("/api/me/trash/:trashId", preferencesWriterMw, async (req, res) => {
+  try {
+    const trashId = typeof req.params.trashId === "string" ? req.params.trashId.trim() : "";
+    if (!trashId) return res.status(400).json({ error: "缺少 trashId" });
+    const key = preferencesOwnerKey(req);
+    if (adminGateEnabled && !key) {
+      return res.status(401).json({ error: "未授权", code: "PUT_AUTH" });
+    }
+    await deleteTrashedNote(key, trashId);
     res.json({ ok: true });
   } catch (e) {
     console.error(e);

@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS collections (
   parent_id   TEXT REFERENCES collections(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED,
   name        TEXT NOT NULL DEFAULT '',
   dot_color   TEXT NOT NULL DEFAULT '',
+  hint        TEXT NOT NULL DEFAULT '',
   sort_order  INTEGER NOT NULL DEFAULT 0,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -70,3 +71,25 @@ CREATE TRIGGER trg_col_upd
 CREATE TRIGGER trg_card_upd
   BEFORE UPDATE ON cards
   FOR EACH ROW EXECUTE PROCEDURE touch_updated_at();
+
+-- ─── 侧栏星标合集（按 owner_key 隔离；多用户为 JWT sub，单用户模式为 __single__）────
+CREATE TABLE IF NOT EXISTS user_favorite_collections (
+  owner_key      TEXT NOT NULL,
+  collection_id  TEXT NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (owner_key, collection_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_fav_col_owner ON user_favorite_collections(owner_key);
+
+-- ─── 垃圾桶：删除的卡片快照（col_id 不设 FK，合集已删时仍可展示/尝试恢复）────────
+CREATE TABLE IF NOT EXISTS trashed_notes (
+  trash_id       TEXT PRIMARY KEY,
+  owner_key      TEXT NOT NULL,
+  col_id         TEXT NOT NULL,
+  col_path_label TEXT NOT NULL DEFAULT '',
+  card           JSONB NOT NULL,
+  deleted_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_trashed_notes_owner ON trashed_notes(owner_key);

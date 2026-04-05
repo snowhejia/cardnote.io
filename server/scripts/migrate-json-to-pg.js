@@ -178,6 +178,7 @@ function flattenTree(userId, tree) {
         name: col.name ?? "",
         dot_color: col.dotColor ?? "",
         sort_order: idx,
+        hint: typeof col.hint === "string" ? col.hint : "",
       });
       const cardList = col.cards ?? col.blocks ?? [];
       cardList.forEach((card, ci) => {
@@ -219,10 +220,18 @@ async function migrateCollectionsData(data, userId) {
     let colCount = 0;
     for (const c of collections) {
       const res = await client.query(
-        `INSERT INTO collections (id, user_id, parent_id, name, dot_color, sort_order)
-         VALUES ($1, $2, $3, $4, $5, $6)
+        `INSERT INTO collections (id, user_id, parent_id, name, dot_color, sort_order, hint)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
          ON CONFLICT (id) DO NOTHING`,
-        [c.id, c.user_id, c.parent_id, c.name, c.dot_color, c.sort_order]
+        [
+          c.id,
+          c.user_id,
+          c.parent_id,
+          c.name,
+          c.dot_color,
+          c.sort_order,
+          c.hint ?? "",
+        ]
       );
       if (res.rowCount > 0) colCount++;
     }

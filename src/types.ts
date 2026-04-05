@@ -46,7 +46,7 @@ export type Collection = {
   children?: Collection[];
 };
 
-/** 侧栏垃圾桶：删除的小笔记快照（仅存本地 localStorage，不同步服务器 JSON） */
+/** 侧栏垃圾桶：删除的小笔记快照（本地模式存 localStorage；远程模式同步 PostgreSQL） */
 export type TrashedNoteEntry = {
   trashId: string;
   colId: string;

@@ -26,7 +26,16 @@ import {
   createCardApi,
   updateCardApi,
   deleteCardApi,
+  type CardRemotePatch,
 } from "./api/collections";
+import {
+  clearMeTrash,
+  deleteMeTrashEntry,
+  fetchMeFavorites,
+  fetchMeTrash,
+  postMeTrashEntry,
+  putMeFavorites,
+} from "./api/mePreferences";
 import { uploadCardMedia } from "./api/upload";
 import { resolveMediaUrl, type AuthUser } from "./api/auth";
 import {
@@ -718,6 +727,83 @@ function readNoteCardDragPayload(e: DragEvent): NoteCardDragPayload | null {
     /* ignore */
   }
   return null;
+}
+
+function findCollectionIdForCard(
+  cols: Collection[],
+  cardId: string
+): string | null {
+  for (const c of cols) {
+    if (c.cards.some((x) => x.id === cardId)) return c.id;
+    if (c.children?.length) {
+      const r = findCollectionIdForCard(c.children, cardId);
+      if (r) return r;
+    }
+  }
+  return null;
+}
+
+/** 远程模式：把拖拽后的合集内顺序与跨合集归属写入 PostgreSQL */
+async function persistNoteCardDropToRemote(
+  from: NoteCardDragPayload,
+  nextTree: Collection[]
+): Promise<boolean> {
+  const movedId = from.cardId;
+  const fromColId = from.colId;
+  const toColId = findCollectionIdForCard(nextTree, movedId);
+  if (!toColId) return false;
+
+  const toCol = findCollectionById(nextTree, toColId);
+  if (!toCol) return false;
+
+  const fromCol =
+    fromColId !== toColId
+      ? findCollectionById(nextTree, fromColId)
+      : null;
+
+  for (let idx = 0; idx < toCol.cards.length; idx++) {
+    const c = toCol.cards[idx];
+    const patch: CardRemotePatch = { sortOrder: idx };
+    if (c.id === movedId && fromColId !== toColId) {
+      patch.collectionId = toColId;
+    }
+    const ok = await updateCardApi(c.id, patch);
+    if (!ok) return false;
+  }
+
+  if (fromColId !== toColId && fromCol) {
+    for (let idx = 0; idx < fromCol.cards.length; idx++) {
+      const ok = await updateCardApi(fromCol.cards[idx].id, {
+        sortOrder: idx,
+      });
+      if (!ok) return false;
+    }
+  }
+
+  return true;
+}
+
+/** 远程模式：侧栏拖拽后的 parentId + 同级 sort_order 写入库 */
+async function persistCollectionTreeLayoutRemote(
+  nodes: Collection[],
+  parentId: string | null
+): Promise<boolean> {
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i];
+    const ok = await updateCollectionApi(n.id, {
+      parentId,
+      sortOrder: i,
+    });
+    if (!ok) return false;
+    if (n.children?.length) {
+      const sub = await persistCollectionTreeLayoutRemote(
+        n.children,
+        n.id
+      );
+      if (!sub) return false;
+    }
+  }
+  return true;
 }
 
 function applyNoteCardDrop(
@@ -2205,13 +2291,39 @@ export default function App() {
 
   useEffect(() => {
     if (!authReady) return;
-    setFavoriteCollectionIds(loadFavoriteCollectionIds(favoriteStorageKey));
-  }, [authReady, favoriteStorageKey]);
-
-  useEffect(() => {
-    if (!authReady) return;
-    setTrashEntries(loadTrashedNoteEntries(trashStorageKey));
-  }, [authReady, trashStorageKey]);
+    if (dataMode === "local") {
+      setFavoriteCollectionIds(loadFavoriteCollectionIds(favoriteStorageKey));
+      setTrashEntries(loadTrashedNoteEntries(trashStorageKey));
+      return;
+    }
+    if (!remoteLoaded) return;
+    if (writeRequiresLogin && !currentUser && !getAdminToken()) {
+      setFavoriteCollectionIds(new Set());
+      setTrashEntries([]);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const [ids, entries] = await Promise.all([
+        fetchMeFavorites(),
+        fetchMeTrash(),
+      ]);
+      if (cancelled) return;
+      if (ids !== null) setFavoriteCollectionIds(new Set(ids));
+      if (entries !== null) setTrashEntries(entries);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    authReady,
+    dataMode,
+    remoteLoaded,
+    writeRequiresLogin,
+    currentUser?.id,
+    favoriteStorageKey,
+    trashStorageKey,
+  ]);
 
   useEffect(() => {
     if (calendarDay) setTrashViewActive(false);
@@ -2227,10 +2339,21 @@ export default function App() {
         if (valid.has(id)) next.add(id);
       }
       if (next.size === prev.size) return prev;
-      saveFavoriteCollectionIds(favoriteStorageKey, next);
+      if (dataMode === "local") {
+        saveFavoriteCollectionIds(favoriteStorageKey, next);
+      } else if (canEdit) {
+        void putMeFavorites([...next]);
+      }
       return next;
     });
-  }, [collections, remoteLoaded, authReady, favoriteStorageKey]);
+  }, [
+    collections,
+    remoteLoaded,
+    authReady,
+    favoriteStorageKey,
+    dataMode,
+    canEdit,
+  ]);
 
   useEffect(() => {
     if (!remoteLoaded || !authReady) return;
@@ -2419,7 +2542,7 @@ export default function App() {
   );
 
   const deleteCard = useCallback(
-    (colId: string, cardId: string) => {
+    async (colId: string, cardId: string) => {
       const col = findCollectionById(collections, colId);
       const card = col?.cards.find((c) => c.id === cardId);
       if (card && canEdit) {
@@ -2430,9 +2553,20 @@ export default function App() {
           card: structuredClone(card) as NoteCard,
           deletedAt: new Date().toISOString(),
         };
+        if (dataMode !== "local") {
+          const ok = await postMeTrashEntry(entry);
+          if (!ok) {
+            window.alert(
+              "同步到云端回收站失败，笔记未删除。请检查网络或登录状态后重试。"
+            );
+            return;
+          }
+        }
         setTrashEntries((te) => {
           const next = [entry, ...te];
-          saveTrashedNoteEntries(trashStorageKey, next);
+          if (dataMode === "local") {
+            saveTrashedNoteEntries(trashStorageKey, next);
+          }
           return next;
         });
       }
@@ -2458,21 +2592,38 @@ export default function App() {
   );
 
   const restoreTrashedEntry = useCallback(
-    (entry: TrashedNoteEntry) => {
+    async (entry: TrashedNoteEntry) => {
       if (!canEdit) return;
       if (!findCollectionById(collections, entry.colId)) {
         setSidebarFlash("原合集不见啦，这条笔记捞不回去惹…");
         return;
       }
+      let cardToAppend: NoteCard = entry.card;
+      if (dataMode !== "local") {
+        const created = await createCardApi(entry.colId, entry.card);
+        if (!created) {
+          window.alert("恢复笔记失败，请检查网络或权限后重试。");
+          return;
+        }
+        cardToAppend = created;
+        const delOk = await deleteMeTrashEntry(entry.trashId);
+        if (!delOk) {
+          window.alert(
+            "笔记已写回合集，但云端回收站记录未清除，刷新后回收站里可能仍显示该条。"
+          );
+        }
+      }
       setTrashEntries((te) => {
         const next = te.filter((t) => t.trashId !== entry.trashId);
-        saveTrashedNoteEntries(trashStorageKey, next);
+        if (dataMode === "local") {
+          saveTrashedNoteEntries(trashStorageKey, next);
+        }
         return next;
       });
       setCollections((prev) =>
         mapCollectionById(prev, entry.colId, (col) => ({
           ...col,
-          cards: [...col.cards, structuredClone(entry.card) as NoteCard],
+          cards: [...col.cards, structuredClone(cardToAppend) as NoteCard],
         }))
       );
       setTrashViewActive(false);
@@ -2480,11 +2631,11 @@ export default function App() {
       setCalendarDay(null);
       setMobileNavOpen(false);
     },
-    [canEdit, collections, trashStorageKey]
+    [canEdit, collections, trashStorageKey, dataMode]
   );
 
   const purgeTrashedEntry = useCallback(
-    (trashId: string) => {
+    async (trashId: string) => {
       if (!canEdit) return;
       if (
         !window.confirm(
@@ -2492,6 +2643,13 @@ export default function App() {
         )
       ) {
         return;
+      }
+      if (dataMode !== "local") {
+        const ok = await deleteMeTrashEntry(trashId);
+        if (!ok) {
+          window.alert("从云端回收站删除失败，请稍后重试。");
+          return;
+        }
       }
       setTrashEntries((te) => {
         const victim = te.find((t) => t.trashId === trashId);
@@ -2501,14 +2659,16 @@ export default function App() {
           }
         }
         const next = te.filter((t) => t.trashId !== trashId);
-        saveTrashedNoteEntries(trashStorageKey, next);
+        if (dataMode === "local") {
+          saveTrashedNoteEntries(trashStorageKey, next);
+        }
         return next;
       });
     },
-    [canEdit, trashStorageKey]
+    [canEdit, trashStorageKey, dataMode]
   );
 
-  const emptyTrash = useCallback(() => {
+  const emptyTrash = useCallback(async () => {
     if (!canEdit || trashEntries.length === 0) return;
     if (
       !window.confirm(
@@ -2517,14 +2677,23 @@ export default function App() {
     ) {
       return;
     }
+    if (dataMode !== "local") {
+      const ok = await clearMeTrash();
+      if (!ok) {
+        window.alert("清空云端回收站失败，请稍后重试。");
+        return;
+      }
+    }
     for (const e of trashEntries) {
       for (const m of e.card.media ?? []) {
         void deleteLocalMediaFile(m.url);
       }
     }
     setTrashEntries([]);
-    saveTrashedNoteEntries(trashStorageKey, []);
-  }, [canEdit, trashEntries, trashStorageKey]);
+    if (dataMode === "local") {
+      saveTrashedNoteEntries(trashStorageKey, []);
+    }
+  }, [canEdit, trashEntries, trashStorageKey, dataMode]);
 
   const removeRelatedPair = useCallback(
     (
@@ -3030,11 +3199,15 @@ export default function App() {
         const next = new Set(prev);
         if (next.has(id)) next.delete(id);
         else next.add(id);
-        saveFavoriteCollectionIds(favoriteStorageKey, next);
+        if (dataMode === "local") {
+          saveFavoriteCollectionIds(favoriteStorageKey, next);
+        } else if (canEdit) {
+          void putMeFavorites([...next]);
+        }
         return next;
       });
     },
-    [favoriteStorageKey]
+    [favoriteStorageKey, dataMode, canEdit]
   );
 
   const performRemoveCollection = useCallback(
@@ -3075,7 +3248,11 @@ export default function App() {
             }
           }
           if (!changed) return prev;
-          saveFavoriteCollectionIds(favoriteStorageKey, next);
+          if (dataMode === "local") {
+            saveFavoriteCollectionIds(favoriteStorageKey, next);
+          } else if (canEdit) {
+            void putMeFavorites([...next]);
+          }
           return next;
         });
       }
@@ -3179,12 +3356,22 @@ export default function App() {
       const noteFrom = readNoteCardDragPayload(e);
       if (noteFrom) {
         if (noteFrom.colId !== targetId) {
-          setCollections((prev) =>
-            applyNoteCardDrop(prev, noteFrom, {
+          setCollections((prev) => {
+            const next = applyNoteCardDrop(prev, noteFrom, {
               type: "collection",
               colId: targetId,
-            })
-          );
+            });
+            if (dataMode === "remote" && canEdit) {
+              void persistNoteCardDropToRemote(noteFrom, next).then((ok) => {
+                if (!ok) {
+                  window.alert(
+                    "笔记移动同步失败，请刷新后重试。"
+                  );
+                }
+              });
+            }
+            return next;
+          });
         }
         setNoteCardDropCollectionId(null);
         setCardDropMarker(null);
@@ -3198,9 +3385,24 @@ export default function App() {
       if (!dragId) return;
       const el = e.currentTarget as HTMLElement;
       const position = dropPositionFromEvent(e, el);
-      setCollections((prev) =>
-        moveCollectionInTree(prev, dragId, targetId, position)
-      );
+      setCollections((prev) => {
+        const next = moveCollectionInTree(
+          prev,
+          dragId,
+          targetId,
+          position
+        );
+        if (dataMode === "remote" && canEdit) {
+          void persistCollectionTreeLayoutRemote(next, null).then((ok) => {
+            if (!ok) {
+              window.alert(
+                "合集顺序同步失败，请刷新后重试。"
+              );
+            }
+          });
+        }
+        return next;
+      });
       if (position === "inside") {
         setCollapsedFolderIds((prev) => {
           const next = new Set(prev);
@@ -3212,7 +3414,7 @@ export default function App() {
       setDraggingCollectionId(null);
       setDropIndicator(null);
     },
-    [canEdit]
+    [canEdit, dataMode]
   );
 
   useLayoutEffect(() => {
@@ -3223,17 +3425,24 @@ export default function App() {
     el.select();
   }, [editingCollectionId]);
 
-  const commitCollectionHint = useCallback(() => {
+  const commitCollectionHint = useCallback(async () => {
     if (!editingHintCollectionId) return;
+    const colId = editingHintCollectionId;
     const text = draftCollectionHint.trim();
     setCollections((prev) =>
-      mapCollectionById(prev, editingHintCollectionId, (col) => ({
+      mapCollectionById(prev, colId, (col) => ({
         ...col,
         ...(text.length > 0 ? { hint: text } : { hint: undefined }),
       }))
     );
     setEditingHintCollectionId(null);
-  }, [editingHintCollectionId, draftCollectionHint]);
+    if (dataMode === "remote" && canEdit) {
+      const ok = await updateCollectionApi(colId, { hint: text });
+      if (!ok) {
+        window.alert("合集说明同步失败，刷新后可能恢复旧内容。");
+      }
+    }
+  }, [editingHintCollectionId, draftCollectionHint, dataMode, canEdit]);
 
   const onCollectionHintBlur = useCallback(() => {
     if (skipHintBlurCommitRef.current) {
@@ -3418,9 +3627,19 @@ export default function App() {
                   colId,
                   cardId: card.id,
                 } as const);
-            setCollections((prev) =>
-              applyNoteCardDrop(prev, from, target)
-            );
+            setCollections((prev) => {
+              const next = applyNoteCardDrop(prev, from, target);
+              if (dataMode === "remote" && canEdit) {
+                void persistNoteCardDropToRemote(from, next).then((ok) => {
+                  if (!ok) {
+                    window.alert(
+                      "笔记移动同步失败，请刷新后重试。"
+                    );
+                  }
+                });
+              }
+              return next;
+            });
             setDraggingNoteCardKey(null);
             return;
           }

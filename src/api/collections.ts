@@ -3,7 +3,7 @@ import { getAdminToken } from "../auth/token";
 import { apiBase } from "./apiBase";
 
 /** GET：多用户模式下需携带登录 JWT（或脚本用的 API_TOKEN + 服务端要求的 userId） */
-function buildHeadersGet(): Record<string, string> {
+export function buildHeadersGet(): Record<string, string> {
   const h: Record<string, string> = {};
   const token = getAdminToken();
   if (token) h.Authorization = `Bearer ${token}`;
@@ -15,7 +15,7 @@ function buildHeadersGet(): Record<string, string> {
 }
 
 /** PUT / PATCH / POST / DELETE：优先会话中的管理员 JWT，其次兼容 VITE_API_TOKEN */
-function buildHeadersPut(
+export function buildHeadersPut(
   extra?: Record<string, string>
 ): Record<string, string> {
   const h: Record<string, string> = { ...extra };
@@ -69,6 +69,7 @@ export async function createCollectionApi(data: {
   id: string;
   name: string;
   dotColor?: string;
+  /** 主区灰色说明；空串表示清除 */
   hint?: string;
   parentId?: string;
   sortOrder?: number;
@@ -146,10 +147,21 @@ export async function createCardApi(
   }
 }
 
+/** 服务端 PATCH 卡片（含跨合集 collectionId、排序 sortOrder） */
+export type CardRemotePatch = Partial<
+  Pick<
+    NoteCard,
+    "text" | "tags" | "media" | "pinned" | "relatedRefs" | "minutesOfDay" | "addedOn"
+  >
+> & {
+  collectionId?: string;
+  sortOrder?: number;
+};
+
 /** 更新卡片任意字段子集；返回是否成功 */
 export async function updateCardApi(
   cardId: string,
-  patch: Partial<Pick<NoteCard, "text" | "tags" | "media" | "pinned" | "relatedRefs" | "minutesOfDay" | "addedOn">>
+  patch: CardRemotePatch
 ): Promise<boolean> {
   const base = apiBase();
   try {
