@@ -49,6 +49,7 @@ export function MediaThumbImage({
       alt={alt}
       loading="lazy"
       decoding="async"
+      referrerPolicy="no-referrer"
       className={className}
     />
   );
@@ -72,6 +73,7 @@ export function MediaThumbVideo({
       muted
       playsInline
       preload="metadata"
+      referrerPolicy="no-referrer"
       tabIndex={-1}
       aria-hidden
     />
@@ -87,7 +89,9 @@ export function MediaLightboxImage({
 }) {
   const src = useMediaDisplaySrc(url);
   if (!src) return null;
-  return <img src={src} alt="" className={className} />;
+  return (
+    <img src={src} alt="" className={className} referrerPolicy="no-referrer" />
+  );
 }
 
 export function MediaLightboxVideo({
@@ -107,6 +111,7 @@ export function MediaLightboxVideo({
       controls
       playsInline
       autoPlay
+      referrerPolicy="no-referrer"
     />
   );
 }
@@ -121,7 +126,14 @@ export function MediaLightboxAudio({
   const src = useMediaDisplaySrc(url);
   if (!src) return null;
   return (
-    <audio key={src} src={src} controls autoPlay className={className} />
+    <audio
+      key={src}
+      src={src}
+      controls
+      autoPlay
+      className={className}
+      referrerPolicy="no-referrer"
+    />
   );
 }
 
@@ -134,7 +146,9 @@ export function MediaLightboxCover({
 }) {
   const src = useMediaDisplaySrc(url);
   if (!src) return null;
-  return <img src={src} alt="" className={className} />;
+  return (
+    <img src={src} alt="" className={className} referrerPolicy="no-referrer" />
+  );
 }
 
 export function MediaOpenLink({

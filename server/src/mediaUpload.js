@@ -9,6 +9,7 @@ function mediaPathSegment(userId) {
   return s.length > 0 ? s : null;
 }
 import { parseBuffer } from "music-metadata";
+import sharp from "sharp";
 import {
   buildObjectPublicUrl,
   getCosObjectBuffer,
@@ -60,6 +61,13 @@ function sniffEmbeddedImageBuffer(buf) {
   if (b[0] === 0x42 && b[1] === 0x4d) {
     return { mimeType: "image/bmp", ext: "bmp" };
   }
+  /** TIFF：常见于 iTunes/部分工具写入；标签常误标为 image/jpeg，Chrome <img> 也不支持 TIFF */
+  if (b[0] === 0x4d && b[1] === 0x4d && b[2] === 0x00 && b[3] === 0x2a) {
+    return { mimeType: "image/tiff", ext: "tiff" };
+  }
+  if (b[0] === 0x49 && b[1] === 0x49 && b[2] === 0x2a && b[3] === 0x00) {
+    return { mimeType: "image/tiff", ext: "tiff" };
+  }
   return null;
 }
 
@@ -74,6 +82,9 @@ function imageTypeFromPictureFormat(fmtRaw) {
   if (fmt.includes("webp")) return { mimeType: "image/webp", ext: "webp" };
   if (fmt.includes("bmp") || fmt.includes("bitmap")) {
     return { mimeType: "image/bmp", ext: "bmp" };
+  }
+  if (fmt.includes("tiff") || /(^|\/)tif\b/i.test(fmt)) {
+    return { mimeType: "image/tiff", ext: "tiff" };
   }
   if (fmt.includes("jpeg") || fmt.includes("jpg")) {
     return { mimeType: "image/jpeg", ext: "jpg" };
@@ -164,6 +175,21 @@ function extForStoredFile(mimetype, originalname) {
   return "bin";
 }
 
+/**
+ * 浏览器普遍不支持在 <img> 中直接显示 TIFF；转为 JPEG 再上传。
+ * @param {Buffer} buf
+ * @returns {Promise<{ buffer: Buffer; mimeType: string; ext: string } | null>}
+ */
+async function tiffCoverToJpeg(buf) {
+  try {
+    const out = await sharp(buf).rotate().jpeg({ quality: 88, mozjpeg: true }).toBuffer();
+    if (!out.length || out.length > MAX_EMBEDDED_COVER_BYTES) return null;
+    return { buffer: out, mimeType: "image/jpeg", ext: "jpg" };
+  } catch {
+    return null;
+  }
+}
+
 function attachmentDisplayName(originalname) {
   const raw =
     typeof originalname === "string" && originalname.trim()
@@ -195,6 +221,11 @@ async function tryExtractEmbeddedAudioCover(buffer, mimeType) {
       /** 魔数优先；无法识别则不用默认 jpg，避免错类型裂图 */
       const chosen = sniffed || fromTag;
       if (chosen) {
+        if (chosen.mimeType === "image/tiff") {
+          const jpeg = await tiffCoverToJpeg(buf);
+          if (!jpeg) continue;
+          return jpeg;
+        }
         return {
           buffer: buf,
           mimeType: chosen.mimeType,

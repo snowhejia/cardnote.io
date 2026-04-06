@@ -3,13 +3,37 @@ import pg from "pg";
 let pool = null;
 
 /**
+ * 在连接串上合并 libpq `options`，为会话设置 statement_timeout（毫秒）。
+ * 避免使用 pool.on("connect") 里再 client.query(SET…)：会与 pool.query 抢同一连接并发 query，触发 pg 弃用警告。
+ */
+function appendStatementTimeoutOption(connectionString, ms = 30_000) {
+  const s = String(connectionString || "").trim();
+  if (!s) return s;
+  try {
+    const u = new URL(s);
+    const existingOpts = (u.searchParams.get("options") || "").trim();
+    if (/statement_timeout/i.test(existingOpts) || /statement_timeout=/i.test(u.href)) {
+      return s;
+    }
+    const flag = `-c statement_timeout=${ms}`;
+    u.searchParams.set("options", existingOpts ? `${existingOpts} ${flag}` : flag);
+    return u.toString();
+  } catch {
+    if (/statement_timeout/i.test(s)) return s;
+    const sep = s.includes("?") ? "&" : "?";
+    return `${s}${sep}options=${encodeURIComponent(`-c statement_timeout=${ms}`)}`;
+  }
+}
+
+/**
  * 获取（或惰性创建）全局连接池。
  * 须先设置环境变量 DATABASE_URL。
  */
 export function getPool() {
   if (pool) return pool;
-  const url = process.env.DATABASE_URL?.trim();
-  if (!url) throw new Error("DATABASE_URL 未配置，请在环境变量中设置 PostgreSQL 连接串（见 server/.env.example）");
+  const urlRaw = process.env.DATABASE_URL?.trim();
+  if (!urlRaw) throw new Error("DATABASE_URL 未配置，请在环境变量中设置 PostgreSQL 连接串（见 server/.env.example）");
+  const url = appendStatementTimeoutOption(urlRaw);
 
   pool = new pg.Pool({
     connectionString: url,
@@ -24,11 +48,6 @@ export function getPool() {
     // TCP keep-alive：防止 NAT 网关静默断开长闲置连接
     keepAlive: true,
     keepAliveInitialDelayMillis: 10_000,
-  });
-
-  // 每条新连接建立后设置 statement_timeout，防止慢查询挂死进程
-  pool.on("connect", (client) => {
-    client.query("SET statement_timeout = '30s'").catch(() => {});
   });
 
   pool.on("error", (err) => {

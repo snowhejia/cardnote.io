@@ -470,7 +470,16 @@ app.post("/api/users/me/avatar/presign", attachJwtSession, requireLoggedInUser, 
     const fileSize = Number(req.body?.fileSize);
     const plan = planAvatarCosDirectUpload(req.userId, contentType, fileSize);
     const putUrl = await getCosPutPresignedUrl({ key: plan.key, contentType: plan.contentType });
-    res.json({ direct: true, putUrl, headers: { "Content-Type": plan.contentType, "x-cos-acl": "public-read" }, key: plan.key });
+    res.json({
+      direct: true,
+      putUrl,
+      headers: {
+        "Content-Type": plan.contentType,
+        "x-cos-acl": "public-read",
+        "Content-Disposition": "inline",
+      },
+      key: plan.key,
+    });
   } catch (e) {
     res.status(400).json({ error: e.message || "预签名失败" });
   }
@@ -833,7 +842,11 @@ app.post(
       res.json({
         direct: true,
         putUrl,
-        headers: { "Content-Type": plan.contentType, "x-cos-acl": "public-read" },
+        headers: {
+          "Content-Type": plan.contentType,
+          "x-cos-acl": "public-read",
+          "Content-Disposition": "inline",
+        },
         key: plan.key,
         url: buildObjectPublicUrl(plan.key),
         kind: plan.kind,

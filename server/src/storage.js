@@ -259,6 +259,8 @@ export async function putCosPublicObject(objectKey, buffer, contentType) {
     Key: key,
     Body: buffer,
     ContentType: contentType || "application/octet-stream",
+    /** 避免 COS/默认元数据为 attachment，导致 <img>/<video> 裂图而地址栏直链仍可打开 */
+    ContentDisposition: "inline",
     ACL: "public-read",
   };
   return new Promise((resolve, reject) => {
@@ -295,6 +297,7 @@ export function getCosPutPresignedUrl(opts) {
         Headers: {
           "Content-Type": contentType,
           "x-cos-acl": "public-read",
+          "Content-Disposition": "inline",
         },
       },
       (err, data) => {
