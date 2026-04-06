@@ -73,7 +73,6 @@ export function MediaThumbVideo({
       muted
       playsInline
       preload="metadata"
-      referrerPolicy="no-referrer"
       tabIndex={-1}
       aria-hidden
     />
@@ -111,7 +110,6 @@ export function MediaLightboxVideo({
       controls
       playsInline
       autoPlay
-      referrerPolicy="no-referrer"
     />
   );
 }
@@ -132,7 +130,6 @@ export function MediaLightboxAudio({
       controls
       autoPlay
       className={className}
-      referrerPolicy="no-referrer"
     />
   );
 }
