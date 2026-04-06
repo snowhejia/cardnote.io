@@ -533,17 +533,11 @@ export function CardGallery({
             ) : null}
           </>
         ) : current.kind === "video" ? (
-          <>
-            <MediaThumbVideo
-              url={current.url}
-              className="card__gallery-thumb card__gallery-thumb--video"
-            />
-            {showPlayBadge ? (
-              <span className="card__gallery-play-badge" aria-hidden>
-                ▶
-              </span>
-            ) : null}
-          </>
+          <MediaThumbVideo
+            url={current.url}
+            className="card__gallery-thumb card__gallery-thumb--video"
+            playBadge={showPlayBadge}
+          />
         ) : (
           <div className="card__gallery-file">
             <FileDocIcon className="card__gallery-file-icon" />

@@ -2898,6 +2898,11 @@ textarea.main__hint-editor:focus {
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
 }
 
+/* video 常为独立合成层，作 .thumb-hit 的兄弟时会把 ▶ 盖在下面；叠在 wrap 内并抬高层级 */
+.card__gallery-thumb-wrap > .card__gallery-play-badge {
+  z-index: 3;
+}
+
 /* 全屏放大（单击轮播区触发，portal 到 body） */
 .image-lightbox {
   position: fixed;

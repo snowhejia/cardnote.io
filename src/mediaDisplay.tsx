@@ -92,9 +92,12 @@ export function MediaThumbImage({
 export function MediaThumbVideo({
   url,
   className,
+  playBadge = false,
 }: {
   url: string;
   className?: string;
+  /** 合集列表等：显示 ▶；须放在 wrap 内，避免 video 合成层盖住兄弟节点 */
+  playBadge?: boolean;
 }) {
   const src = useMediaDisplaySrc(url);
   const [ready, setReady] = useState(false);
@@ -126,6 +129,11 @@ export function MediaThumbVideo({
           onCanPlay={() => setReady(true)}
           onError={() => setReady(true)}
         />
+      ) : null}
+      {playBadge && !showLoading ? (
+        <span className="card__gallery-play-badge" aria-hidden>
+          ▶
+        </span>
       ) : null}
     </div>
   );

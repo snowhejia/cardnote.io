@@ -194,6 +194,95 @@ function scrapeNotePage() {
     return false;
   }
 
+  function imgDisplaySrc(img) {
+    return (
+      img.currentSrc ||
+      img.src ||
+      img.dataset?.src ||
+      img.getAttribute("data-original") ||
+      ""
+    );
+  }
+
+  function isUsableNoteImage(img, src) {
+    if (!src || !/^https?:\/\//i.test(src)) return false;
+    if (isEmojiOrStickerImg(img, src)) return false;
+    const low = src.toLowerCase();
+    if (
+      low.includes("avatar") ||
+      low.includes("icon") ||
+      low.includes("1x1") ||
+      low.includes("blank")
+    ) {
+      return false;
+    }
+    try {
+      const u = new URL(src);
+      if (u.pathname.length < 8) return false;
+    } catch {
+      return false;
+    }
+    return true;
+  }
+
+  const seen = new Set();
+  const imageUrls = [];
+
+  function tryPushImage(img) {
+    const src = imgDisplaySrc(img);
+    if (!isUsableNoteImage(img, src)) return false;
+    if (seen.has(src)) return false;
+    seen.add(src);
+    imageUrls.push(src);
+    return true;
+  }
+
+  /**
+   * 多图笔记顺序问题：原先按 #noteContainer 等选择器拼 DOM 深度顺序，常与轮播视觉顺序不一致；
+   * Swiper loop 还会在首尾插入 swiper-slide-duplicate。这里先按「主轮播」slide 顺序收图，再兜底其它区域。
+   */
+  const noteRoots = [];
+  const pushRoot = (n) => {
+    if (n && noteRoots.indexOf(n) === -1) noteRoots.push(n);
+  };
+  pushRoot(document.querySelector("#noteContainer"));
+  pushRoot(document.querySelector(".note-detail"));
+  pushRoot(document.querySelector('[class*="note-detail"]'));
+
+  function pickMainSwiperWrapper(root) {
+    let best = null;
+    let bestN = 0;
+    for (const wrap of root.querySelectorAll(".swiper-wrapper")) {
+      const n = wrap.querySelectorAll(
+        ".swiper-slide:not(.swiper-slide-duplicate)"
+      ).length;
+      if (n > bestN) {
+        bestN = n;
+        best = wrap;
+      }
+    }
+    return best;
+  }
+
+  for (const root of noteRoots) {
+    const wrap = pickMainSwiperWrapper(root);
+    if (!wrap) continue;
+    let slides = wrap.querySelectorAll(
+      ":scope > .swiper-slide:not(.swiper-slide-duplicate)"
+    );
+    if (slides.length === 0) {
+      slides = wrap.querySelectorAll(
+        ".swiper-slide:not(.swiper-slide-duplicate)"
+      );
+    }
+    for (const slide of slides) {
+      const imgs = slide.querySelectorAll("img");
+      for (const img of imgs) {
+        if (tryPushImage(img)) break;
+      }
+    }
+  }
+
   const imgSelectors = [
     "#noteContainer img",
     ".swiper-slide img",
@@ -201,35 +290,9 @@ function scrapeNotePage() {
     "#detail-desc img",
     "article img",
   ];
-  const seen = new Set();
-  const imageUrls = [];
   for (const sel of imgSelectors) {
     for (const img of document.querySelectorAll(sel)) {
-      const src =
-        img.currentSrc ||
-        img.src ||
-        img.dataset?.src ||
-        img.getAttribute("data-original");
-      if (!src || !/^https?:\/\//i.test(src)) continue;
-      if (isEmojiOrStickerImg(img, src)) continue;
-      const low = src.toLowerCase();
-      if (
-        low.includes("avatar") ||
-        low.includes("icon") ||
-        low.includes("1x1") ||
-        low.includes("blank")
-      ) {
-        continue;
-      }
-      try {
-        const u = new URL(src);
-        if (u.pathname.length < 8) continue;
-      } catch {
-        continue;
-      }
-      if (seen.has(src)) continue;
-      seen.add(src);
-      imageUrls.push(src);
+      tryPushImage(img);
     }
   }
 
