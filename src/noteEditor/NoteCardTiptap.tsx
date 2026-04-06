@@ -14,6 +14,8 @@ type NoteCardTiptapProps = {
   canEdit: boolean;
   ariaLabel?: string;
   onPasteFiles?: (files: File[]) => void;
+  /** 是否显示选区荧光笔气泡菜单；合集列表内为 false，仅笔记详情为 true */
+  highlightBubble?: boolean;
 };
 
 export function NoteCardTiptap({
@@ -23,6 +25,7 @@ export function NoteCardTiptap({
   canEdit,
   ariaLabel = "笔记正文",
   onPasteFiles,
+  highlightBubble = false,
 }: NoteCardTiptapProps) {
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
@@ -108,7 +111,7 @@ export function NoteCardTiptap({
           : "card__text-editor card__text-editor--readonly"
       }
     >
-      {canEdit ? (
+      {canEdit && highlightBubble ? (
         <BubbleMenu
           editor={editor}
           pluginKey={`noteHighlightBubble-${id}`}

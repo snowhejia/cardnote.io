@@ -267,6 +267,7 @@ export function CardDetail({
                 onChange={onChangeText}
                 ariaLabel="笔记正文"
                 onPasteFiles={onPasteFiles}
+                highlightBubble
               />
               <CardTagsRow
                 colId={colId}

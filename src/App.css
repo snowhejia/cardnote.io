@@ -1442,16 +1442,14 @@
   padding: 0 0 4px;
   max-height: min(168px, 28vh);
   overflow-y: auto;
-  scrollbar-width: thin;
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* 旧 Edge */
 }
 
 .sidebar__favorites-list::-webkit-scrollbar {
-  width: 4px;
-}
-
-.sidebar__favorites-list::-webkit-scrollbar-thumb {
-  background: rgba(55, 53, 47, 0.15);
-  border-radius: 2px;
+  display: none; /* Chromium / Safari */
+  width: 0;
+  height: 0;
 }
 
 .sidebar__favorites-item {

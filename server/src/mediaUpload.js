@@ -19,6 +19,68 @@ import {
 /** 内嵌封面过大则跳过，避免内存与存储压力 */
 const MAX_EMBEDDED_COVER_BYTES = 512 * 1024;
 
+/**
+ * 按文件头识别内嵌图真实类型（优于依赖标签里的 format，避免错标为 jpg 导致浏览器裂图）
+ * @param {Buffer} buf
+ * @returns {{ mimeType: string; ext: string } | null}
+ */
+function sniffEmbeddedImageBuffer(buf) {
+  if (!buf || buf.length < 12) return null;
+  const b = buf;
+  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) {
+    return { mimeType: "image/jpeg", ext: "jpg" };
+  }
+  if (
+    b[0] === 0x89 &&
+    b[1] === 0x50 &&
+    b[2] === 0x4e &&
+    b[3] === 0x47 &&
+    b[4] === 0x0d &&
+    b[5] === 0x0a &&
+    b[6] === 0x1a &&
+    b[7] === 0x0a
+  ) {
+    return { mimeType: "image/png", ext: "png" };
+  }
+  if (b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x38) {
+    return { mimeType: "image/gif", ext: "gif" };
+  }
+  if (
+    b[0] === 0x52 &&
+    b[1] === 0x49 &&
+    b[2] === 0x46 &&
+    b[3] === 0x46 &&
+    b[8] === 0x57 &&
+    b[9] === 0x45 &&
+    b[10] === 0x42 &&
+    b[11] === 0x50
+  ) {
+    return { mimeType: "image/webp", ext: "webp" };
+  }
+  if (b[0] === 0x42 && b[1] === 0x4d) {
+    return { mimeType: "image/bmp", ext: "bmp" };
+  }
+  return null;
+}
+
+/**
+ * @param {string | undefined} fmtRaw music-metadata picture.format
+ */
+function imageTypeFromPictureFormat(fmtRaw) {
+  const fmt = String(fmtRaw || "").toLowerCase();
+  if (!fmt) return null;
+  if (fmt.includes("png")) return { mimeType: "image/png", ext: "png" };
+  if (fmt.includes("gif")) return { mimeType: "image/gif", ext: "gif" };
+  if (fmt.includes("webp")) return { mimeType: "image/webp", ext: "webp" };
+  if (fmt.includes("bmp") || fmt.includes("bitmap")) {
+    return { mimeType: "image/bmp", ext: "bmp" };
+  }
+  if (fmt.includes("jpeg") || fmt.includes("jpg")) {
+    return { mimeType: "image/jpeg", ext: "jpg" };
+  }
+  return null;
+}
+
 /** 已知 MIME → 稳定扩展名；其余类型从原始文件名或 MIME 子类型推断 */
 const MIME_TO_EXT = {
   "image/jpeg": "jpg",
@@ -121,18 +183,26 @@ async function tryExtractEmbeddedAudioCover(buffer, mimeType) {
       { mimeType },
       { duration: false }
     );
-    const pic = md.common.picture?.[0];
-    if (!pic?.data?.length) return null;
-    if (pic.data.length > MAX_EMBEDDED_COVER_BYTES) return null;
-    const buf = Buffer.from(pic.data);
-    const fmt = String(pic.format || "").toLowerCase();
-    if (fmt.includes("png")) {
-      return { buffer: buf, mimeType: "image/png", ext: "png" };
+    const pictures = md.common.picture;
+    if (!Array.isArray(pictures) || pictures.length === 0) return null;
+
+    for (const pic of pictures) {
+      if (!pic?.data?.length) continue;
+      if (pic.data.length > MAX_EMBEDDED_COVER_BYTES) continue;
+      const buf = Buffer.from(pic.data);
+      const sniffed = sniffEmbeddedImageBuffer(buf);
+      const fromTag = imageTypeFromPictureFormat(pic.format);
+      /** 魔数优先；无法识别则不用默认 jpg，避免错类型裂图 */
+      const chosen = sniffed || fromTag;
+      if (chosen) {
+        return {
+          buffer: buf,
+          mimeType: chosen.mimeType,
+          ext: chosen.ext,
+        };
+      }
     }
-    if (fmt.includes("webp")) {
-      return { buffer: buf, mimeType: "image/webp", ext: "webp" };
-    }
-    return { buffer: buf, mimeType: "image/jpeg", ext: "jpg" };
+    return null;
   } catch {
     return null;
   }
