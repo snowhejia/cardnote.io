@@ -176,18 +176,6 @@ function cloneInitialCollections(): Collection[] {
   return structuredClone(initialCollections) as Collection[];
 }
 
-/** 首屏：本地模式读缓存/内置；云端模式不预填示例，避免未登录时闪一下样例 */
-function initialWorkspaceFromStorage(): {
-  collections: Collection[];
-  activeId: string;
-} {
-  if (getAppDataMode() === "local") {
-    const cols = loadLocalCollections(cloneInitialCollections);
-    return { collections: cols, activeId: cols[0]?.id ?? "" };
-  }
-  return { collections: [], activeId: "" };
-}
-
 function localDateString(d = new Date()): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
@@ -196,6 +184,59 @@ function localDateString(d = new Date()): string {
 }
 
 const MASONRY_LAYOUT_STORAGE_KEY = "mikujar-masonry-layout";
+
+const ACTIVE_COLLECTION_STORAGE_PREFIX = "mikujar-active-collection:";
+
+function activeCollectionStorageKey(
+  mode: AppDataMode,
+  userId: string | null
+): string {
+  if (mode === "local") {
+    return `${ACTIVE_COLLECTION_STORAGE_PREFIX}local`;
+  }
+  return `${ACTIVE_COLLECTION_STORAGE_PREFIX}remote:${userId ?? "guest"}`;
+}
+
+function readPersistedActiveCollectionId(key: string): string | null {
+  try {
+    if (typeof localStorage === "undefined") return null;
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const t = raw.trim();
+    return t.length ? t : null;
+  } catch {
+    return null;
+  }
+}
+
+const COLLAPSED_FOLDERS_STORAGE_PREFIX = "mikujar-sidebar-collapsed:";
+
+function collapsedFoldersStorageKey(
+  mode: AppDataMode,
+  userId: string | null
+): string {
+  if (mode === "local") {
+    return `${COLLAPSED_FOLDERS_STORAGE_PREFIX}local`;
+  }
+  return `${COLLAPSED_FOLDERS_STORAGE_PREFIX}remote:${userId ?? "guest"}`;
+}
+
+function readCollapsedFolderIdsFromStorage(key: string): Set<string> {
+  try {
+    if (typeof localStorage === "undefined") return new Set();
+    const raw = localStorage.getItem(key);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(
+      parsed.filter(
+        (x): x is string => typeof x === "string" && x.trim().length > 0
+      )
+    );
+  } catch {
+    return new Set();
+  }
+}
 
 /** 瀑布流模式下：超过则默认折叠，需点「展开全文」 */
 const MASONRY_COLLAPSE_PLAIN_CHARS = 520;
@@ -229,6 +270,17 @@ function walkCollections(
     visit(c);
     if (c.children?.length) walkCollections(c.children, visit);
   }
+}
+
+/** 去掉已删除合集的折叠记录，避免 Set 无限增长 */
+function pruneCollapsedFolderIds(
+  cols: Collection[],
+  saved: Set<string>
+): Set<string> {
+  if (saved.size === 0) return new Set();
+  const valid = new Set<string>();
+  walkCollections(cols, (c) => valid.add(c.id));
+  return new Set([...saved].filter((id) => valid.has(id)));
 }
 
 /** 全库卡片标签去重，中文排序，供侧栏底部展示 */
@@ -517,6 +569,45 @@ function findCollectionById(
   }
   return undefined;
 }
+
+function resolveActiveCollectionId(
+  cols: Collection[],
+  savedId: string | null
+): string {
+  if (savedId && findCollectionById(cols, savedId)) return savedId;
+  return cols[0]?.id ?? "";
+}
+
+/** 首屏：本地模式读缓存/内置；云端模式不预填示例，避免未登录时闪一下样例 */
+function initialWorkspaceFromStorage(): {
+  collections: Collection[];
+  activeId: string;
+  collapsedFolderIds: Set<string>;
+} {
+  if (getAppDataMode() === "local") {
+    const cols = loadLocalCollections(cloneInitialCollections);
+    const activeKey = activeCollectionStorageKey("local", null);
+    const collapsedKey = collapsedFoldersStorageKey("local", null);
+    return {
+      collections: cols,
+      activeId: resolveActiveCollectionId(
+        cols,
+        readPersistedActiveCollectionId(activeKey)
+      ),
+      collapsedFolderIds: pruneCollapsedFolderIds(
+        cols,
+        readCollapsedFolderIdsFromStorage(collapsedKey)
+      ),
+    };
+  }
+  return {
+    collections: [],
+    activeId: "",
+    collapsedFolderIds: new Set(),
+  };
+}
+
+const INITIAL_WORKSPACE = initialWorkspaceFromStorage();
 
 function findCardInTree(
   cols: Collection[],
@@ -1854,12 +1945,20 @@ export default function App() {
     [dataMode, currentUser?.id]
   );
 
+  const activeCollectionKey = useMemo(
+    () => activeCollectionStorageKey(dataMode, currentUser?.id ?? null),
+    [dataMode, currentUser?.id]
+  );
+
+  const collapsedFoldersKey = useMemo(
+    () => collapsedFoldersStorageKey(dataMode, currentUser?.id ?? null),
+    [dataMode, currentUser?.id]
+  );
+
   const [collections, setCollections] = useState<Collection[]>(
-    () => initialWorkspaceFromStorage().collections
+    () => INITIAL_WORKSPACE.collections
   );
-  const [activeId, setActiveId] = useState(
-    () => initialWorkspaceFromStorage().activeId
-  );
+  const [activeId, setActiveId] = useState(() => INITIAL_WORKSPACE.activeId);
   const [calendarDay, setCalendarDay] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   /** 未输入内容时是否展开顶栏搜索框（有内容时始终展开） */
@@ -1908,7 +2007,7 @@ export default function App() {
   const collectionHintTextareaRef = useRef<HTMLTextAreaElement>(null);
   const skipHintBlurCommitRef = useRef(false);
   const [collapsedFolderIds, setCollapsedFolderIds] = useState<Set<string>>(
-    () => new Set()
+    () => INITIAL_WORKSPACE.collapsedFolderIds
   );
   const [favoriteCollectionIds, setFavoriteCollectionIds] = useState<
     Set<string>
@@ -2293,7 +2392,19 @@ export default function App() {
       setApiOnline(true);
       setLoadError(null);
       setSaveError(null);
-      setCollections(loadLocalCollections(cloneInitialCollections));
+      const cols = loadLocalCollections(cloneInitialCollections);
+      setCollections(cols);
+      const localKey = activeCollectionStorageKey("local", null);
+      const localCollapsedKey = collapsedFoldersStorageKey("local", null);
+      setActiveId(
+        resolveActiveCollectionId(cols, readPersistedActiveCollectionId(localKey))
+      );
+      setCollapsedFolderIds(
+        pruneCollapsedFolderIds(
+          cols,
+          readCollapsedFolderIdsFromStorage(localCollapsedKey)
+        )
+      );
       setRemoteLoaded(true);
       return;
     }
@@ -2339,6 +2450,26 @@ export default function App() {
           }
         }
         setCollections(tree);
+        const remoteKey = activeCollectionStorageKey(
+          "remote",
+          currentUser?.id ?? null
+        );
+        const remoteCollapsedKey = collapsedFoldersStorageKey(
+          "remote",
+          currentUser?.id ?? null
+        );
+        setActiveId(
+          resolveActiveCollectionId(
+            tree,
+            readPersistedActiveCollectionId(remoteKey)
+          )
+        );
+        setCollapsedFolderIds(
+          pruneCollapsedFolderIds(
+            tree,
+            readCollapsedFolderIdsFromStorage(remoteCollapsedKey)
+          )
+        );
         setApiOnline(true);
         setLoadError(null);
         setRemoteSaveAllowed(true);
@@ -2477,6 +2608,49 @@ export default function App() {
       setActiveId(collections[0]?.id ?? "");
     }
   }, [collections, activeId]);
+
+  /** 刷新后回到上次选中的合集（按数据模式与用户区分） */
+  useEffect(() => {
+    if (!authReady) return;
+    if (dataMode === "remote" && !remoteLoaded) return;
+    if (!activeId) return;
+    try {
+      localStorage.setItem(activeCollectionKey, activeId);
+    } catch {
+      /* ignore */
+    }
+  }, [activeId, activeCollectionKey, authReady, dataMode, remoteLoaded]);
+
+  /** 侧栏子合集折叠状态（与当前合集同样按模式与用户区分） */
+  useEffect(() => {
+    if (!authReady) return;
+    if (dataMode === "remote" && !remoteLoaded) return;
+    try {
+      localStorage.setItem(
+        collapsedFoldersKey,
+        JSON.stringify([...collapsedFolderIds].sort())
+      );
+    } catch {
+      /* ignore */
+    }
+  }, [
+    collapsedFolderIds,
+    collapsedFoldersKey,
+    authReady,
+    dataMode,
+    remoteLoaded,
+  ]);
+
+  /** 树结构变化时剔除已不存在合集的折叠记录（不写回存储，交给上一 effect） */
+  useEffect(() => {
+    setCollapsedFolderIds((prev) => {
+      const next = pruneCollapsedFolderIds(collections, prev);
+      if (next.size === prev.size && [...next].every((id) => prev.has(id))) {
+        return prev;
+      }
+      return next;
+    });
+  }, [collections]);
 
   const { pinned, rest } = useMemo(
     () => splitPinnedCards(active?.cards ?? []),
