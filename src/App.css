@@ -2002,6 +2002,18 @@ textarea.main__hint-editor:focus {
   outline-offset: 2px;
 }
 
+.main__header-icon-btn--active {
+  background: rgba(37, 99, 235, 0.12);
+  border-color: rgba(37, 99, 235, 0.35);
+  color: #1d4ed8;
+}
+
+.main__header-icon-btn--active:hover {
+  background: rgba(37, 99, 235, 0.16);
+  border-color: rgba(37, 99, 235, 0.45);
+  color: #1e40af;
+}
+
 .main__header-icon-btn__svg {
   display: block;
 }
@@ -2363,6 +2375,43 @@ textarea.main__hint-editor:focus {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+}
+
+/* 瀑布流：时间线内笔记列表多列；超大卡片见 .card--masonry-collapsed */
+.app--masonry .timeline ul.cards {
+  display: block;
+  column-count: 2;
+  column-gap: 0.75rem;
+}
+
+.app--masonry .timeline ul.cards > li.card {
+  break-inside: avoid;
+  display: inline-block;
+  width: 100%;
+  margin: 0 0 0.75rem;
+  vertical-align: top;
+  box-sizing: border-box;
+}
+
+@media (min-width: 1180px) {
+  .app--masonry .timeline ul.cards {
+    column-count: 3;
+  }
+}
+
+@media (max-width: 640px) {
+  .app--masonry .timeline ul.cards {
+    column-count: 1;
+  }
+
+  .app--masonry .timeline ul.cards > li.card {
+    margin-bottom: 0.75rem;
+  }
+}
+
+.app--masonry .card--masonry-collapsed .card__inner {
+  max-height: min(360px, 52vh);
+  overflow: hidden;
 }
 
 /* 白卡片 + 横格纸：行高 = 横线周期，字号 = 周期一半 → 半行距把字撑在两条横线之间 */

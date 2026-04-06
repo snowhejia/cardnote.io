@@ -195,6 +195,32 @@ function localDateString(d = new Date()): string {
   return `${y}-${m}-${day}`;
 }
 
+const MASONRY_LAYOUT_STORAGE_KEY = "mikujar-masonry-layout";
+
+/** 瀑布流模式下：超过则默认折叠，需点「展开全文」 */
+const MASONRY_COLLAPSE_PLAIN_CHARS = 520;
+const MASONRY_COLLAPSE_MEDIA_COUNT = 4;
+
+function readMasonryLayoutFromStorage(): boolean {
+  try {
+    return (
+      typeof localStorage !== "undefined" &&
+      localStorage.getItem(MASONRY_LAYOUT_STORAGE_KEY) === "1"
+    );
+  } catch {
+    return false;
+  }
+}
+
+function cardNeedsMasonryCollapse(card: NoteCard): boolean {
+  const plainLen = htmlToPlainText(card.text ?? "").length;
+  const mediaN = (card.media ?? []).filter((m) => m.url?.trim()).length;
+  if (plainLen >= MASONRY_COLLAPSE_PLAIN_CHARS) return true;
+  if (mediaN >= MASONRY_COLLAPSE_MEDIA_COUNT) return true;
+  if (plainLen >= 300 && mediaN >= 2) return true;
+  return false;
+}
+
 function walkCollections(
   cols: Collection[],
   visit: (c: Collection) => void
@@ -1851,6 +1877,8 @@ export default function App() {
     colId: string;
     cardId: string;
   } | null>(null);
+  /** 瀑布流布局（localStorage 持久化） */
+  const [masonryLayout, setMasonryLayout] = useState(readMasonryLayoutFromStorage);
   const [detailCard, setDetailCard] = useState<{
     card: NoteCard;
     colId: string;
@@ -2543,6 +2571,18 @@ export default function App() {
     setCalendarDay(dateStr);
     const [yy, mm] = dateStr.split("-").map(Number);
     setCalendarViewMonth(new Date(yy, mm - 1, 1));
+  }, []);
+
+  const toggleMasonryLayout = useCallback(() => {
+    setMasonryLayout((v) => {
+      const n = !v;
+      try {
+        localStorage.setItem(MASONRY_LAYOUT_STORAGE_KEY, n ? "1" : "0");
+      } catch {
+        /* ignore */
+      }
+      return n;
+    });
   }, []);
 
   const dayReminderEntries = useMemo(() => {
@@ -3638,6 +3678,8 @@ export default function App() {
     const media = (card.media ?? []).filter((m) => m.url?.trim());
     const hasGallery = media.length > 0;
     const reminderBesideTime = formatCardReminderBesideTime(card);
+    const hugeForMasonry =
+      masonryLayout && cardNeedsMasonryCollapse(card);
     const noteKey = `${colId}-${card.id}`;
     const dropEdgeActive =
       cardDropMarker !== null &&
@@ -3657,7 +3699,8 @@ export default function App() {
               ? " card--note-drop-before"
               : " card--note-drop-after"
             : "") +
-          (draggingNoteCardKey === noteKey ? " card--note-dragging" : "")
+          (draggingNoteCardKey === noteKey ? " card--note-dragging" : "") +
+          (hugeForMasonry ? " card--masonry-collapsed" : "")
         }
         onDragOver={(e) => {
           if (!canEdit) return;
@@ -3835,8 +3878,16 @@ export default function App() {
                 <button
                   type="button"
                   className="card__icon-btn card__detail-btn"
-                  title="查看详情"
-                  aria-label="查看详情"
+                  title={
+                    hugeForMasonry
+                      ? "查看完整笔记"
+                      : "查看详情"
+                  }
+                  aria-label={
+                    hugeForMasonry
+                      ? "查看完整笔记"
+                      : "查看详情"
+                  }
                   onClick={() =>
                     setDetailCard({
                       card,
@@ -4014,6 +4065,8 @@ export default function App() {
     const media = (card.media ?? []).filter((m) => m.url?.trim());
     const hasGallery = media.length > 0;
     const trashReminderBeside = formatCardReminderBesideTime(card);
+    const trashHugeMasonry =
+      masonryLayout && cardNeedsMasonryCollapse(card);
     const menuId = `__trash__${entry.trashId}`;
     const noteKey = `trash-${entry.trashId}`;
     return (
@@ -4021,7 +4074,8 @@ export default function App() {
         key={noteKey}
         className={
           "card card--in-trash" +
-          (cardMenuId === menuId ? " is-menu-open" : "")
+          (cardMenuId === menuId ? " is-menu-open" : "") +
+          (trashHugeMasonry ? " card--masonry-collapsed" : "")
         }
         title={
           entry.colPathLabel
@@ -4410,7 +4464,9 @@ export default function App() {
   return (
     <div
       className={
-        "app" + (mobileNavOpen ? " app--mobile-nav-open" : "")
+        "app" +
+        (mobileNavOpen ? " app--mobile-nav-open" : "") +
+        (masonryLayout ? " app--masonry" : "")
       }
     >
       {showRemoteLoading ? (
@@ -4931,6 +4987,39 @@ export default function App() {
                   </svg>
                 </button>
               ) : null}
+              <button
+                type="button"
+                className={
+                  "main__header-icon-btn" +
+                  (masonryLayout ? " main__header-icon-btn--active" : "")
+                }
+                aria-pressed={masonryLayout}
+                aria-label={
+                  masonryLayout
+                    ? "切换为列表布局"
+                    : "切换为瀑布流布局"
+                }
+                title={masonryLayout ? "列表布局" : "瀑布流"}
+                onClick={toggleMasonryLayout}
+              >
+                <svg
+                  className="main__header-icon-btn__svg"
+                  width="20"
+                  height="20"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinejoin="round"
+                  aria-hidden
+                >
+                  {/* 两列错落砖块：瀑布流 */}
+                  <rect x="3" y="5" width="7.5" height="8" rx="1.5" />
+                  <rect x="3" y="15" width="7.5" height="5" rx="1.5" />
+                  <rect x="13.5" y="4" width="7.5" height="6" rx="1.5" />
+                  <rect x="13.5" y="12" width="7.5" height="8" rx="1.5" />
+                </svg>
+              </button>
               {canEdit &&
               trashViewActive &&
               !searchActive &&
