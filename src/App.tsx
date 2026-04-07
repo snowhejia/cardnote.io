@@ -1,5 +1,4 @@
 import {
-  Fragment,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -7,25 +6,16 @@ import {
   useRef,
   useState,
 } from "react";
-import type {
-  ChangeEvent,
-  DragEvent,
-  ReactNode,
-  Ref,
-} from "react";
+import type { ChangeEvent } from "react";
 import { createPortal, flushSync } from "react-dom";
 import { isTauri } from "@tauri-apps/api/core";
-import { fetchApiHealth } from "./api/health";
 import {
-  fetchCollectionsFromApi,
-  saveCollectionsToApi,
   createCollectionApi,
   updateCollectionApi,
   deleteCollectionApi,
   createCardApi,
   updateCardApi,
   deleteCardApi,
-  type CardRemotePatch,
 } from "./api/collections";
 import {
   clearMeTrash,
@@ -36,31 +26,15 @@ import {
   putMeFavorites,
 } from "./api/mePreferences";
 import { uploadCardMedia } from "./api/upload";
-import { resolveMediaUrl, type AuthUser } from "./api/auth";
-import {
-  createUserApi,
-  deleteUserApi,
-  fetchUsersList,
-  updateUserApi,
-  type PublicUser,
-} from "./api/users";
 import { useAppDataMode } from "./appDataMode";
-import { getAppDataMode, type AppDataMode } from "./appDataModeStorage";
 import { useAuth } from "./auth/AuthContext";
 import { getAdminToken } from "./auth/token";
-import { collections as initialCollections } from "./data";
-import { loadLocalCollections, saveLocalCollections } from "./localCollectionsStorage";
-import {
-  loadRemoteCollectionsSnapshot,
-  remoteSnapshotUserKey,
-  saveRemoteCollectionsSnapshot,
-} from "./remoteCollectionsCache";
+import { saveLocalCollections } from "./localCollectionsStorage";
 import { saveLocalMediaInlineInBrowser } from "./localMediaBrowser";
 import {
   deleteLocalMediaFile,
   saveLocalMediaToAppFolder,
 } from "./localMediaTauri";
-import { migrateCollectionTree } from "./migrateCollections";
 import {
   readNewNotePlacement,
   saveNewNotePlacement,
@@ -71,1863 +45,73 @@ import { DataStatsModal } from "./DataStatsModal";
 import { NoteSettingsModal } from "./NoteSettingsModal";
 import { CardDetail } from "./CardDetail";
 import { ReminderPickerModal } from "./ReminderPickerModal";
-import { CardRowInner } from "./CardRowInner";
-import { CardTagsRow } from "./CardTagsRow";
-import { CardGallery } from "./CardGallery";
-import {
-  formatCardReminderBesideTime,
-  formatCardTimeLabel,
-} from "./cardTimeLabel";
-import {
-  dataTransferHasFiles,
-  filesFromDataTransfer,
-} from "./filesFromDataTransfer";
-import { NoteCardTiptap } from "./noteEditor/NoteCardTiptap";
-import { htmlToPlainText } from "./noteEditor/plainHtml";
 import type {
   Collection,
   NoteCard,
   NoteMediaItem,
-  NoteMediaKind,
   TrashedNoteEntry,
 } from "./types";
 import "./App.css";
 
-const DEFAULT_COLLECTION_HINT =
-  "欢迎光临 mikujar「未来罐」～ 一条笔记一件小事，按一天里的时刻慢慢堆满！左侧合集随便切；这段灰灰的字双击一下，就能换成你自己的开场白 ✨";
-
-/** 与 favicon 一致的未来罐，手机底栏「新建小笔记」用 */
-function MobileDockJarIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      width="34"
-      height="34"
-      viewBox="0 0 32 32"
-      aria-hidden
-    >
-      <rect
-        x="9"
-        y="7"
-        width="14"
-        height="5"
-        rx="2.5"
-        fill="var(--mikujar-logo-lid)"
-      />
-      <rect
-        x="12"
-        y="11"
-        width="8"
-        height="5"
-        rx="1"
-        fill="var(--mikujar-logo-jar)"
-      />
-      <rect
-        x="10"
-        y="15"
-        width="12"
-        height="11"
-        rx="2"
-        fill="var(--mikujar-logo-jar)"
-      />
-      <circle cx="13" cy="18.5" r="1.25" fill="#fff" opacity="0.5" />
-      <circle cx="16" cy="21.8" r="0.9" fill="#fff" opacity="0.38" />
-    </svg>
-  );
-}
-
-/** 圆角星形（描边 / 填充），主栏标题与侧栏收藏共用 */
-/** 合集排序拖动手柄（三杠），与顶栏示意图标共用 */
-function CollectionDragGripIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      width="20"
-      height="20"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      aria-hidden
-    >
-      <path d="M8 6h10M8 12h10M8 18h10" />
-    </svg>
-  );
-}
-
-function CollectionStarIcon({
-  filled,
-  className,
-}: {
-  filled: boolean;
-  className?: string;
-}) {
-  return (
-    <svg
-      className={className}
-      width="20"
-      height="20"
-      viewBox="0 0 24 24"
-      aria-hidden
-    >
-      <path
-        d="M12 2.25 15.09 8.51 22 9.52 17 14.39 18.18 21.25 12 18.02 5.82 21.25 7 14.39 2 9.52 8.91 8.51 12 2.25z"
-        fill={filled ? "currentColor" : "none"}
-        stroke={filled ? "none" : "currentColor"}
-        strokeWidth={filled ? 0 : 1.4}
-        strokeLinejoin="round"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-function cloneInitialCollections(): Collection[] {
-  return structuredClone(initialCollections) as Collection[];
-}
-
-/** 小屏抽屉：左缘右滑打开、侧栏左滑关闭（与 @media max-width:900px 一致） */
-const MOBILE_NAV_SWIPE_LAYOUT_MAX_PX = 900;
-const MOBILE_NAV_SWIPE_OPEN_MIN_DX = 56;
-const MOBILE_NAV_SWIPE_CLOSE_MIN_DX = 56;
-const MOBILE_NAV_SWIPE_AXIS_RATIO = 1.25;
-/** 仅从屏幕左缘划入时打开，减少与正文/编辑器手势冲突 */
-const MOBILE_NAV_SWIPE_FROM_LEFT_PX = 40;
-
-function mobileNavSwipeMostlyHorizontal(dx: number, dy: number): boolean {
-  const ax = Math.abs(dx);
-  const ay = Math.abs(dy);
-  return ax > ay * MOBILE_NAV_SWIPE_AXIS_RATIO;
-}
-
-function mobileNavSwipeTargetIsTextual(target: EventTarget | null): boolean {
-  const el =
-    target instanceof Element
-      ? target.closest(
-          'input, textarea, select, [contenteditable="true"], .ProseMirror, [role="textbox"]'
-        )
-      : null;
-  return Boolean(el);
-}
-
-function localDateString(d = new Date()): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
-const MASONRY_LAYOUT_STORAGE_KEY = "mikujar-masonry-layout";
-
-const ACTIVE_COLLECTION_STORAGE_PREFIX = "mikujar-active-collection:";
-
-function activeCollectionStorageKey(
-  mode: AppDataMode,
-  userId: string | null
-): string {
-  if (mode === "local") {
-    return `${ACTIVE_COLLECTION_STORAGE_PREFIX}local`;
-  }
-  return `${ACTIVE_COLLECTION_STORAGE_PREFIX}remote:${userId ?? "guest"}`;
-}
-
-function readPersistedActiveCollectionId(key: string): string | null {
-  try {
-    if (typeof localStorage === "undefined") return null;
-    const raw = localStorage.getItem(key);
-    if (!raw) return null;
-    const t = raw.trim();
-    return t.length ? t : null;
-  } catch {
-    return null;
-  }
-}
-
-const COLLAPSED_FOLDERS_STORAGE_PREFIX = "mikujar-sidebar-collapsed:";
-
-function collapsedFoldersStorageKey(
-  mode: AppDataMode,
-  userId: string | null
-): string {
-  if (mode === "local") {
-    return `${COLLAPSED_FOLDERS_STORAGE_PREFIX}local`;
-  }
-  return `${COLLAPSED_FOLDERS_STORAGE_PREFIX}remote:${userId ?? "guest"}`;
-}
-
-function readCollapsedFolderIdsFromStorage(key: string): Set<string> {
-  try {
-    if (typeof localStorage === "undefined") return new Set();
-    const raw = localStorage.getItem(key);
-    if (!raw) return new Set();
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return new Set();
-    return new Set(
-      parsed.filter(
-        (x): x is string => typeof x === "string" && x.trim().length > 0
-      )
-    );
-  } catch {
-    return new Set();
-  }
-}
-
-/** 瀑布流模式下：超过则默认折叠，需点「展开全文」 */
-const MASONRY_COLLAPSE_PLAIN_CHARS = 520;
-const MASONRY_COLLAPSE_MEDIA_COUNT = 4;
-
-function readMasonryLayoutFromStorage(): boolean {
-  try {
-    return (
-      typeof localStorage !== "undefined" &&
-      localStorage.getItem(MASONRY_LAYOUT_STORAGE_KEY) === "1"
-    );
-  } catch {
-    return false;
-  }
-}
-
-function cardNeedsMasonryCollapse(card: NoteCard): boolean {
-  const plainLen = htmlToPlainText(card.text ?? "").length;
-  const mediaN = (card.media ?? []).filter((m) => m.url?.trim()).length;
-  if (plainLen >= MASONRY_COLLAPSE_PLAIN_CHARS) return true;
-  if (mediaN >= MASONRY_COLLAPSE_MEDIA_COUNT) return true;
-  if (plainLen >= 300 && mediaN >= 2) return true;
-  return false;
-}
-
-function walkCollections(
-  cols: Collection[],
-  visit: (c: Collection) => void
-): void {
-  for (const c of cols) {
-    visit(c);
-    if (c.children?.length) walkCollections(c.children, visit);
-  }
-}
-
-/** 去掉已删除合集的折叠记录，避免 Set 无限增长 */
-function pruneCollapsedFolderIds(
-  cols: Collection[],
-  saved: Set<string>
-): Set<string> {
-  if (saved.size === 0) return new Set();
-  const valid = new Set<string>();
-  walkCollections(cols, (c) => valid.add(c.id));
-  return new Set([...saved].filter((id) => valid.has(id)));
-}
-
-/** 全库卡片标签去重，中文排序，供侧栏底部展示 */
-function collectAllTagsFromCollections(cols: Collection[]): string[] {
-  const seen = new Set<string>();
-  walkCollections(cols, (col) => {
-    for (const card of col.cards) {
-      for (const raw of card.tags ?? []) {
-        const t = raw.trim();
-        if (t) seen.add(t);
-      }
-    }
-  });
-  return [...seen].sort((a, b) => a.localeCompare(b, "zh-CN"));
-}
-
-function collectCardsOnDate(
-  cols: Collection[],
-  date: string
-): { col: Collection; card: NoteCard; order: number }[] {
-  const out: {
-    col: Collection;
-    card: NoteCard;
-    colWalkSeq: number;
-    order: number;
-  }[] = [];
-  let colWalkSeq = 0;
-  walkCollections(cols, (col) => {
-    col.cards.forEach((card, order) => {
-      if (card.addedOn === date) {
-        out.push({ col, card, colWalkSeq, order });
-      }
-    });
-    colWalkSeq++;
-  });
-  out.sort((a, b) => {
-    if (a.colWalkSeq !== b.colWalkSeq) return a.colWalkSeq - b.colWalkSeq;
-    return a.order - b.order;
-  });
-  return out.map(({ col, card, order }) => ({ col, card, order }));
-}
-
-function collectReminderCardsOnDate(
-  cols: Collection[],
-  date: string
-): { col: Collection; card: NoteCard; order: number }[] {
-  const out: {
-    col: Collection;
-    card: NoteCard;
-    colWalkSeq: number;
-    order: number;
-  }[] = [];
-  let colWalkSeq = 0;
-  walkCollections(cols, (col) => {
-    col.cards.forEach((card, order) => {
-      if (card.reminderOn === date) {
-        out.push({ col, card, colWalkSeq, order });
-      }
-    });
-    colWalkSeq++;
-  });
-  out.sort((a, b) => {
-    if (a.colWalkSeq !== b.colWalkSeq) return a.colWalkSeq - b.colWalkSeq;
-    return a.order - b.order;
-  });
-  return out.map(({ col, card, order }) => ({ col, card, order }));
-}
-
-/** 月历底部小点：该日有笔记（addedOn） */
-function datesWithNoteAddedOn(cols: Collection[]): Set<string> {
-  const s = new Set<string>();
-  walkCollections(cols, (col) => {
-    for (const card of col.cards) {
-      if (card.addedOn) s.add(card.addedOn);
-    }
-  });
-  return s;
-}
-
-/** 月历角标：该日有至少一条提醒（reminderOn） */
-function datesWithReminderOn(cols: Collection[]): Set<string> {
-  const s = new Set<string>();
-  walkCollections(cols, (col) => {
-    for (const card of col.cards) {
-      if (card.reminderOn?.trim()) s.add(card.reminderOn.trim());
-    }
-  });
-  return s;
-}
-
-/** 遍历树，附带「父名 / 子名」路径 */
-function walkCollectionsWithPath(
-  nodes: Collection[],
-  prefix: string[]
-): { col: Collection; path: string }[] {
-  const out: { col: Collection; path: string }[] = [];
-  for (const c of nodes) {
-    const names = [...prefix, c.name];
-    out.push({ col: c, path: names.join(" / ") });
-    if (c.children?.length) {
-      out.push(...walkCollectionsWithPath(c.children, names));
-    }
-  }
-  return out;
-}
-
-const FAVORITE_COLLECTIONS_STORAGE_PREFIX = "mikujar-favorite-collections:";
-
-function favoriteCollectionsStorageKey(userId: string | null): string {
-  return `${FAVORITE_COLLECTIONS_STORAGE_PREFIX}${userId ?? "guest"}`;
-}
-
-function loadFavoriteCollectionIds(key: string): Set<string> {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return new Set();
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return new Set();
-    return new Set(
-      parsed.filter(
-        (x): x is string => typeof x === "string" && x.length > 0
-      )
-    );
-  } catch {
-    return new Set();
-  }
-}
-
-function saveFavoriteCollectionIds(key: string, ids: Set<string>): void {
-  try {
-    localStorage.setItem(key, JSON.stringify([...ids]));
-  } catch {
-    /* quota / 隐私模式 */
-  }
-}
-
-const TRASH_CARDS_STORAGE_PREFIX = "mikujar-trash-cards:";
-
-function trashCardsStorageKey(
-  dataMode: AppDataMode,
-  userId: string | null
-): string {
-  return `${TRASH_CARDS_STORAGE_PREFIX}${dataMode}:${userId ?? "guest"}`;
-}
-
-function isTrashedNoteEntry(x: unknown): x is TrashedNoteEntry {
-  if (x === null || typeof x !== "object") return false;
-  const o = x as Record<string, unknown>;
-  return (
-    typeof o.trashId === "string" &&
-    o.trashId.length > 0 &&
-    typeof o.colId === "string" &&
-    typeof o.colPathLabel === "string" &&
-    typeof o.deletedAt === "string" &&
-    o.card !== null &&
-    typeof o.card === "object" &&
-    typeof (o.card as NoteCard).id === "string"
-  );
-}
-
-function loadTrashedNoteEntries(key: string): TrashedNoteEntry[] {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter(isTrashedNoteEntry);
-  } catch {
-    return [];
-  }
-}
-
-function saveTrashedNoteEntries(
-  key: string,
-  entries: TrashedNoteEntry[]
-): void {
-  try {
-    localStorage.setItem(key, JSON.stringify(entries));
-  } catch {
-    /* quota */
-  }
-}
-
-function cardTextMatchesQuery(card: NoteCard, q: string): boolean {
-  if (htmlToPlainText(card.text).toLowerCase().includes(q)) return true;
-  for (const t of card.tags ?? []) {
-    if (t.toLowerCase().includes(q)) return true;
-  }
-  for (const m of card.media ?? []) {
-    if ((m.name ?? "").toLowerCase().includes(q)) return true;
-  }
-  return false;
-}
-
-function buildSearchResults(
-  cols: Collection[],
-  qRaw: string
-): {
-  collectionMatches: { col: Collection; path: string }[];
-  groupedCards: { col: Collection; path: string; cards: NoteCard[] }[];
-} {
-  const q = qRaw.trim().toLowerCase();
-  if (!q) {
-    return { collectionMatches: [], groupedCards: [] };
-  }
-  const flat = walkCollectionsWithPath(cols, []);
-  const collectionMatches: { col: Collection; path: string }[] = [];
-  const seenNameHit = new Set<string>();
-  const cardHits: { col: Collection; path: string; card: NoteCard }[] = [];
-
-  for (const { col, path } of flat) {
-    if (col.name.toLowerCase().includes(q) && !seenNameHit.has(col.id)) {
-      seenNameHit.add(col.id);
-      collectionMatches.push({ col, path });
-    }
-    for (const card of col.cards) {
-      if (cardTextMatchesQuery(card, q)) {
-        cardHits.push({ col, path, card });
-      }
-    }
-  }
-
-  const groupMap = new Map<
-    string,
-    { col: Collection; path: string; cards: NoteCard[] }
-  >();
-  for (const h of cardHits) {
-    let g = groupMap.get(h.col.id);
-    if (!g) {
-      g = { col: h.col, path: h.path, cards: [] };
-      groupMap.set(h.col.id, g);
-    }
-    g.cards.push(h.card);
-  }
-  return {
-    collectionMatches,
-    groupedCards: [...groupMap.values()],
-  };
-}
-
-function formatChineseDayTitle(iso: string): string {
-  const [y, m, d] = iso.split("-").map(Number);
-  const dt = new Date(y, m - 1, d);
-  const wk = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"][
-    dt.getDay()
-  ];
-  return `${y}年${m}月${d}日 ${wk}`;
-}
-
-/** 侧栏月历格：周一为列首 */
-function buildCalendarCells(viewMonth: Date): (null | { day: number; dateStr: string })[] {
-  const y = viewMonth.getFullYear();
-  const mo = viewMonth.getMonth();
-  const firstDow = new Date(y, mo, 1).getDay();
-  const pad = (firstDow + 6) % 7;
-  const dim = new Date(y, mo + 1, 0).getDate();
-  const cells: (null | { day: number; dateStr: string })[] = [];
-  for (let i = 0; i < pad; i++) cells.push(null);
-  for (let d = 1; d <= dim; d++) {
-    cells.push({
-      day: d,
-      dateStr: localDateString(new Date(y, mo, d)),
-    });
-  }
-  return cells;
-}
-
-/** 新建合集侧栏圆点：随机色相，饱和度与亮度控制在易辨认、不过分刺眼 */
-function randomDotColor(): string {
-  const h = Math.floor(Math.random() * 360);
-  const s = 48 + Math.floor(Math.random() * 28);
-  const l = 48 + Math.floor(Math.random() * 14);
-  return `hsl(${h} ${s}% ${l}%)`;
-}
-
-function findCollectionById(
-  cols: Collection[],
-  id: string
-): Collection | undefined {
-  for (const c of cols) {
-    if (c.id === id) return c;
-    if (c.children?.length) {
-      const f = findCollectionById(c.children, id);
-      if (f) return f;
-    }
-  }
-  return undefined;
-}
-
-function resolveActiveCollectionId(
-  cols: Collection[],
-  savedId: string | null
-): string {
-  if (savedId && findCollectionById(cols, savedId)) return savedId;
-  return cols[0]?.id ?? "";
-}
-
-/** 首屏：本地模式读缓存/内置；云端模式不预填示例，避免未登录时闪一下样例 */
-function initialWorkspaceFromStorage(): {
-  collections: Collection[];
-  activeId: string;
-  collapsedFolderIds: Set<string>;
-} {
-  if (getAppDataMode() === "local") {
-    const cols = loadLocalCollections(cloneInitialCollections);
-    const activeKey = activeCollectionStorageKey("local", null);
-    const collapsedKey = collapsedFoldersStorageKey("local", null);
-    return {
-      collections: cols,
-      activeId: resolveActiveCollectionId(
-        cols,
-        readPersistedActiveCollectionId(activeKey)
-      ),
-      collapsedFolderIds: pruneCollapsedFolderIds(
-        cols,
-        readCollapsedFolderIdsFromStorage(collapsedKey)
-      ),
-    };
-  }
-  return {
-    collections: [],
-    activeId: "",
-    collapsedFolderIds: new Set(),
-  };
-}
-
-const INITIAL_WORKSPACE = initialWorkspaceFromStorage();
-
-function findCardInTree(
-  cols: Collection[],
-  colId: string,
-  cardId: string
-): { col: Collection; card: NoteCard } | null {
-  const col = findCollectionById(cols, colId);
-  if (!col) return null;
-  const card = col.cards.find((c) => c.id === cardId);
-  if (!card) return null;
-  return { col, card };
-}
-
-function mapEveryCard(
-  cols: Collection[],
-  mapper: (col: Collection, card: NoteCard) => NoteCard
-): Collection[] {
-  return cols.map((c) => ({
-    ...c,
-    cards: c.cards.map((card) => mapper(c, card)),
-    children: c.children?.length
-      ? mapEveryCard(c.children, mapper)
-      : undefined,
-  }));
-}
-
-function stripRelatedRefsToTarget(
-  cols: Collection[],
-  targetColId: string,
-  targetCardId: string
-): Collection[] {
-  return mapEveryCard(cols, (_col, card) => {
-    const refs = card.relatedRefs ?? [];
-    const filtered = refs.filter(
-      (r) => !(r.colId === targetColId && r.cardId === targetCardId)
-    );
-    if (filtered.length === refs.length) return card;
-    if (filtered.length === 0) {
-      const { relatedRefs: _r, ...rest } = card;
-      return rest;
-    }
-    return { ...card, relatedRefs: filtered };
-  });
-}
-
-function addBidirectionalRelated(
-  cols: Collection[],
-  colIdA: string,
-  cardIdA: string,
-  colIdB: string,
-  cardIdB: string
-): Collection[] {
-  if (colIdA === colIdB && cardIdA === cardIdB) return cols;
-  const refToB = { colId: colIdB, cardId: cardIdB };
-  const refToA = { colId: colIdA, cardId: cardIdA };
-  return mapEveryCard(cols, (col, card) => {
-    if (col.id === colIdA && card.id === cardIdA) {
-      const refs = card.relatedRefs ?? [];
-      if (
-        refs.some(
-          (r) => r.colId === refToB.colId && r.cardId === refToB.cardId
-        )
-      ) {
-        return card;
-      }
-      return { ...card, relatedRefs: [...refs, refToB] };
-    }
-    if (col.id === colIdB && card.id === cardIdB) {
-      const refs = card.relatedRefs ?? [];
-      if (
-        refs.some(
-          (r) => r.colId === refToA.colId && r.cardId === refToA.cardId
-        )
-      ) {
-        return card;
-      }
-      return { ...card, relatedRefs: [...refs, refToA] };
-    }
-    return card;
-  });
-}
-
-function removeBidirectionalRelated(
-  cols: Collection[],
-  colIdA: string,
-  cardIdA: string,
-  colIdB: string,
-  cardIdB: string
-): Collection[] {
-  return mapEveryCard(cols, (col, card) => {
-    const refs = card.relatedRefs ?? [];
-    const filtered = refs.filter(
-      (r) =>
-        !(
-          (col.id === colIdA &&
-            card.id === cardIdA &&
-            r.colId === colIdB &&
-            r.cardId === cardIdB) ||
-          (col.id === colIdB &&
-            card.id === cardIdB &&
-            r.colId === colIdA &&
-            r.cardId === cardIdA)
-        )
-    );
-    if (filtered.length === refs.length) return card;
-    if (filtered.length === 0) {
-      const { relatedRefs: _r, ...rest } = card;
-      return rest;
-    }
-    return { ...card, relatedRefs: filtered };
-  });
-}
-
-function flattenAllCardsWithPath(
-  nodes: Collection[],
-  prefix: string[]
-): { col: Collection; card: NoteCard; path: string }[] {
-  const out: { col: Collection; card: NoteCard; path: string }[] = [];
-  for (const c of nodes) {
-    const names = [...prefix, c.name];
-    const pathStr = names.join(" / ");
-    for (const card of c.cards) {
-      out.push({ col: c, card, path: pathStr });
-    }
-    if (c.children?.length) {
-      out.push(...flattenAllCardsWithPath(c.children, names));
-    }
-  }
-  return out;
-}
-
-function collectionPathLabel(cols: Collection[], colId: string): string {
-  function walk(nodes: Collection[], prefix: string[]): string | null {
-    for (const c of nodes) {
-      const names = [...prefix, c.name];
-      if (c.id === colId) return names.join(" / ");
-      if (c.children?.length) {
-        const inner = walk(c.children, names);
-        if (inner) return inner;
-      }
-    }
-    return null;
-  }
-  return walk(cols, []) ?? "";
-}
-
-function previewCardTextOneLine(text: string, maxLen = 72): string {
-  const line = htmlToPlainText(text).replace(/\s+/g, " ").trim();
-  if (line.length <= maxLen) return line || "（无正文）";
-  return `${line.slice(0, maxLen)}…`;
-}
-
-/** 侧栏角标：仅本合集一层的小笔记张数（子合集内的笔记不计入父行，避免空文件夹拖入子文件夹后父级误显示有笔记） */
-function countSidebarCollectionCardBadge(c: Collection): number {
-  return c.cards.length;
-}
-
-/** 从根到 target 的父级 id（不含 target） */
-function ancestorIdsFor(cols: Collection[], targetId: string): string[] {
-  function walk(nodes: Collection[], acc: string[]): string[] | null {
-    for (const n of nodes) {
-      if (n.id === targetId) return acc;
-      if (n.children?.length) {
-        const r = walk(n.children, [...acc, n.id]);
-        if (r) return r;
-      }
-    }
-    return null;
-  }
-  return walk(cols, []) ?? [];
-}
-
-function mapCollectionById(
-  cols: Collection[],
-  colId: string,
-  fn: (c: Collection) => Collection
-): Collection[] {
-  return cols.map((c) => {
-    if (c.id === colId) return fn(c);
-    if (c.children?.length) {
-      return {
-        ...c,
-        children: mapCollectionById(c.children, colId, fn),
-      };
-    }
-    return c;
-  });
-}
-
-function insertChildCollection(
-  cols: Collection[],
-  parentId: string,
-  child: Collection
-): Collection[] {
-  return cols.map((c) => {
-    if (c.id === parentId) {
-      return { ...c, children: [...(c.children ?? []), child] };
-    }
-    if (c.children?.length) {
-      return {
-        ...c,
-        children: insertChildCollection(c.children, parentId, child),
-      };
-    }
-    return c;
-  });
-}
-
-/** 从合集中取出一张小笔记卡片 */
-function extractCardFromCollections(
-  cols: Collection[],
-  colId: string,
-  cardId: string
-): { next: Collection[]; card: NoteCard | null } {
-  let extracted: NoteCard | null = null;
-  const next = mapCollectionById(cols, colId, (col) => ({
-    ...col,
-    cards: col.cards.filter((c) => {
-      if (c.id !== cardId) return true;
-      extracted = c;
-      return false;
-    }),
-  }));
-  return { next, card: extracted };
-}
-
-function insertCardRelativeTo(
-  cols: Collection[],
-  colId: string,
-  card: NoteCard,
-  anchorCardId: string,
-  place: "before" | "after"
-): Collection[] {
-  return mapCollectionById(cols, colId, (col) => {
-    const cards = [...col.cards];
-    const ai = cards.findIndex((c) => c.id === anchorCardId);
-    if (ai < 0) return { ...col, cards: [...cards, card] };
-    const insertIdx = place === "before" ? ai : ai + 1;
-    cards.splice(insertIdx, 0, card);
-    return { ...col, cards };
-  });
-}
-
-type NoteCardDragPayload = {
-  colId: string;
-  cardId: string;
-};
-
-type NoteCardDropTarget =
-  | { type: "before"; colId: string; cardId: string }
-  | { type: "after"; colId: string; cardId: string }
-  | { type: "collection"; colId: string };
-
-const NOTE_CARD_DRAG_MIME = "application/x-mikujar-note-card";
-const NOTE_CARD_TEXT_PREFIX = "mikujar-note-card:";
-
-function noteCardDragTypesInclude(dt: DataTransfer): boolean {
-  const want = NOTE_CARD_DRAG_MIME.toLowerCase();
-  return [...dt.types].some((t) => t.toLowerCase() === want);
-}
-
-function readNoteCardDragPayload(e: DragEvent): NoteCardDragPayload | null {
-  const dt = e.dataTransfer;
-  let raw =
-    dt.getData(NOTE_CARD_DRAG_MIME) || dt.getData("text/plain");
-  if (!raw) return null;
-  if (raw.startsWith(NOTE_CARD_TEXT_PREFIX)) {
-    raw = raw.slice(NOTE_CARD_TEXT_PREFIX.length);
-  }
-  try {
-    const o = JSON.parse(raw) as NoteCardDragPayload & { blockId?: string };
-    if (o?.colId && o?.cardId) {
-      return { colId: o.colId, cardId: o.cardId };
-    }
-  } catch {
-    /* ignore */
-  }
-  return null;
-}
-
-function findCollectionIdForCard(
-  cols: Collection[],
-  cardId: string
-): string | null {
-  for (const c of cols) {
-    if (c.cards.some((x) => x.id === cardId)) return c.id;
-    if (c.children?.length) {
-      const r = findCollectionIdForCard(c.children, cardId);
-      if (r) return r;
-    }
-  }
-  return null;
-}
-
-/** 远程模式：把拖拽后的合集内顺序与跨合集归属写入 PostgreSQL */
-async function persistNoteCardDropToRemote(
-  from: NoteCardDragPayload,
-  nextTree: Collection[]
-): Promise<boolean> {
-  const movedId = from.cardId;
-  const fromColId = from.colId;
-  const toColId = findCollectionIdForCard(nextTree, movedId);
-  if (!toColId) return false;
-
-  const toCol = findCollectionById(nextTree, toColId);
-  if (!toCol) return false;
-
-  const fromCol =
-    fromColId !== toColId
-      ? findCollectionById(nextTree, fromColId)
-      : null;
-
-  for (let idx = 0; idx < toCol.cards.length; idx++) {
-    const c = toCol.cards[idx];
-    const patch: CardRemotePatch = { sortOrder: idx };
-    if (c.id === movedId && fromColId !== toColId) {
-      patch.collectionId = toColId;
-    }
-    const ok = await updateCardApi(c.id, patch);
-    if (!ok) return false;
-  }
-
-  if (fromColId !== toColId && fromCol) {
-    for (let idx = 0; idx < fromCol.cards.length; idx++) {
-      const ok = await updateCardApi(fromCol.cards[idx].id, {
-        sortOrder: idx,
-      });
-      if (!ok) return false;
-    }
-  }
-
-  return true;
-}
-
-/** 远程模式：侧栏拖拽后的 parentId + 同级 sort_order 写入库 */
-async function persistCollectionTreeLayoutRemote(
-  nodes: Collection[],
-  parentId: string | null
-): Promise<boolean> {
-  for (let i = 0; i < nodes.length; i++) {
-    const n = nodes[i];
-    const ok = await updateCollectionApi(n.id, {
-      parentId,
-      sortOrder: i,
-    });
-    if (!ok) return false;
-    if (n.children?.length) {
-      const sub = await persistCollectionTreeLayoutRemote(
-        n.children,
-        n.id
-      );
-      if (!sub) return false;
-    }
-  }
-  return true;
-}
-
-function applyNoteCardDrop(
-  prev: Collection[],
-  from: NoteCardDragPayload,
-  to: NoteCardDropTarget
-): Collection[] {
-  if (
-    to.type !== "collection" &&
-    from.colId === to.colId &&
-    (to.type === "before" || to.type === "after") &&
-    from.cardId === to.cardId
-  ) {
-    return prev;
-  }
-  const fromCol = findCollectionById(prev, from.colId);
-  const fromCard = fromCol?.cards.find((c) => c.id === from.cardId);
-  if (!fromCard) return prev;
-
-  const { next, card } = extractCardFromCollections(
-    prev,
-    from.colId,
-    from.cardId
-  );
-  if (!card) return prev;
-
-  if (to.type === "collection") {
-    if (from.colId === to.colId) return prev;
-    return appendCardToCollection(next, to.colId, card);
-  }
-
-  const place = to.type === "before" ? "before" : "after";
-  const toCol = findCollectionById(next, to.colId);
-  const anchor = toCol?.cards.find((c) => c.id === to.cardId);
-  if (!anchor) return appendCardToCollection(next, to.colId, card);
-
-  return insertCardRelativeTo(next, to.colId, card, to.cardId, place);
-}
-
-function appendCardToCollection(
-  cols: Collection[],
-  colId: string,
-  card: NoteCard
-): Collection[] {
-  return mapCollectionById(cols, colId, (col) => ({
-    ...col,
-    cards: [...col.cards, card],
-  }));
-}
-
-const COLLECTION_DRAG_MIME = "application/x-note-collection";
-
-type CollectionDropPosition = "before" | "after" | "inside";
-
-function removeCollectionFromTree(
-  cols: Collection[],
-  id: string
-): { tree: Collection[]; removed: Collection | null } {
-  let removed: Collection | null = null;
-
-  function process(nodes: Collection[]): Collection[] {
-    return nodes
-      .filter((n) => {
-        if (n.id === id) {
-          removed = n;
-          return false;
-        }
-        return true;
-      })
-      .map((n) => {
-        if (!n.children?.length) return n;
-        const nc = process(n.children);
-        return {
-          ...n,
-          children: nc.length > 0 ? nc : undefined,
-        };
-      });
-  }
-
-  return { tree: process(cols), removed };
-}
-
-function collectSubtreeCollectionIds(root: Collection): string[] {
-  const out = [root.id];
-  for (const ch of root.children ?? []) {
-    out.push(...collectSubtreeCollectionIds(ch));
-  }
-  return out;
-}
-
-function findParentAndIndex(
-  cols: Collection[],
-  targetId: string
-): { parentId: string | null; index: number } | null {
-  const rootIdx = cols.findIndex((c) => c.id === targetId);
-  if (rootIdx >= 0) return { parentId: null, index: rootIdx };
-
-  function walk(
-    nodes: Collection[],
-    parentId: string
-  ): { parentId: string; index: number } | null {
-    const idx = nodes.findIndex((c) => c.id === targetId);
-    if (idx >= 0) return { parentId, index: idx };
-    for (const n of nodes) {
-      if (n.children?.length) {
-        const r = walk(n.children, n.id);
-        if (r) return r;
-      }
-    }
-    return null;
-  }
-
-  for (const n of cols) {
-    if (n.children?.length) {
-      const r = walk(n.children, n.id);
-      if (r) return r;
-    }
-  }
-  return null;
-}
-
-function isTargetUnderDragNode(
-  dragNode: Collection,
-  targetId: string
-): boolean {
-  function walk(n: Collection): boolean {
-    if (n.id === targetId) return true;
-    return n.children?.some(walk) ?? false;
-  }
-  return dragNode.children?.some(walk) ?? false;
-}
-
-function insertCollectionRelative(
-  cols: Collection[],
-  targetId: string,
-  node: Collection,
-  position: CollectionDropPosition
-): Collection[] {
-  if (position === "inside") {
-    return mapCollectionById(cols, targetId, (t) => ({
-      ...t,
-      children: [node, ...(t.children ?? [])],
-    }));
-  }
-
-  const info = findParentAndIndex(cols, targetId);
-  if (!info) return cols;
-
-  if (info.parentId === null) {
-    const next = [...cols];
-    const insertAt =
-      position === "before" ? info.index : info.index + 1;
-    next.splice(insertAt, 0, node);
-    return next;
-  }
-
-  return mapCollectionById(cols, info.parentId, (p) => {
-    const ch = [...(p.children ?? [])];
-    const insertAt =
-      position === "before" ? info.index : info.index + 1;
-    ch.splice(insertAt, 0, node);
-    return { ...p, children: ch };
-  });
-}
-
-function moveCollectionInTree(
-  cols: Collection[],
-  dragId: string,
-  targetId: string,
-  position: CollectionDropPosition
-): Collection[] {
-  if (dragId === targetId) return cols;
-
-  const dragNode = findCollectionById(cols, dragId);
-  if (!dragNode) return cols;
-  if (isTargetUnderDragNode(dragNode, targetId)) return cols;
-
-  const { tree: without, removed } = removeCollectionFromTree(
-    cols,
-    dragId
-  );
-  if (!removed) return cols;
-
-  return insertCollectionRelative(
-    without,
-    targetId,
-    removed,
-    position
-  );
-}
-
-function dropPositionFromEvent(
-  e: DragEvent,
-  el: HTMLElement
-): CollectionDropPosition {
-  const r = el.getBoundingClientRect();
-  const y = e.clientY - r.top;
-  const h = Math.max(r.height, 1);
-  /** 上下边缘各留一条「细带」，矮行用像素下限，避免 28%/72% 在 min-height 36px 上过窄难操作 */
-  const margin = Math.max(10, Math.min(16, h * 0.3));
-  if (y < margin) return "before";
-  if (y > h - margin) return "after";
-  return "inside";
-}
-
-/** 置顶在上，其余保持合集内 cards 数组顺序（不按时刻排序） */
-function splitPinnedCards(cards: NoteCard[]): {
-  pinned: NoteCard[];
-  rest: NoteCard[];
-} {
-  const pinned = cards.filter((c) => c.pinned);
-  const rest = cards.filter((c) => !c.pinned);
-  return { pinned, rest };
-}
-
-/** 将上传接口结果转为 NoteMediaItem */
-function mediaItemFromUploadResult(r: {
-  url: string;
-  kind: NoteMediaKind;
-  name?: string;
-  coverUrl?: string;
-  sizeBytes?: number;
-}): NoteMediaItem {
-  return {
-    kind: r.kind,
-    url: r.url,
-    ...(r.name?.trim() ? { name: r.name.trim() } : {}),
-    ...(typeof r.sizeBytes === "number" &&
-    Number.isFinite(r.sizeBytes) &&
-    r.sizeBytes >= 0
-      ? { sizeBytes: Math.floor(r.sizeBytes) }
-      : {}),
-    ...(r.kind === "audio" && r.coverUrl?.trim()
-      ? { coverUrl: r.coverUrl.trim() }
-      : {}),
-  };
-}
-
-/** 未登录 / 恢复会话时：与浏览器标签页一致的软件图标 */
-function SidebarWorkspaceAppMark() {
-  return (
-    <img
-      src={`${import.meta.env.BASE_URL}favicon.svg`}
-      alt=""
-      className="sidebar__workspace-app-icon"
-      aria-hidden
-    />
-  );
-}
-
-/** 头像旁下拉：个人中心、笔记设置、数据统计（具体项在弹窗内） */
-function UserAccountMenuDropdown({
-  dataMode,
-  profileBusy,
-  onOpenProfile,
-  onOpenNoteSettings,
-  onOpenDataStats,
-}: {
-  dataMode: AppDataMode;
-  profileBusy: boolean;
-  onOpenProfile: () => void;
-  onOpenNoteSettings: () => void;
-  onOpenDataStats: () => void;
-}) {
-  return (
-    <div className="sidebar__user-menu-dropdown" role="menu">
-      <button
-        type="button"
-        className="sidebar__user-menu-item"
-        role="menuitem"
-        disabled={dataMode !== "remote" || profileBusy}
-        title={
-          dataMode !== "remote"
-            ? "请先切换到云端同步后再打开个人中心"
-            : undefined
-        }
-        onClick={() => {
-          onOpenProfile();
-        }}
-      >
-        个人中心
-      </button>
-      <button
-        type="button"
-        className="sidebar__user-menu-item"
-        role="menuitem"
-        onClick={() => {
-          onOpenNoteSettings();
-        }}
-      >
-        笔记设置
-      </button>
-      <button
-        type="button"
-        className="sidebar__user-menu-item"
-        role="menuitem"
-        onClick={() => {
-          onOpenDataStats();
-        }}
-      >
-        数据统计
-      </button>
-    </div>
-  );
-}
-
-/** 侧栏头像+昵称；点头像打开账户菜单（个人中心、数据模式） */
-function SidebarWorkspaceIdentity({
-  writeRequiresLogin,
-  currentUser,
-  avatarBusy,
-  menuWrapRef,
-  onAvatarClick,
-  menuOpen,
-  menuDropdown,
-}: {
-  writeRequiresLogin: boolean;
-  currentUser: AuthUser | null;
-  avatarBusy: boolean;
-  menuWrapRef: Ref<HTMLDivElement>;
-  onAvatarClick: () => void;
-  menuOpen: boolean;
-  menuDropdown: ReactNode;
-}) {
-  return (
-    <div className="sidebar__workspace">
-      {writeRequiresLogin && currentUser ? (
-        <>
-          <div
-            className={
-              "sidebar__user-menu-anchor" +
-              (menuOpen ? " sidebar__user-menu-anchor--open" : "")
-            }
-            ref={menuWrapRef}
-          >
-            <button
-              type="button"
-              className={
-                "sidebar__avatar-hit" +
-                (avatarBusy ? " sidebar__avatar-hit--busy" : "")
-              }
-              onClick={onAvatarClick}
-              aria-expanded={menuOpen}
-              aria-haspopup="menu"
-              aria-label="账户菜单"
-              title="账户菜单"
-            >
-              {currentUser.avatarUrl ? (
-                <img
-                  src={resolveMediaUrl(currentUser.avatarUrl)}
-                  alt=""
-                  className="sidebar__avatar-img"
-                />
-              ) : (
-                <SidebarWorkspaceAppMark />
-              )}
-            </button>
-            {menuDropdown}
-          </div>
-          <div className="sidebar__workspace-text">
-            <span className="sidebar__workspace-name">
-              {currentUser.displayName || currentUser.username}
-            </span>
-          </div>
-        </>
-      ) : writeRequiresLogin && getAdminToken() ? (
-        <>
-          <SidebarWorkspaceAppMark />
-          <div className="sidebar__workspace-text">
-            <span className="sidebar__workspace-name">恢复会话…</span>
-          </div>
-        </>
-      ) : (
-        <>
-          <SidebarWorkspaceAppMark />
-          <span className="sidebar__workspace-name">mikujar</span>
-        </>
-      )}
-    </div>
-  );
-}
-
-/** 侧栏管理：登录=锁，已登录=退出箭头 */
-function AdminHeaderIcon({ mode }: { mode: "login" | "logout" }) {
-  const cls = "sidebar__admin-icon-svg";
-  if (mode === "login") {
-    return (
-      <svg
-        className={cls}
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.75"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        aria-hidden
-      >
-        <rect x="5" y="11" width="14" height="11" rx="2" ry="2" />
-        <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-      </svg>
-    );
-  }
-  return (
-    <svg
-      className={cls}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.75"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-      <polyline points="16 17 21 12 16 7" />
-      <line x1="21" y1="12" x2="9" y2="12" />
-    </svg>
-  );
-}
-
-/** 候选行大致高度（含 gap），供 ResizeObserver 估算可显示条数 */
-const RELATED_PICK_ROW_EST_PX = 50;
-const RELATED_PICK_POOL_MAX = 800;
-
-/**
- * 源笔记与候选笔记的内容相似度（越大越靠前）。含标签、词片段、汉字重合与搜索词加权。
- */
-function relatedPickSimilarity(
-  sourceColId: string,
-  sourceCard: NoteCard,
-  col: Collection,
-  card: NoteCard,
-  path: string,
-  query: string
-): number {
-  const srcText = htmlToPlainText(sourceCard.text ?? "").trim();
-  const srcLower = srcText.toLowerCase();
-  const srcTags = sourceCard.tags ?? [];
-  const hay = `${htmlToPlainText(card.text ?? "").trim()}\n${(card.tags ?? []).join(" ")}\n${col.name}\n${path}`.toLowerCase();
-  let score = 0;
-
-  if (query) {
-    const ql = query.toLowerCase();
-    if (htmlToPlainText(card.text ?? "").toLowerCase().includes(ql)) score += 120;
-    if (col.name.toLowerCase().includes(ql)) score += 60;
-    if ((card.tags ?? []).some((t) => t.toLowerCase().includes(ql))) {
-      score += 90;
-    }
-    if (path.toLowerCase().includes(ql)) score += 40;
-  }
-
-  for (const t of srcTags) {
-    const tl = t.trim().toLowerCase();
-    if (tl.length < 1) continue;
-    if ((card.tags ?? []).some((x) => x.toLowerCase() === tl)) score += 85;
-    else if (hay.includes(tl)) score += 28;
-  }
-
-  const tokens = srcLower.split(/[\s,.;，。；、\n\r]+/).filter((w) => w.length >= 2);
-  const seen = new Set<string>();
-  for (const w of tokens) {
-    if (seen.has(w)) continue;
-    seen.add(w);
-    if (hay.includes(w)) score += Math.min(36, w.length * 4);
-  }
-
-  for (const ch of srcLower.replace(/\s/g, "")) {
-    if (/[\u4e00-\u9fff]/.test(ch) && hay.includes(ch)) score += 1.15;
-  }
-
-  if (col.id === sourceColId) score += 18;
-
-  return score;
-}
-
-/** 年月分栏输入；避免 type=month 受控时逐字改年会被浏览器解析成 1902 等错误值 */
-function CalendarYearMonthFields({
-  calendarViewMonth,
-  setCalendarViewMonth,
-}: {
-  calendarViewMonth: Date;
-  setCalendarViewMonth: (d: Date) => void;
-}) {
-  const syncKey = `${calendarViewMonth.getFullYear()}-${calendarViewMonth.getMonth()}`;
-  const [yearField, setYearField] = useState(() =>
-    String(calendarViewMonth.getFullYear())
-  );
-  const [monthField, setMonthField] = useState(() =>
-    String(calendarViewMonth.getMonth() + 1)
-  );
-
-  useEffect(() => {
-    setYearField(String(calendarViewMonth.getFullYear()));
-    setMonthField(String(calendarViewMonth.getMonth() + 1));
-  }, [syncKey]);
-
-  const commit = useCallback(() => {
-    const cy = calendarViewMonth.getFullYear();
-    const cm = calendarViewMonth.getMonth() + 1;
-    let y = parseInt(yearField.replace(/\D/g, ""), 10);
-    let mo = parseInt(monthField.replace(/\D/g, ""), 10);
-    if (yearField.trim() === "" || !Number.isFinite(y) || y < 1000 || y > 9999) {
-      y = cy;
-      setYearField(String(y));
-    }
-    if (
-      monthField.trim() === "" ||
-      !Number.isFinite(mo) ||
-      mo < 1 ||
-      mo > 12
-    ) {
-      mo = cm;
-      setMonthField(String(mo));
-    }
-    setCalendarViewMonth(new Date(y, mo - 1, 1));
-  }, [yearField, monthField, calendarViewMonth, setCalendarViewMonth]);
-
-  return (
-    <div className="sidebar__cal-title-wrap sidebar__cal-ym-fields">
-      <input
-        type="text"
-        className="sidebar__cal-year-field"
-        aria-label="年（四位数字）"
-        inputMode="numeric"
-        autoComplete="off"
-        maxLength={4}
-        value={yearField}
-        onChange={(e) => {
-          setYearField(e.target.value.replace(/\D/g, "").slice(0, 4));
-        }}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            (e.target as HTMLInputElement).blur();
-          }
-        }}
-      />
-      <span className="sidebar__cal-ym-sep" aria-hidden>
-        年
-      </span>
-      <input
-        type="text"
-        className="sidebar__cal-month-field"
-        aria-label="月（1–12）"
-        inputMode="numeric"
-        autoComplete="off"
-        maxLength={2}
-        value={monthField}
-        onChange={(e) => {
-          setMonthField(e.target.value.replace(/\D/g, "").slice(0, 2));
-        }}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            (e.target as HTMLInputElement).blur();
-          }
-        }}
-      />
-      <span className="sidebar__cal-ym-sep" aria-hidden>
-        月
-      </span>
-    </div>
-  );
-}
-
-type CalendarCellRow = (null | { day: number; dateStr: string })[];
-
-function CalendarBrowsePanel({
-  calendarViewMonth,
-  setCalendarViewMonth,
-  calendarCells,
-  calendarDay,
-  datesWithNotesSet,
-  datesWithRemindersSet,
-  onDayClick,
-}: {
-  calendarViewMonth: Date;
-  setCalendarViewMonth: (d: Date) => void;
-  calendarCells: CalendarCellRow;
-  calendarDay: string | null;
-  /** 有笔记的日期 → 格内底部蓝点 */
-  datesWithNotesSet: ReadonlySet<string>;
-  /** 有提醒的日期 → 格内右上角角标 */
-  datesWithRemindersSet: ReadonlySet<string>;
-  onDayClick: (dateStr: string) => void;
-}) {
-  return (
-    <>
-      <div className="sidebar__cal-head">
-        <button
-          type="button"
-          className="sidebar__cal-nav-btn"
-          aria-label="上一月"
-          onClick={() => {
-            const d = new Date(calendarViewMonth);
-            d.setMonth(d.getMonth() - 1);
-            setCalendarViewMonth(
-              new Date(d.getFullYear(), d.getMonth(), 1)
-            );
-          }}
-        >
-          ‹
-        </button>
-        <CalendarYearMonthFields
-          calendarViewMonth={calendarViewMonth}
-          setCalendarViewMonth={setCalendarViewMonth}
-        />
-        <button
-          type="button"
-          className="sidebar__cal-nav-btn"
-          aria-label="下一月"
-          onClick={() => {
-            const d = new Date(calendarViewMonth);
-            d.setMonth(d.getMonth() + 1);
-            setCalendarViewMonth(
-              new Date(d.getFullYear(), d.getMonth(), 1)
-            );
-          }}
-        >
-          ›
-        </button>
-      </div>
-      <div className="sidebar__cal-weekdays" aria-hidden>
-        {["一", "二", "三", "四", "五", "六", "日"].map((w) => (
-          <span key={w} className="sidebar__cal-wd">
-            {w}
-          </span>
-        ))}
-      </div>
-      <div className="sidebar__cal-grid">
-        {calendarCells.map((cell, i) =>
-          cell ? (
-            <button
-              key={cell.dateStr}
-              type="button"
-              className={
-                "sidebar__cal-day" +
-                (cell.dateStr === calendarDay ? " is-selected" : "") +
-                (cell.dateStr === localDateString() ? " is-today" : "") +
-                (datesWithNotesSet.has(cell.dateStr) ? " has-notes" : "") +
-                (datesWithRemindersSet.has(cell.dateStr)
-                  ? " has-reminder"
-                  : "")
-              }
-              onClick={() => onDayClick(cell.dateStr)}
-            >
-              {cell.day}
-            </button>
-          ) : (
-            <span
-              key={`pad-${i}`}
-              className="sidebar__cal-day sidebar__cal-day--pad"
-              aria-hidden
-            />
-          )
-        )}
-      </div>
-    </>
-  );
-}
-
-function RelatedCardsSidePanel({
-  sourceColId,
-  sourceCardId,
-  collections,
-  canEdit,
-  onClose,
-  onRemoveRelation,
-  onAddRelation,
-  onNavigateToCard,
-}: {
-  sourceColId: string;
-  sourceCardId: string;
-  collections: Collection[];
-  canEdit: boolean;
-  onClose: () => void;
-  onRemoveRelation: (targetColId: string, targetCardId: string) => void;
-  onAddRelation: (targetColId: string, targetCardId: string) => void;
-  onNavigateToCard: (targetColId: string, targetCardId: string) => void;
-}) {
-  const [pickQuery, setPickQuery] = useState("");
-  const [pickSlots, setPickSlots] = useState(14);
-  const pickGrowRef = useRef<HTMLDivElement>(null);
-  const source = findCardInTree(collections, sourceColId, sourceCardId);
-
-  useEffect(() => {
-    setPickQuery("");
-  }, [sourceColId, sourceCardId]);
-
-  useLayoutEffect(() => {
-    if (!canEdit || !source) return;
-    const el = pickGrowRef.current;
-    if (!el || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver((entries) => {
-      const h = entries[0]?.contentRect.height ?? 0;
-      const slots = Math.max(
-        4,
-        Math.min(120, Math.floor(h / RELATED_PICK_ROW_EST_PX))
-      );
-      setPickSlots(slots);
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [canEdit, source, sourceColId, sourceCardId, pickQuery]);
-
-  const relatedList = useMemo(() => {
-    if (!source) return [];
-    const refs = source.card.relatedRefs ?? [];
-    return refs.map((ref) => {
-      const hit = findCardInTree(collections, ref.colId, ref.cardId);
-      return { ref, hit };
-    });
-  }, [source, collections]);
-
-  const pickCandidatesSorted = useMemo(() => {
-    if (!source) return [];
-    const flat = flattenAllCardsWithPath(collections, []);
-    const q = pickQuery.trim().toLowerCase();
-    const relatedSet = new Set(
-      (source.card.relatedRefs ?? []).map(
-        (r) => `${r.colId}\0${r.cardId}`
-      )
-    );
-    relatedSet.add(`${sourceColId}\0${sourceCardId}`);
-    const filtered = flat.filter(({ col, card }) => {
-      if (relatedSet.has(`${col.id}\0${card.id}`)) return false;
-      if (!q) return true;
-      return (
-        htmlToPlainText(card.text).toLowerCase().includes(q) ||
-        (card.tags ?? []).some((t) => t.toLowerCase().includes(q)) ||
-        col.name.toLowerCase().includes(q)
-      );
-    });
-    const scored = filtered.map((row) => ({
-      col: row.col,
-      card: row.card,
-      path: row.path,
-      score: relatedPickSimilarity(
-        sourceColId,
-        source.card,
-        row.col,
-        row.card,
-        row.path,
-        q
-      ),
-    }));
-    scored.sort(
-      (a, b) =>
-        b.score - a.score || a.path.localeCompare(b.path, "zh-CN")
-    );
-    const top = scored.slice(0, RELATED_PICK_POOL_MAX);
-    return top.map(({ col, card, path }) => ({ col, card, path }));
-  }, [collections, pickQuery, source, sourceColId, sourceCardId]);
-
-  const pickCandidatesShown = useMemo(
-    () => pickCandidatesSorted.slice(0, pickSlots),
-    [pickCandidatesSorted, pickSlots]
-  );
-
-  return (
-    <div className="related-panel-mount">
-      <div
-        className="related-panel-backdrop"
-        aria-hidden
-        onClick={onClose}
-      />
-      <aside
-        className="related-panel"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="related-panel-title"
-      >
-        <div className="related-panel__head">
-          <h2 id="related-panel-title" className="related-panel__title">
-            相关笔记
-          </h2>
-          <button
-            type="button"
-            className="related-panel__close"
-            aria-label="关闭"
-            onClick={onClose}
-          >
-            ×
-          </button>
-        </div>
-        <div
-          className={
-            "related-panel__body" +
-            (source ? " related-panel__body--with-pick" : "")
-          }
-        >
-          {!source ? (
-            <p className="related-panel__hint">源笔记好像蒸发啦…</p>
-          ) : (
-            <>
-              <div className="related-panel__upper">
-                {relatedList.length === 0 ? (
-                  <p className="related-panel__hint">
-                    {canEdit
-                      ? "还没有关联笔记，可在下方按相似度搜索并粘贴关联～"
-                      : "还没有关联笔记。"}
-                  </p>
-                ) : (
-                  <ul className="related-panel__list">
-                    {relatedList.map(({ ref, hit }) => (
-                      <li
-                        key={`${ref.colId}-${ref.cardId}`}
-                        className={
-                          "related-panel__item" +
-                          (hit ? " related-panel__item--row" : "")
-                        }
-                      >
-                        {hit ? (
-                          <>
-                            <button
-                              type="button"
-                              className="related-panel__item-hit"
-                              onClick={() =>
-                                onNavigateToCard(hit.col.id, hit.card.id)
-                              }
-                            >
-                              <div className="related-panel__item-path">
-                                {collectionPathLabel(collections, hit.col.id)}
-                              </div>
-                              <div className="related-panel__item-text">
-                                {previewCardTextOneLine(hit.card.text)}
-                              </div>
-                            </button>
-                            {canEdit ? (
-                              <button
-                                type="button"
-                                className="related-panel__unlink"
-                                aria-label="解除贴贴"
-                                title="解除贴贴"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  onRemoveRelation(ref.colId, ref.cardId);
-                                }}
-                              >
-                                ×
-                              </button>
-                            ) : null}
-                          </>
-                        ) : (
-                          <div className="related-panel__missing-wrap related-panel__missing-row">
-                            <p className="related-panel__missing">
-                              那边笔记不见啦或打不开惹
-                            </p>
-                            {canEdit ? (
-                              <button
-                                type="button"
-                                className="related-panel__unlink"
-                                aria-label="撕掉坏掉的贴贴"
-                                title="撕掉坏掉的贴贴"
-                                onClick={() =>
-                                  onRemoveRelation(ref.colId, ref.cardId)
-                                }
-                              >
-                                ×
-                              </button>
-                            ) : null}
-                          </div>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-              {canEdit ? (
-                <div className="related-panel__add related-panel__add--fill">
-                  <p className="related-panel__add-label">粘贴关联</p>
-                  <input
-                    type="text"
-                    className="related-panel__add-input"
-                    placeholder="搜索笔记（按与当前内容的相似度排序）…"
-                    value={pickQuery}
-                    onChange={(e) => setPickQuery(e.target.value)}
-                    autoComplete="off"
-                  />
-                  <div
-                    ref={pickGrowRef}
-                    className="related-panel__pick-grow"
-                  >
-                    {pickCandidatesShown.length > 0 ? (
-                      <ul className="related-panel__pick-list">
-                        {pickCandidatesShown.map(({ col, card, path }) => (
-                          <li key={`${col.id}-${card.id}`}>
-                            <button
-                              type="button"
-                              className="related-panel__pick-row"
-                              onClick={() => {
-                                onAddRelation(col.id, card.id);
-                                setPickQuery("");
-                              }}
-                            >
-                              <span className="related-panel__pick-path">
-                                {path}
-                              </span>
-                              <span className="related-panel__pick-text">
-                                {previewCardTextOneLine(card.text, 48)}
-                              </span>
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : pickQuery.trim() ? (
-                      <p className="related-panel__hint related-panel__hint--pick">
-                        没找到合拍笔记，换个关键词试试？
-                      </p>
-                    ) : null}
-                  </div>
-                </div>
-              ) : (
-                <div className="related-panel__add related-panel__add--fill related-panel__add--readonly">
-                  <p className="related-panel__add-label">粘贴关联</p>
-                  <div className="related-panel__readonly-lower-body">
-                    <p className="related-panel__hint">
-                      只读模式下无法搜索或添加关联。
-                    </p>
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      </aside>
-    </div>
-  );
-}
-
+import {
+  addBidirectionalRelated,
+  AdminHeaderIcon,
+  ancestorIdsFor,
+  activeCollectionStorageKey,
+  buildCalendarCells,
+  buildSearchResults,
+  CalendarBrowsePanel,
+  CollectionContextMenu,
+  CollectionDeleteDialog,
+  CollectionSidebarTree,
+  CollectionStarIcon,
+  collapsedFoldersStorageKey,
+  type CollectionDropPosition,
+  collectAllTagsFromCollections,
+  collectCardsOnDate,
+  collectReminderCardsOnDate,
+  collectSubtreeCollectionIds,
+  collectionPathLabel,
+  countSidebarCollectionCardBadge,
+  datesWithNoteAddedOn,
+  datesWithReminderOn,
+  DEFAULT_COLLECTION_HINT,
+  favoriteCollectionsStorageKey,
+  findCollectionById,
+  formatChineseDayTitle,
+  insertChildCollection,
+  INITIAL_WORKSPACE,
+  loadFavoriteCollectionIds,
+  loadTrashedNoteEntries,
+  localDateString,
+  MASONRY_LAYOUT_STORAGE_KEY,
+  mapCollectionById,
+  mediaItemFromUploadResult,
+  MobileDockJarIcon,
+  NoteTimelineCard,
+  pruneCollapsedFolderIds,
+  randomDotColor,
+  readMasonryLayoutFromStorage,
+  RelatedCardsSidePanel,
+  removeBidirectionalRelated,
+  removeCollectionFromTree,
+  saveFavoriteCollectionIds,
+  saveTrashedNoteEntries,
+  SidebarWorkspaceIdentity,
+  splitPinnedCards,
+  stripRelatedRefsToTarget,
+  trashCardsStorageKey,
+  TrashNoteCardRow,
+  UserAccountMenuDropdown,
+  UserAdminModal,
+  useCardTextRemoteAutosave,
+  useCollectionRowDnD,
+  useMobileNavSwipe,
+  useRemoteCollectionsSync,
+  useUserAdmin,
+  walkCollections,
+  walkCollectionsWithPath,
+} from "./appkit";
 export default function App() {
   const {
     isAdmin,
@@ -2077,10 +261,6 @@ export default function App() {
   const [noteCardDropCollectionId, setNoteCardDropCollectionId] = useState<
     string | null
   >(null);
-  /** 卡片文本编辑的防抖计时器：key = cardId，value = setTimeout handle */
-  const textSaveTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
-  /** 与防抖同步：待落库的最新正文，供切页/隐藏时立刻 PATCH */
-  const pendingCardTextById = useRef<Map<string, string>>(new Map());
 
   const cardMediaUploadTargetRef = useRef<{
     colId: string;
@@ -2092,22 +272,15 @@ export default function App() {
   /** 合集拖拽 id：在 dragStart 同步写入，避免 state 晚一帧时 dragOver 未 preventDefault 导致无法放置 */
   const draggingCollectionIdRef = useRef<string | null>(null);
 
-  const [userAdminOpen, setUserAdminOpen] = useState(false);
-  const [adminUsers, setAdminUsers] = useState<PublicUser[]>([]);
-  const [adminUsersLoading, setAdminUsersLoading] = useState(false);
-  const [adminUsersErr, setAdminUsersErr] = useState<string | null>(null);
-  const [newUserUsername, setNewUserUsername] = useState("");
-  const [newUserPassword, setNewUserPassword] = useState("");
-  const [newUserDisplayName, setNewUserDisplayName] = useState("");
-  const [newUserRole, setNewUserRole] = useState<"admin" | "user">("user");
-  const [newUserBusy, setNewUserBusy] = useState(false);
-  const [userAdminFormErr, setUserAdminFormErr] = useState<string | null>(
-    null
-  );
-  const [pwdResetByUser, setPwdResetByUser] = useState<Record<string, string>>(
-    {}
-  );
-  const [rowBusyId, setRowBusyId] = useState<string | null>(null);
+  const userAdmin = useUserAdmin({
+    isAdmin,
+    currentUserId: currentUser?.id,
+    logout,
+    refreshMe,
+  });
+
+  const { setCardText } = useCardTextRemoteAutosave(dataMode, setCollections);
+
   const [profileSaveBusy, setProfileSaveBusy] = useState(false);
   const [userProfileModalOpen, setUserProfileModalOpen] =
     useState(false);
@@ -2222,55 +395,10 @@ export default function App() {
   }, [activeId, calendarDay]);
 
   useEffect(() => {
-    if (!userAdminOpen || !isAdmin) return;
-    let cancelled = false;
-    setAdminUsersLoading(true);
-    setAdminUsersErr(null);
-    void fetchUsersList()
-      .then((list) => {
-        if (!cancelled) setAdminUsers(list);
-      })
-      .catch((e: unknown) => {
-        if (!cancelled) {
-          setAdminUsersErr(
-            e instanceof Error ? e.message : "小伙伴名单没拉出来…"
-          );
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setAdminUsersLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [userAdminOpen, isAdmin]);
-
-  useEffect(() => {
-    if (!userAdminOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setUserAdminOpen(false);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [userAdminOpen]);
-
-  useEffect(() => {
     if (!sidebarFlash) return;
     const t = window.setTimeout(() => setSidebarFlash(null), 5000);
     return () => window.clearTimeout(t);
   }, [sidebarFlash]);
-
-  const reloadAdminUsers = useCallback(async () => {
-    try {
-      const list = await fetchUsersList();
-      setAdminUsers(list);
-      setAdminUsersErr(null);
-    } catch (e: unknown) {
-      setAdminUsersErr(
-        e instanceof Error ? e.message : "小伙伴名单没拉出来…"
-      );
-    }
-  }, []);
 
   useEffect(() => {
     if (!userAccountMenuOpen) return;
@@ -2302,281 +430,29 @@ export default function App() {
     }
   }, [currentUser]);
 
-  const submitNewUser = useCallback(async () => {
-    setUserAdminFormErr(null);
-    const u = newUserUsername.trim();
-    const p = newUserPassword;
-    if (!u || !p) {
-      setUserAdminFormErr("用户名和密码都要填好噢");
-      return;
-    }
-    setNewUserBusy(true);
-    try {
-      await createUserApi({
-        username: u,
-        password: p,
-        displayName: newUserDisplayName.trim() || u,
-        role: newUserRole,
-      });
-      setNewUserUsername("");
-      setNewUserPassword("");
-      setNewUserDisplayName("");
-      setNewUserRole("user");
-      await reloadAdminUsers();
-    } catch (e: unknown) {
-      setUserAdminFormErr(
-        e instanceof Error ? e.message : "拉新失败惹，看看报错？"
-      );
-    } finally {
-      setNewUserBusy(false);
-    }
-  }, [
-    newUserUsername,
-    newUserPassword,
-    newUserDisplayName,
-    newUserRole,
-    reloadAdminUsers,
-  ]);
-
-  const onDeleteUser = useCallback(
-    async (u: PublicUser) => {
-      if (!window.confirm(`要把用户「${u.username}」请出群吗？（删除不可撤销）`))
-        return;
-      setRowBusyId(u.id);
-      setUserAdminFormErr(null);
-      try {
-        await deleteUserApi(u.id);
-        if (currentUser?.id === u.id) {
-          logout();
-          setUserAdminOpen(false);
-        } else {
-          await reloadAdminUsers();
-        }
-      } catch (e: unknown) {
-        setUserAdminFormErr(
-          e instanceof Error ? e.message : "送走失败惹…"
-        );
-      } finally {
-        setRowBusyId(null);
-      }
-    },
-    [currentUser?.id, logout, reloadAdminUsers]
-  );
-
-  const onRoleChange = useCallback(
-    async (u: PublicUser, role: "admin" | "user") => {
-      if (u.role === role) return;
-      setRowBusyId(u.id);
-      setUserAdminFormErr(null);
-      try {
-        await updateUserApi(u.id, { role });
-        await reloadAdminUsers();
-        if (currentUser?.id === u.id) await refreshMe();
-      } catch (e: unknown) {
-        setUserAdminFormErr(
-          e instanceof Error ? e.message : "改身份失败惹…"
-        );
-      } finally {
-        setRowBusyId(null);
-      }
-    },
-    [currentUser?.id, refreshMe, reloadAdminUsers]
-  );
-
-  const applyPasswordReset = useCallback(
-    async (u: PublicUser) => {
-      const pwd = (pwdResetByUser[u.id] ?? "").trim();
-      if (pwd.length < 4) {
-        setUserAdminFormErr("新口令至少 4 位啦");
-        return;
-      }
-      setRowBusyId(u.id);
-      setUserAdminFormErr(null);
-      try {
-        await updateUserApi(u.id, { password: pwd });
-        setPwdResetByUser((prev) => ({ ...prev, [u.id]: "" }));
-        setUserAdminFormErr(null);
-        await reloadAdminUsers();
-      } catch (e: unknown) {
-        setUserAdminFormErr(
-          e instanceof Error ? e.message : "换口令失败惹…"
-        );
-      } finally {
-        setRowBusyId(null);
-      }
-    },
-    [pwdResetByUser, reloadAdminUsers]
-  );
-
   useEffect(() => {
     const clear = () => setCardDragOverId(null);
     window.addEventListener("dragend", clear);
     return () => window.removeEventListener("dragend", clear);
   }, []);
 
-  useEffect(() => {
-    if (!authReady) return;
-
-    if (dataMode === "local") {
-      setMediaUploadMode(null);
-      setApiOnline(true);
-      setLoadError(null);
-      setSaveError(null);
-      setRemoteBootSyncing(false);
-      const cols = loadLocalCollections(cloneInitialCollections);
-      setCollections(cols);
-      const localKey = activeCollectionStorageKey("local", null);
-      const localCollapsedKey = collapsedFoldersStorageKey("local", null);
-      setActiveId(
-        resolveActiveCollectionId(cols, readPersistedActiveCollectionId(localKey))
-      );
-      setCollapsedFolderIds(
-        pruneCollapsedFolderIds(
-          cols,
-          readCollapsedFolderIdsFromStorage(localCollapsedKey)
-        )
-      );
-      setRemoteLoaded(true);
-      return;
-    }
-
-    const snapshotKey = remoteSnapshotUserKey(
-      writeRequiresLogin,
-      currentUser?.id ?? null
-    );
-    const canTryRemoteCache =
-      snapshotKey !== null &&
-      (!writeRequiresLogin || Boolean(currentUser || getAdminToken()));
-
-    let usedRemoteCache = false;
-    if (canTryRemoteCache) {
-      const cached = loadRemoteCollectionsSnapshot(snapshotKey);
-      if (cached !== null) {
-        const remoteUserId = writeRequiresLogin ? currentUser?.id ?? null : null;
-        const remoteKey = activeCollectionStorageKey("remote", remoteUserId);
-        const remoteCollapsedKey = collapsedFoldersStorageKey(
-          "remote",
-          remoteUserId
-        );
-        setCollections(cached);
-        setActiveId(
-          resolveActiveCollectionId(
-            cached,
-            readPersistedActiveCollectionId(remoteKey)
-          )
-        );
-        setCollapsedFolderIds(
-          pruneCollapsedFolderIds(
-            cached,
-            readCollapsedFolderIdsFromStorage(remoteCollapsedKey)
-          )
-        );
-        setRemoteLoaded(true);
-        setRemoteSaveAllowed(true);
-        usedRemoteCache = true;
-      }
-    }
-
-    if (!usedRemoteCache) {
-      setRemoteSaveAllowed(false);
-      setRemoteLoaded(false);
-    }
-
-    let cancelled = false;
-    setRemoteBootSyncing(true);
-    (async () => {
-      try {
-        const health = await fetchApiHealth();
-        if (cancelled) return;
-        const mu = health?.mediaUpload;
-        if (mu === "cos" || mu === "local") {
-          setMediaUploadMode(mu);
-        } else {
-          setMediaUploadMode(null);
-        }
-        const online = Boolean(health?.ok);
-        /* 要求登录且未带 JWT：不加载示例数据，仅就绪；登录框由单独 effect 自动打开 */
-        if (writeRequiresLogin && !currentUser && !getAdminToken()) {
-          setCollections([]);
-          setLoadError(null);
-          setSaveError(null);
-          setApiOnline(online);
-          setRemoteSaveAllowed(false);
-          setRemoteLoaded(true);
-          return;
-        }
-        const data = await fetchCollectionsFromApi();
-        if (cancelled) return;
-        if (data !== null) {
-          let tree = migrateCollectionTree(data);
-          const authed = Boolean(currentUser || getAdminToken());
-          if (tree.length === 0 && authed && writeRequiresLogin) {
-            tree = cloneInitialCollections();
-            const seeded = await saveCollectionsToApi(tree);
-            if (!seeded) {
-              setSidebarFlash(
-                "新账号内置笔记已就绪，但首次同步到服务器失败，可稍后再试或联系管理员"
-              );
-            }
-          }
-          setCollections(tree);
-          const remoteKey = activeCollectionStorageKey(
-            "remote",
-            currentUser?.id ?? null
-          );
-          const remoteCollapsedKey = collapsedFoldersStorageKey(
-            "remote",
-            currentUser?.id ?? null
-          );
-          setActiveId(
-            resolveActiveCollectionId(
-              tree,
-              readPersistedActiveCollectionId(remoteKey)
-            )
-          );
-          setCollapsedFolderIds(
-            pruneCollapsedFolderIds(
-              tree,
-              readCollapsedFolderIdsFromStorage(remoteCollapsedKey)
-            )
-          );
-          if (snapshotKey) {
-            saveRemoteCollectionsSnapshot(snapshotKey, tree);
-          }
-          setApiOnline(true);
-          setLoadError(null);
-          setRemoteSaveAllowed(true);
-        } else {
-          setRemoteSaveAllowed(false);
-          if (writeRequiresLogin && (currentUser || getAdminToken())) {
-            setLoadError(
-              "笔记加载摔了一跤… 看看网络或重新登录试试？"
-            );
-            if (!usedRemoteCache) {
-              setCollections([]);
-              setApiOnline(false);
-            } else {
-              setApiOnline(false);
-            }
-          } else {
-            setLoadError(
-              "连不上服务器喵～请检查网络或稍后再刷新。"
-            );
-            if (!usedRemoteCache) {
-              setCollections([]);
-              setApiOnline(online);
-            }
-          }
-        }
-        setRemoteLoaded(true);
-      } finally {
-        if (!cancelled) setRemoteBootSyncing(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [authReady, dataMode, writeRequiresLogin, currentUser?.id]);
+  useRemoteCollectionsSync({
+    authReady,
+    dataMode,
+    writeRequiresLogin,
+    currentUser,
+    setCollections,
+    setActiveId,
+    setCollapsedFolderIds,
+    setRemoteLoaded,
+    setRemoteBootSyncing,
+    setRemoteSaveAllowed,
+    setApiOnline,
+    setLoadError,
+    setSaveError,
+    setMediaUploadMode,
+    setSidebarFlash,
+  });
 
   /** 云端模式下在首次 remote 就绪前盖住主区（含未登录时等健康检查、登录后等 GET 合集） */
   const showRemoteLoading = useMemo(
@@ -2584,57 +460,25 @@ export default function App() {
     [authReady, dataMode, remoteLoaded]
   );
 
-  const mobileMainSwipeRef = useRef<{
-    x: number;
-    y: number;
-    tracking: boolean;
-  } | null>(null);
-  const mobileSidebarSwipeRef = useRef<{ x: number; y: number } | null>(
-    null
-  );
-
-  const onMobileMainTouchStart = useCallback(
-    (e: React.TouchEvent) => {
-      if (
-        typeof window === "undefined" ||
-        window.innerWidth > MOBILE_NAV_SWIPE_LAYOUT_MAX_PX
-      ) {
-        return;
-      }
-      if (
-        mobileNavOpen ||
-        mobileCalendarOpen ||
-        relatedPanel !== null ||
-        detailCard !== null ||
-        userAdminOpen ||
-        userProfileModalOpen ||
-        userNoteSettingsOpen ||
-        userDataStatsOpen ||
-        reminderPicker !== null ||
-        collectionDeleteDialog !== null ||
-        showRemoteLoading
-      ) {
-        return;
-      }
-      if (mobileNavSwipeTargetIsTextual(e.target)) return;
-      const t = e.touches[0];
-      if (!t) return;
-      if (t.clientX > MOBILE_NAV_SWIPE_FROM_LEFT_PX) {
-        mobileMainSwipeRef.current = null;
-        return;
-      }
-      mobileMainSwipeRef.current = {
-        x: t.clientX,
-        y: t.clientY,
-        tracking: true,
-      };
-    },
+  const blockMainEdgeSwipe = useMemo(
+    () =>
+      mobileNavOpen ||
+      mobileCalendarOpen ||
+      relatedPanel !== null ||
+      detailCard !== null ||
+      userAdmin.userAdminOpen ||
+      userProfileModalOpen ||
+      userNoteSettingsOpen ||
+      userDataStatsOpen ||
+      reminderPicker !== null ||
+      collectionDeleteDialog !== null ||
+      showRemoteLoading,
     [
       mobileNavOpen,
       mobileCalendarOpen,
       relatedPanel,
       detailCard,
-      userAdminOpen,
+      userAdmin.userAdminOpen,
       userProfileModalOpen,
       userNoteSettingsOpen,
       userDataStatsOpen,
@@ -2644,75 +488,19 @@ export default function App() {
     ]
   );
 
-  const onMobileMainTouchEnd = useCallback(
-    (e: React.TouchEvent) => {
-      const start = mobileMainSwipeRef.current;
-      mobileMainSwipeRef.current = null;
-      if (!start?.tracking) return;
-      if (
-        typeof window !== "undefined" &&
-        window.innerWidth > MOBILE_NAV_SWIPE_LAYOUT_MAX_PX
-      ) {
-        return;
-      }
-      const t = e.changedTouches[0];
-      if (!t) return;
-      const dx = t.clientX - start.x;
-      const dy = t.clientY - start.y;
-      if (dx < MOBILE_NAV_SWIPE_OPEN_MIN_DX) return;
-      if (!mobileNavSwipeMostlyHorizontal(dx, dy)) return;
-      setMobileNavOpen(true);
-    },
-    []
-  );
-
-  const onMobileMainTouchCancel = useCallback(() => {
-    mobileMainSwipeRef.current = null;
-  }, []);
-
-  const onMobileSidebarTouchStart = useCallback(
-    (e: React.TouchEvent) => {
-      if (
-        typeof window === "undefined" ||
-        window.innerWidth > MOBILE_NAV_SWIPE_LAYOUT_MAX_PX
-      ) {
-        return;
-      }
-      if (!mobileNavOpen || showRemoteLoading) return;
-      if (mobileNavSwipeTargetIsTextual(e.target)) return;
-      const t = e.touches[0];
-      if (!t) return;
-      mobileSidebarSwipeRef.current = { x: t.clientX, y: t.clientY };
-    },
-    [mobileNavOpen, showRemoteLoading]
-  );
-
-  const onMobileSidebarTouchEnd = useCallback(
-    (e: React.TouchEvent) => {
-      const start = mobileSidebarSwipeRef.current;
-      mobileSidebarSwipeRef.current = null;
-      if (!start) return;
-      if (
-        typeof window !== "undefined" &&
-        window.innerWidth > MOBILE_NAV_SWIPE_LAYOUT_MAX_PX
-      ) {
-        return;
-      }
-      if (!mobileNavOpen) return;
-      const t = e.changedTouches[0];
-      if (!t) return;
-      const dx = t.clientX - start.x;
-      const dy = t.clientY - start.y;
-      if (dx > -MOBILE_NAV_SWIPE_CLOSE_MIN_DX) return;
-      if (!mobileNavSwipeMostlyHorizontal(dx, dy)) return;
-      setMobileNavOpen(false);
-    },
-    [mobileNavOpen]
-  );
-
-  const onMobileSidebarTouchCancel = useCallback(() => {
-    mobileSidebarSwipeRef.current = null;
-  }, []);
+  const {
+    onMobileMainTouchStart,
+    onMobileMainTouchEnd,
+    onMobileMainTouchCancel,
+    onMobileSidebarTouchStart,
+    onMobileSidebarTouchEnd,
+    onMobileSidebarTouchCancel,
+  } = useMobileNavSwipe({
+    mobileNavOpen,
+    setMobileNavOpen,
+    showRemoteLoading,
+    blockMainEdgeSwipe,
+  });
 
   useEffect(() => {
     if (!authReady) return;
@@ -3269,63 +1057,6 @@ export default function App() {
     []
   );
 
-  const flushPendingCardTextToRemote = useCallback(() => {
-    if (dataMode === "local") return;
-    const timers = textSaveTimers.current;
-    for (const h of timers.values()) clearTimeout(h);
-    timers.clear();
-    const pending = pendingCardTextById.current;
-    for (const [cid, t] of pending) {
-      void updateCardApi(cid, { text: t });
-    }
-    pending.clear();
-  }, [dataMode]);
-
-  useEffect(() => {
-    if (dataMode === "local") return;
-    const onHidden = () => {
-      if (document.visibilityState === "hidden") flushPendingCardTextToRemote();
-    };
-    const onPageHide = () => flushPendingCardTextToRemote();
-    document.addEventListener("visibilitychange", onHidden);
-    window.addEventListener("pagehide", onPageHide);
-    return () => {
-      document.removeEventListener("visibilitychange", onHidden);
-      window.removeEventListener("pagehide", onPageHide);
-    };
-  }, [dataMode, flushPendingCardTextToRemote]);
-
-  const setCardText = useCallback(
-    (colId: string, cardId: string, text: string) => {
-      setCollections((prev) =>
-        mapCollectionById(prev, colId, (col) => ({
-          ...col,
-          cards: col.cards.map((card) =>
-            card.id === cardId ? { ...card, text } : card
-          ),
-        }))
-      );
-      if (dataMode !== "local") {
-        pendingCardTextById.current.set(cardId, text);
-        // 文本编辑高频触发，防抖后再 PATCH；切页时由 flushPendingCardTextToRemote 立即写出
-        const existing = textSaveTimers.current.get(cardId);
-        if (existing) clearTimeout(existing);
-        textSaveTimers.current.set(
-          cardId,
-          setTimeout(() => {
-            const latest = pendingCardTextById.current.get(cardId);
-            if (latest !== undefined) {
-              void updateCardApi(cardId, { text: latest });
-              pendingCardTextById.current.delete(cardId);
-            }
-            textSaveTimers.current.delete(cardId);
-          }, 400)
-        );
-      }
-    },
-    [dataMode]
-  );
-
   const setCardTags = useCallback(
     (colId: string, cardId: string, tags: string[]) => {
       setCollections((prev) =>
@@ -3875,127 +1606,24 @@ export default function App() {
     [collections]
   );
 
-  const onCollectionRowDragStart = useCallback(
-    (id: string, e: DragEvent) => {
-      if (!canEdit) {
-        e.preventDefault();
-        return;
-      }
-      const t = e.target as HTMLElement;
-      if (t.closest("button, input, textarea")) {
-        e.preventDefault();
-        return;
-      }
-      e.dataTransfer.setData(COLLECTION_DRAG_MIME, id);
-      e.dataTransfer.setData("text/plain", id);
-      e.dataTransfer.effectAllowed = "move";
-      draggingCollectionIdRef.current = id;
-      setDraggingCollectionId(id);
-    },
-    [canEdit]
-  );
-
-  const onCollectionRowDragEnd = useCallback(() => {
-    draggingCollectionIdRef.current = null;
-    setDraggingCollectionId(null);
-    setDropIndicator(null);
-    setNoteCardDropCollectionId(null);
-  }, []);
-
-  const onCollectionRowDragOver = useCallback(
-    (id: string, e: DragEvent) => {
-      if (!canEdit) return;
-      if (
-        noteCardDragActiveRef.current ||
-        noteCardDragTypesInclude(e.dataTransfer)
-      ) {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = "move";
-        setNoteCardDropCollectionId(id);
-        return;
-      }
-      if (draggingCollectionIdRef.current === null) return;
-      e.preventDefault();
-      e.dataTransfer.dropEffect = "move";
-      const el = e.currentTarget as HTMLElement;
-      setDropIndicator({
-        targetId: id,
-        position: dropPositionFromEvent(e, el),
-      });
-    },
-    [canEdit]
-  );
-
-  const onCollectionRowDrop = useCallback(
-    (targetId: string, e: DragEvent) => {
-      if (!canEdit) {
-        e.preventDefault();
-        return;
-      }
-      e.preventDefault();
-      const noteFrom = readNoteCardDragPayload(e);
-      if (noteFrom) {
-        if (noteFrom.colId !== targetId) {
-          setCollections((prev) => {
-            const next = applyNoteCardDrop(prev, noteFrom, {
-              type: "collection",
-              colId: targetId,
-            });
-            if (dataMode === "remote" && canEdit) {
-              void persistNoteCardDropToRemote(noteFrom, next).then((ok) => {
-                if (!ok) {
-                  window.alert(
-                    "笔记移动同步失败，请刷新后重试。"
-                  );
-                }
-              });
-            }
-            return next;
-          });
-        }
-        setNoteCardDropCollectionId(null);
-        setCardDropMarker(null);
-        setDraggingNoteCardKey(null);
-        return;
-      }
-      const dragId = (
-        e.dataTransfer.getData(COLLECTION_DRAG_MIME) ||
-        e.dataTransfer.getData("text/plain")
-      ).trim();
-      if (!dragId) return;
-      const el = e.currentTarget as HTMLElement;
-      const position = dropPositionFromEvent(e, el);
-      setCollections((prev) => {
-        const next = moveCollectionInTree(
-          prev,
-          dragId,
-          targetId,
-          position
-        );
-        if (dataMode === "remote" && canEdit) {
-          void persistCollectionTreeLayoutRemote(next, null).then((ok) => {
-            if (!ok) {
-              window.alert(
-                "合集顺序同步失败，请刷新后重试。"
-              );
-            }
-          });
-        }
-        return next;
-      });
-      if (position === "inside") {
-        setCollapsedFolderIds((prev) => {
-          const next = new Set(prev);
-          next.delete(targetId);
-          return next;
-        });
-      }
-      draggingCollectionIdRef.current = null;
-      setDraggingCollectionId(null);
-      setDropIndicator(null);
-    },
-    [canEdit, dataMode]
-  );
+  const {
+    onCollectionRowDragStart,
+    onCollectionRowDragEnd,
+    onCollectionRowDragOver,
+    onCollectionRowDrop,
+  } = useCollectionRowDnD({
+    canEdit,
+    dataMode,
+    noteCardDragActiveRef,
+    draggingCollectionIdRef,
+    setCollections,
+    setCollapsedFolderIds,
+    setDraggingCollectionId,
+    setDropIndicator,
+    setNoteCardDropCollectionId,
+    setCardDropMarker,
+    setDraggingNoteCardKey,
+  });
 
   useLayoutEffect(() => {
     if (!editingCollectionId) return;
@@ -4114,514 +1742,6 @@ export default function App() {
     if (detailCard && !detailCardLive) setDetailCard(null);
   }, [detailCard, detailCardLive]);
 
-  const renderCard = (card: NoteCard, colId: string) => {
-    const media = (card.media ?? []).filter((m) => m.url?.trim());
-    const hasGallery = media.length > 0;
-    const reminderBesideTime = formatCardReminderBesideTime(card);
-    const hugeForMasonry =
-      masonryLayout && cardNeedsMasonryCollapse(card);
-    const noteKey = `${colId}-${card.id}`;
-    const dropEdgeActive =
-      cardDropMarker !== null &&
-      cardDropMarker.colId === colId &&
-      cardDropMarker.cardId === card.id;
-    return (
-      <li
-        key={noteKey}
-        className={
-          "card" +
-          (cardMenuId === card.id ? " is-menu-open" : "") +
-          (cardDragOverId === card.id && canEdit && canAttachMedia
-            ? " card--file-drag-over"
-            : "") +
-          (dropEdgeActive
-            ? cardDropMarker.before
-              ? " card--note-drop-before"
-              : " card--note-drop-after"
-            : "") +
-          (draggingNoteCardKey === noteKey ? " card--note-dragging" : "") +
-          (hugeForMasonry ? " card--masonry-collapsed" : "")
-        }
-        onDragOver={(e) => {
-          if (!canEdit) return;
-          if (noteCardDragActiveRef.current) {
-            e.preventDefault();
-            e.stopPropagation();
-            e.dataTransfer.dropEffect = "move";
-            const rect = e.currentTarget.getBoundingClientRect();
-            const before =
-              e.clientY < rect.top + rect.height * 0.5;
-            setCardDropMarker({
-              colId,
-              cardId: card.id,
-              before,
-            });
-            return;
-          }
-          if (!canAttachMedia) return;
-          if (!dataTransferHasFiles(e.dataTransfer)) return;
-          e.preventDefault();
-          e.dataTransfer.dropEffect = "copy";
-        }}
-        onDragEnter={(e) => {
-          if (!canEdit) return;
-          if (noteCardDragActiveRef.current) {
-            e.preventDefault();
-            return;
-          }
-          if (!canAttachMedia) return;
-          if (!dataTransferHasFiles(e.dataTransfer)) return;
-          e.preventDefault();
-          setCardDragOverId(card.id);
-        }}
-        onDragLeave={(e) => {
-          if (!canEdit) return;
-          const rel = e.relatedTarget as Node | null;
-          if (rel && e.currentTarget.contains(rel)) return;
-          if (noteCardDragActiveRef.current) {
-            setCardDropMarker((m) =>
-              m && m.cardId === card.id && m.colId === colId
-                ? null
-                : m
-            );
-            return;
-          }
-          if (!canAttachMedia) return;
-          setCardDragOverId((id) => (id === card.id ? null : id));
-        }}
-        onDrop={(e) => {
-          if (!canEdit) return;
-          const from = readNoteCardDragPayload(e);
-          if (from) {
-            e.preventDefault();
-            e.stopPropagation();
-            setCardDropMarker(null);
-            setNoteCardDropCollectionId(null);
-            const rect = e.currentTarget.getBoundingClientRect();
-            const before =
-              e.clientY < rect.top + rect.height * 0.5;
-            const target = before
-              ? ({
-                  type: "before" as const,
-                  colId,
-                  cardId: card.id,
-                } as const)
-              : ({
-                  type: "after" as const,
-                  colId,
-                  cardId: card.id,
-                } as const);
-            setCollections((prev) => {
-              const next = applyNoteCardDrop(prev, from, target);
-              if (dataMode === "remote" && canEdit) {
-                void persistNoteCardDropToRemote(from, next).then((ok) => {
-                  if (!ok) {
-                    window.alert(
-                      "笔记移动同步失败，请刷新后重试。"
-                    );
-                  }
-                });
-              }
-              return next;
-            });
-            setDraggingNoteCardKey(null);
-            return;
-          }
-          if (!canAttachMedia) return;
-          e.preventDefault();
-          setCardDragOverId(null);
-          const files = filesFromDataTransfer(e.dataTransfer);
-          if (files.length === 0) return;
-          void uploadFilesToCard(colId, card.id, files);
-        }}
-      >
-        <CardRowInner
-          hasGallery={hasGallery}
-          textRev={card.text}
-          className={
-            "card__inner" + (hasGallery ? " card__inner--split" : "")
-          }
-        >
-          <div
-            className={
-              "card__move-rail" +
-              (canEdit ? "" : " card__move-rail--readonly")
-            }
-            draggable={canEdit}
-            aria-label={
-              canEdit
-                ? "拖动以移动小笔记"
-                : "侧栏条（登录后可拖动排列）"
-            }
-            title={
-              canEdit
-                ? "按住拖到其他卡片旁或侧栏合集"
-                : "登录后可拖动小笔记排序"
-            }
-            onDragStart={
-              canEdit
-                ? (e: DragEvent<HTMLDivElement>) => {
-                    e.stopPropagation();
-                    const cardEl = e.currentTarget.closest(
-                      "li.card"
-                    ) as HTMLElement | null;
-                    if (cardEl) {
-                      const cr = cardEl.getBoundingClientRect();
-                      const ox = Math.round(e.clientX - cr.left);
-                      const oy = Math.round(e.clientY - cr.top);
-                      e.dataTransfer.setDragImage(cardEl, ox, oy);
-                    }
-                    const payload: NoteCardDragPayload = {
-                      colId,
-                      cardId: card.id,
-                    };
-                    const json = JSON.stringify(payload);
-                    e.dataTransfer.setData(NOTE_CARD_DRAG_MIME, json);
-                    e.dataTransfer.setData(
-                      "text/plain",
-                      NOTE_CARD_TEXT_PREFIX + json
-                    );
-                    e.dataTransfer.effectAllowed = "move";
-                    noteCardDragActiveRef.current = true;
-                    setDraggingNoteCardKey(noteKey);
-                  }
-                : undefined
-            }
-            onDragEnd={
-              canEdit
-                ? () => {
-                    noteCardDragActiveRef.current = false;
-                    setDraggingNoteCardKey(null);
-                    setCardDropMarker(null);
-                    setNoteCardDropCollectionId(null);
-                  }
-                : undefined
-            }
-          />
-          <div
-            className={
-              "card__paper" +
-              (hasGallery ? " card__paper--with-gallery" : "") +
-              " card__paper--with-move-rail"
-            }
-          >
-            <div className="card__toolbar">
-              <span className="card__time">
-                {formatCardTimeLabel(card)}
-                {reminderBesideTime ? (
-                  <span className="card__time-reminder">
-                    {reminderBesideTime}
-                  </span>
-                ) : null}
-              </span>
-              <div className="card__toolbar-actions">
-                <button
-                  type="button"
-                  className="card__icon-btn card__detail-btn"
-                  title={
-                    hugeForMasonry
-                      ? "查看完整笔记"
-                      : "查看详情"
-                  }
-                  aria-label={
-                    hugeForMasonry
-                      ? "查看完整笔记"
-                      : "查看详情"
-                  }
-                  onClick={() =>
-                    setDetailCard({
-                      card,
-                      colId,
-                    })
-                  }
-                >
-                  <svg
-                    viewBox="0 0 16 16"
-                    width="13"
-                    height="13"
-                    fill="currentColor"
-                    aria-hidden="true"
-                  >
-                    <path d="M1 1h5v1.5H2.5V5H1V1zm9 0h5v4h-1.5V2.5H10V1zM1 10h1.5v2.5H5V14H1v-4zM15 10h-1.5v2.5H11V14H15v-4z" />
-                  </svg>
-                </button>
-                <div
-                  className="card__menu-root"
-                  data-card-menu-root={card.id}
-                >
-                  <button
-                    type="button"
-                    className="card__more"
-                    aria-label="更多操作"
-                    aria-expanded={cardMenuId === card.id}
-                    onClick={() =>
-                      setCardMenuId((id) =>
-                        id === card.id ? null : card.id
-                      )
-                    }
-                  >
-                    …
-                  </button>
-                  {cardMenuId === card.id && (
-                    <div
-                      className="card__menu"
-                      role="menu"
-                      aria-orientation="vertical"
-                    >
-                      <button
-                        type="button"
-                        className={
-                          "card__menu-item" +
-                          (relatedPanel?.colId === colId &&
-                          relatedPanel?.cardId === card.id
-                            ? " is-active"
-                            : "")
-                        }
-                        role="menuitem"
-                        onClick={() => {
-                          setRelatedPanel((p) =>
-                            p?.colId === colId && p?.cardId === card.id
-                              ? null
-                              : { colId, cardId: card.id }
-                          );
-                          setCardMenuId(null);
-                        }}
-                      >
-                        相关笔记
-                      </button>
-                      {canEdit && canAttachMedia ? (
-                        <button
-                          type="button"
-                          className="card__menu-item"
-                          role="menuitem"
-                          disabled={uploadBusyCardId === card.id}
-                          onClick={() =>
-                            beginCardMediaUpload(colId, card.id)
-                          }
-                        >
-                          {uploadBusyCardId === card.id
-                            ? "上传中…"
-                            : "添加附件"}
-                        </button>
-                      ) : null}
-                      {canEdit && hasGallery ? (
-                        <button
-                          type="button"
-                          className="card__menu-item"
-                          role="menuitem"
-                          onClick={() =>
-                            clearCardMedia(colId, card.id)
-                          }
-                        >
-                          清空附件
-                        </button>
-                      ) : null}
-                      {canEdit ? (
-                        <button
-                          type="button"
-                          className="card__menu-item"
-                          role="menuitem"
-                          onClick={() => {
-                            setReminderPicker({
-                              colId,
-                              cardId: card.id,
-                            });
-                            setCardMenuId(null);
-                          }}
-                        >
-                          提醒…
-                        </button>
-                      ) : null}
-                      {canEdit ? (
-                        <button
-                          type="button"
-                          className="card__menu-item"
-                          role="menuitem"
-                          onClick={() => {
-                            togglePin(colId, card.id);
-                            setCardMenuId(null);
-                          }}
-                        >
-                          {card.pinned ? "取消置顶" : "置顶"}
-                        </button>
-                      ) : null}
-                      {canEdit ? (
-                        <button
-                          type="button"
-                          className="card__menu-item card__menu-item--danger"
-                          role="menuitem"
-                          onClick={() =>
-                            deleteCard(colId, card.id)
-                          }
-                        >
-                          删除
-                        </button>
-                      ) : null}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-            <NoteCardTiptap
-              id={`card-text-${card.id}`}
-              value={card.text}
-              canEdit={canEdit}
-              ariaLabel="笔记正文"
-              onChange={(next) => setCardText(colId, card.id, next)}
-              onPasteFiles={
-                canEdit && canAttachMedia
-                  ? (files) => {
-                      void uploadFilesToCard(colId, card.id, files);
-                    }
-                  : undefined
-              }
-            />
-            <CardTagsRow
-              colId={colId}
-              card={card}
-              canEdit={canEdit}
-              onCommit={setCardTags}
-            />
-          </div>
-          {hasGallery ? (
-            <CardGallery
-              items={media}
-              onRemoveItem={
-                canEdit
-                  ? (item) =>
-                      removeCardMediaItem(colId, card.id, item)
-                  : undefined
-              }
-            />
-          ) : null}
-        </CardRowInner>
-      </li>
-    );
-  };
-
-  /** 垃圾桶内：与普通小笔记相同的卡片布局，仅菜单为恢复 / 永久删除 */
-  const renderTrashCard = (entry: TrashedNoteEntry) => {
-    const card = entry.card;
-    const media = (card.media ?? []).filter((m) => m.url?.trim());
-    const hasGallery = media.length > 0;
-    const trashReminderBeside = formatCardReminderBesideTime(card);
-    const trashHugeMasonry =
-      masonryLayout && cardNeedsMasonryCollapse(card);
-    const menuId = `__trash__${entry.trashId}`;
-    const noteKey = `trash-${entry.trashId}`;
-    return (
-      <li
-        key={noteKey}
-        className={
-          "card card--in-trash" +
-          (cardMenuId === menuId ? " is-menu-open" : "") +
-          (trashHugeMasonry ? " card--masonry-collapsed" : "")
-        }
-        title={
-          entry.colPathLabel
-            ? `原所在合集：${entry.colPathLabel}`
-            : undefined
-        }
-      >
-        <CardRowInner
-          hasGallery={hasGallery}
-          textRev={card.text}
-          className={
-            "card__inner" + (hasGallery ? " card__inner--split" : "")
-          }
-        >
-          <div
-            className={
-              "card__paper" +
-              (hasGallery ? " card__paper--with-gallery" : "")
-            }
-          >
-            <div className="card__toolbar">
-              <span className="card__time">
-                {formatCardTimeLabel(card)}
-                {trashReminderBeside ? (
-                  <span className="card__time-reminder">
-                    {trashReminderBeside}
-                  </span>
-                ) : null}
-              </span>
-              <div className="card__toolbar-actions">
-                {canEdit ? (
-                  <div
-                    className="card__menu-root"
-                    data-card-menu-root={menuId}
-                  >
-                    <button
-                      type="button"
-                      className="card__more"
-                      aria-label="更多操作"
-                      aria-expanded={cardMenuId === menuId}
-                      onClick={() =>
-                        setCardMenuId((id) =>
-                          id === menuId ? null : menuId
-                        )
-                      }
-                    >
-                      …
-                    </button>
-                    {cardMenuId === menuId ? (
-                      <div
-                        className="card__menu"
-                        role="menu"
-                        aria-orientation="vertical"
-                      >
-                        <button
-                          type="button"
-                          className="card__menu-item"
-                          role="menuitem"
-                          onClick={() => {
-                            setCardMenuId(null);
-                            restoreTrashedEntry(entry);
-                          }}
-                        >
-                          恢复到原合集
-                        </button>
-                        <button
-                          type="button"
-                          className="card__menu-item card__menu-item--danger"
-                          role="menuitem"
-                          onClick={() => {
-                            setCardMenuId(null);
-                            purgeTrashedEntry(entry.trashId);
-                          }}
-                        >
-                          永久删除
-                        </button>
-                      </div>
-                    ) : null}
-                  </div>
-                ) : (
-                  <div className="card__toolbar-spacer" aria-hidden />
-                )}
-              </div>
-            </div>
-            <NoteCardTiptap
-              id={`trash-card-text-${entry.trashId}`}
-              value={card.text}
-              canEdit={false}
-              ariaLabel="笔记正文"
-              onChange={() => {}}
-            />
-            <CardTagsRow
-              colId={entry.colId}
-              card={card}
-              canEdit={false}
-              onCommit={() => {}}
-            />
-          </div>
-          {hasGallery ? (
-            <CardGallery items={media} />
-          ) : null}
-        </CardRowInner>
-      </li>
-    );
-  };
-
   const timelineEmpty = (active?.cards.length ?? 0) === 0;
   const listEmpty = pinned.length === 0 && rest.length === 0;
 
@@ -4631,222 +1751,43 @@ export default function App() {
   const mobileCollectionDragByHandle =
     mobileNavOpen && mobileBrowseEditMode;
 
-  const renderCollectionBranch = (
-    items: Collection[],
-    depth: number
-  ): ReactNode =>
-    items.map((c) => {
-      const childList = c.children ?? [];
-      const hasChildren = childList.length > 0;
-      const collapsed = collapsedFolderIds.has(c.id);
-
-      const dropCls =
-        dropIndicator?.targetId === c.id
-          ? dropIndicator.position === "before"
-            ? " sidebar__tree-row--drop-before"
-            : dropIndicator.position === "after"
-              ? " sidebar__tree-row--drop-after"
-              : " sidebar__tree-row--drop-inside"
-          : "";
-
-      return (
-        <Fragment key={c.id}>
-          <div
-            className={
-              "sidebar__tree-row" +
-              (c.id === active?.id && !calendarDay && !trashViewActive
-                ? " is-active"
-                : "") +
-              (c.id === draggingCollectionId
-                ? " sidebar__tree-row--dragging"
-                : "") +
-              (noteCardDropCollectionId === c.id
-                ? " sidebar__tree-row--note-card-drop"
-                : "") +
-              dropCls
-            }
-            style={{ paddingLeft: 8 + depth * 14 }}
-            draggable={
-              canEdit &&
-              editingCollectionId !== c.id &&
-              !mobileCollectionDragByHandle
-            }
-            onDragStart={(e) => onCollectionRowDragStart(c.id, e)}
-            onDragEnd={onCollectionRowDragEnd}
-            onDragOver={(e) => onCollectionRowDragOver(c.id, e)}
-            onDragLeave={(e) => {
-              const rel = e.relatedTarget as Node | null;
-              if (rel && e.currentTarget.contains(rel)) return;
-              if (noteCardDragActiveRef.current) {
-                setNoteCardDropCollectionId((id) =>
-                  id === c.id ? null : id
-                );
-              }
-            }}
-            onDrop={(e) => onCollectionRowDrop(c.id, e)}
-            onContextMenu={(e) => {
-              if (!canEdit || editingCollectionId === c.id) return;
-              e.preventDefault();
-              setCollectionCtxMenu({
-                x: e.clientX,
-                y: e.clientY,
-                id: c.id,
-                name: c.name,
-                hasChildren: (c.children?.length ?? 0) > 0,
-              });
-            }}
-          >
-            {hasChildren ? (
-              <button
-                type="button"
-                draggable={false}
-                className={
-                  "sidebar__chevron" +
-                  (collapsed ? "" : " is-expanded")
-                }
-                aria-label={collapsed ? "展开子合集" : "折叠子合集"}
-                aria-expanded={!collapsed}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  toggleFolderCollapsed(c.id);
-                }}
-              >
-                <span className="sidebar__chevron-icon" aria-hidden>
-                  ›
-                </span>
-              </button>
-            ) : (
-              <span className="sidebar__chevron-spacer" aria-hidden />
-            )}
-            <div
-              role="button"
-              tabIndex={editingCollectionId === c.id ? -1 : 0}
-              className="sidebar__item-hit"
-              onClick={() => {
-                if (editingCollectionId === c.id) return;
-                setTrashViewActive(false);
-                setCalendarDay(null);
-                expandAncestorsOf(c.id);
-                setActiveId(c.id);
-                /* 与收藏行一致：手机点当前已选合集时 activeId 不变，仅靠 effect 不会关抽屉 */
-                setMobileNavOpen(false);
-              }}
-              onKeyDown={(e) => {
-                if (editingCollectionId === c.id) return;
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  setTrashViewActive(false);
-                  setCalendarDay(null);
-                  expandAncestorsOf(c.id);
-                  setActiveId(c.id);
-                  setMobileNavOpen(false);
-                }
-              }}
-            >
-              <span
-                className="sidebar__dot"
-                style={{ backgroundColor: c.dotColor }}
-                aria-hidden
-              />
-              {editingCollectionId === c.id ? (
-                <input
-                  ref={collectionNameInputRef}
-                  type="text"
-                  className="sidebar__name-input"
-                  value={draftCollectionName}
-                  aria-label="合集名称"
-                  onChange={(e) =>
-                    setDraftCollectionName(e.target.value)
-                  }
-                  onClick={(e) => e.stopPropagation()}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      (e.target as HTMLInputElement).blur();
-                    }
-                    if (e.key === "Escape") {
-                      e.preventDefault();
-                      skipCollectionBlurCommitRef.current = true;
-                      setEditingCollectionId(null);
-                    }
-                  }}
-                  onBlur={onCollectionNameBlur}
-                />
-              ) : (
-                <span
-                  className="sidebar__name"
-                  title={
-                    canEdit ? "双击修改名称；右键可删除合集" : undefined
-                  }
-                  onDoubleClick={
-                    canEdit
-                      ? (e) => {
-                          e.stopPropagation();
-                          setDraftCollectionName(c.name);
-                          setEditingCollectionId(c.id);
-                        }
-                      : undefined
-                  }
-                >
-                  {c.name}
-                </span>
-              )}
-              <span className="sidebar__count">
-                {countSidebarCollectionCardBadge(c)}
-              </span>
-            </div>
-            {canEdit ? (
-              <div className="sidebar__tree-row__tail">
-                {!hideAddsInMobileBrowse ? (
-                  <button
-                    type="button"
-                    draggable={false}
-                    className="sidebar__add-sub"
-                    aria-label="添加子合集"
-                    title="子合集"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      addSubCollection(c.id);
-                    }}
-                  >
-                    +
-                  </button>
-                ) : (
-                  <span
-                    className="sidebar__add-sub-spacer"
-                    aria-hidden
-                  />
-                )}
-                {mobileCollectionDragByHandle ? (
-                  editingCollectionId !== c.id ? (
-                    <div
-                      className="sidebar__tree-drag-handle"
-                      draggable
-                      onDragStart={(e) =>
-                        onCollectionRowDragStart(c.id, e)
-                      }
-                      onDragEnd={onCollectionRowDragEnd}
-                      aria-label="拖动调整合集顺序"
-                      title="拖动调整顺序"
-                    >
-                      <CollectionDragGripIcon className="sidebar__tree-drag-handle__svg" />
-                    </div>
-                  ) : (
-                    <span
-                      className="sidebar__tree-drag-handle-spacer"
-                      aria-hidden
-                    />
-                  )
-                ) : null}
-              </div>
-            ) : null}
-          </div>
-          {hasChildren && !collapsed
-            ? renderCollectionBranch(childList, depth + 1)
-            : null}
-        </Fragment>
-      );
-    });
+  function renderNoteTimelineCard(card: NoteCard, colId: string) {
+    return (
+      <NoteTimelineCard
+        key={`${colId}-${card.id}`}
+        card={card}
+        colId={colId}
+        masonryLayout={masonryLayout}
+        canEdit={canEdit}
+        canAttachMedia={canAttachMedia}
+        cardMenuId={cardMenuId}
+        setCardMenuId={setCardMenuId}
+        relatedPanel={relatedPanel}
+        setRelatedPanel={setRelatedPanel}
+        uploadBusyCardId={uploadBusyCardId}
+        cardDragOverId={cardDragOverId}
+        setCardDragOverId={setCardDragOverId}
+        draggingNoteCardKey={draggingNoteCardKey}
+        cardDropMarker={cardDropMarker}
+        noteCardDragActiveRef={noteCardDragActiveRef}
+        setCardDropMarker={setCardDropMarker}
+        setNoteCardDropCollectionId={setNoteCardDropCollectionId}
+        setDraggingNoteCardKey={setDraggingNoteCardKey}
+        setCollections={setCollections}
+        dataMode={dataMode}
+        setDetailCard={setDetailCard}
+        beginCardMediaUpload={beginCardMediaUpload}
+        clearCardMedia={clearCardMedia}
+        uploadFilesToCard={uploadFilesToCard}
+        removeCardMediaItem={removeCardMediaItem}
+        setReminderPicker={setReminderPicker}
+        togglePin={togglePin}
+        deleteCard={deleteCard}
+        setCardText={setCardText}
+        setCardTags={setCardTags}
+      />
+    );
+  }
 
   const openUserProfileModal = useCallback(() => {
     setUserAccountMenuOpen(false);
@@ -5068,7 +2009,7 @@ export default function App() {
                     <button
                       type="button"
                       className="sidebar__users-btn"
-                      onClick={() => setUserAdminOpen(true)}
+                      onClick={() => userAdmin.setUserAdminOpen(true)}
                       title="小伙伴管理台"
                     >
                       用户
@@ -5220,7 +2161,40 @@ export default function App() {
             ) : null}
           </div>
           <nav className="sidebar__nav" aria-label="合集">
-            {renderCollectionBranch(collections, 0)}
+            <CollectionSidebarTree
+              collections={collections}
+              activeId={active?.id}
+              calendarDay={calendarDay}
+              trashViewActive={trashViewActive}
+              collapsedFolderIds={collapsedFolderIds}
+              dropIndicator={dropIndicator}
+              draggingCollectionId={draggingCollectionId}
+              noteCardDropCollectionId={noteCardDropCollectionId}
+              canEdit={canEdit}
+              editingCollectionId={editingCollectionId}
+              mobileCollectionDragByHandle={mobileCollectionDragByHandle}
+              hideAddsInMobileBrowse={hideAddsInMobileBrowse}
+              draftCollectionName={draftCollectionName}
+              collectionNameInputRef={collectionNameInputRef}
+              skipCollectionBlurCommitRef={skipCollectionBlurCommitRef}
+              noteCardDragActiveRef={noteCardDragActiveRef}
+              onCollectionRowDragStart={onCollectionRowDragStart}
+              onCollectionRowDragEnd={onCollectionRowDragEnd}
+              onCollectionRowDragOver={onCollectionRowDragOver}
+              onCollectionRowDrop={onCollectionRowDrop}
+              setNoteCardDropCollectionId={setNoteCardDropCollectionId}
+              setCollectionCtxMenu={setCollectionCtxMenu}
+              toggleFolderCollapsed={toggleFolderCollapsed}
+              expandAncestorsOf={expandAncestorsOf}
+              setTrashViewActive={setTrashViewActive}
+              setCalendarDay={setCalendarDay}
+              setActiveId={setActiveId}
+              setMobileNavOpen={setMobileNavOpen}
+              setDraftCollectionName={setDraftCollectionName}
+              setEditingCollectionId={setEditingCollectionId}
+              onCollectionNameBlur={onCollectionNameBlur}
+              addSubCollection={addSubCollection}
+            />
           </nav>
         </div>
 
@@ -5698,7 +2672,7 @@ export default function App() {
                         </div>
                         <ul className="cards">
                           {cards.map((card) =>
-                            renderCard(card, col.id)
+                            renderNoteTimelineCard(card, col.id)
                           )}
                         </ul>
                       </div>
@@ -5716,7 +2690,18 @@ export default function App() {
               </div>
             ) : (
               <ul className="cards" aria-label="已删除的笔记">
-                {trashEntries.map((entry) => renderTrashCard(entry))}
+                {trashEntries.map((entry) => (
+                  <TrashNoteCardRow
+                    key={entry.trashId}
+                    entry={entry}
+                    canEdit={canEdit}
+                    masonryLayout={masonryLayout}
+                    cardMenuId={cardMenuId}
+                    setCardMenuId={setCardMenuId}
+                    restoreTrashedEntry={restoreTrashedEntry}
+                    purgeTrashedEntry={purgeTrashedEntry}
+                  />
+                ))}
               </ul>
             )
           ) : calendarDay ? (
@@ -5738,7 +2723,7 @@ export default function App() {
                     <h2 className="timeline__pin-heading">提醒</h2>
                     <ul className="cards">
                       {dayReminderEntries.map(({ card }) =>
-                        renderCard(
+                        renderNoteTimelineCard(
                           card,
                           cardToColIdForDay.get(card.id) ?? ""
                         )
@@ -5762,7 +2747,7 @@ export default function App() {
                     <h2 className="timeline__pin-heading">置顶</h2>
                     <ul className="cards">
                       {dayPinned.map((card) =>
-                        renderCard(
+                        renderNoteTimelineCard(
                           card,
                           cardToColIdForDay.get(card.id) ?? ""
                         )
@@ -5787,7 +2772,7 @@ export default function App() {
                     </h2>
                     <ul className="cards">
                       {dayColCards.map((card) =>
-                        renderCard(card, col.id)
+                        renderNoteTimelineCard(card, col.id)
                       )}
                     </ul>
                   </div>
@@ -5812,7 +2797,7 @@ export default function App() {
                   <h2 className="timeline__pin-heading">置顶</h2>
                   <ul className="cards">
                     {pinned.map((card) =>
-                      renderCard(card, active!.id)
+                      renderNoteTimelineCard(card, active!.id)
                     )}
                   </ul>
                 </section>
@@ -5825,7 +2810,7 @@ export default function App() {
                 />
               )}
               <ul className="cards">
-                {rest.map((card) => renderCard(card, active!.id))}
+                {rest.map((card) => renderNoteTimelineCard(card, active!.id))}
               </ul>
             </>
           )}
@@ -6049,93 +3034,17 @@ export default function App() {
         tabIndex={-1}
         onChange={onCardMediaFileSelected}
       />
-      {collectionCtxMenu
-        ? createPortal(
-            <div
-              data-collection-ctx-menu
-              className="attachment-ctx-menu"
-              style={{
-                position: "fixed",
-                left: Math.min(
-                  collectionCtxMenu.x,
-                  typeof window !== "undefined"
-                    ? window.innerWidth - 160
-                    : collectionCtxMenu.x
-                ),
-                top: collectionCtxMenu.y,
-                zIndex: 10002,
-              }}
-              role="menu"
-            >
-              <button
-                type="button"
-                className="attachment-ctx-menu__item"
-                role="menuitem"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  openRemoveCollectionDialog(
-                    collectionCtxMenu.id,
-                    collectionCtxMenu.name,
-                    collectionCtxMenu.hasChildren
-                  );
-                }}
-              >
-                删除合集
-              </button>
-            </div>,
-            document.body
-          )
-        : null}
-      {collectionDeleteDialog
-        ? createPortal(
-            <div
-              className="auth-modal-backdrop"
-              role="presentation"
-              onClick={() => setCollectionDeleteDialog(null)}
-            >
-              <div
-                className="auth-modal"
-                role="alertdialog"
-                aria-modal="true"
-                aria-labelledby="collection-delete-dialog-title"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <h2
-                  id="collection-delete-dialog-title"
-                  className="auth-modal__title"
-                >
-                  删除合集
-                </h2>
-                <p className="auth-modal__hint">
-                  {collectionDeleteDialog.hasSubtree
-                    ? `要连「${collectionDeleteDialog.displayName}」带子文件夹一锅端吗？里面的笔记也会一起蒸发，救不回喔。`
-                    : `确定拆掉「${collectionDeleteDialog.displayName}」这个合集？里面的笔记也会一起消失喔。`}
-                </p>
-                <div className="auth-modal__actions">
-                  <button
-                    type="button"
-                    className="auth-modal__btn auth-modal__btn--ghost"
-                    onClick={() => setCollectionDeleteDialog(null)}
-                  >
-                    取消
-                  </button>
-                  <button
-                    type="button"
-                    className="auth-modal__btn auth-modal__btn--primary"
-                    onClick={() => {
-                      const d = collectionDeleteDialog;
-                      setCollectionDeleteDialog(null);
-                      performRemoveCollection(d.id);
-                    }}
-                  >
-                    确定删除
-                  </button>
-                </div>
-              </div>
-            </div>,
-            document.body
-          )
-        : null}
+      <CollectionContextMenu
+        menu={collectionCtxMenu}
+        onRemove={(id, name, hasChildren) => {
+          openRemoveCollectionDialog(id, name, hasChildren);
+        }}
+      />
+      <CollectionDeleteDialog
+        dialog={collectionDeleteDialog}
+        onClose={() => setCollectionDeleteDialog(null)}
+        onConfirmRemove={(id) => performRemoveCollection(id)}
+      />
       {relatedPanel
         ? createPortal(
             <RelatedCardsSidePanel
@@ -6173,184 +3082,30 @@ export default function App() {
             document.body
           )
         : null}
-      {userAdminOpen && isAdmin
-        ? createPortal(
-            <div
-              className="auth-modal-backdrop"
-              role="presentation"
-              onClick={() => setUserAdminOpen(false)}
-            >
-              <div
-                className="auth-modal user-admin-modal"
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="user-admin-title"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <h2 id="user-admin-title" className="auth-modal__title">
-                  小伙伴管理台
-                </h2>
-                <p className="auth-modal__hint">
-                  在这儿给新来的发入住许可～ 登录后每人都有自己的笔记小窝和附件格子；站长还能改身份、换口令、送走来访者。
-                </p>
-                {adminUsersErr || userAdminFormErr ? (
-                  <p className="auth-modal__err" role="alert">
-                    {adminUsersErr ?? userAdminFormErr}
-                  </p>
-                ) : null}
-                <div className="user-admin__new">
-                  <p className="user-admin__new-title">拉新坑位</p>
-                  <input
-                    type="text"
-                    className="auth-modal__input"
-                    autoComplete="off"
-                    placeholder="登录用小 ID"
-                    value={newUserUsername}
-                    disabled={newUserBusy}
-                    onChange={(e) => setNewUserUsername(e.target.value)}
-                  />
-                  <input
-                    type="password"
-                    className="auth-modal__input"
-                    autoComplete="new-password"
-                    placeholder="开局口令（至少 4 位）"
-                    value={newUserPassword}
-                    disabled={newUserBusy}
-                    onChange={(e) => setNewUserPassword(e.target.value)}
-                  />
-                  <input
-                    type="text"
-                    className="auth-modal__input"
-                    autoComplete="off"
-                    placeholder="对外昵称（可选，不填就用小 ID）"
-                    value={newUserDisplayName}
-                    disabled={newUserBusy}
-                    onChange={(e) => setNewUserDisplayName(e.target.value)}
-                  />
-                  <div className="user-admin__new-row">
-                    <label className="user-admin__role-label">
-                      身份
-                      <select
-                        className="user-admin__role-select"
-                        value={newUserRole}
-                        disabled={newUserBusy}
-                        onChange={(e) =>
-                          setNewUserRole(
-                            e.target.value === "admin" ? "admin" : "user"
-                          )
-                        }
-                      >
-                        <option value="user">住民</option>
-                        <option value="admin">站长</option>
-                      </select>
-                    </label>
-                    <button
-                      type="button"
-                      className="auth-modal__btn auth-modal__btn--primary"
-                      disabled={
-                        newUserBusy ||
-                        !newUserUsername.trim() ||
-                        newUserPassword.length < 4
-                      }
-                      onClick={() => void submitNewUser()}
-                    >
-                      {newUserBusy ? "…" : "发放入住许可"}
-                    </button>
-                  </div>
-                </div>
-                <div className="user-admin__table-wrap">
-                  {adminUsersLoading ? (
-                    <p className="user-admin__loading">名单抓抓中…</p>
-                  ) : (
-                    <table className="user-admin__table">
-                      <thead>
-                        <tr>
-                          <th>昵称</th>
-                          <th>登录 ID</th>
-                          <th>身份</th>
-                          <th>换口令</th>
-                          <th />
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {adminUsers.map((u) => (
-                          <tr key={u.id}>
-                            <td>{u.displayName}</td>
-                            <td className="user-admin__mono">{u.username}</td>
-                            <td>
-                              <select
-                                className="user-admin__role-select user-admin__role-select--inline"
-                                value={u.role}
-                                disabled={rowBusyId === u.id}
-                                onChange={(e) =>
-                                  void onRoleChange(
-                                    u,
-                                    e.target.value === "admin"
-                                      ? "admin"
-                                      : "user"
-                                  )
-                                }
-                              >
-                                <option value="user">住民</option>
-                                <option value="admin">站长</option>
-                              </select>
-                            </td>
-                            <td className="user-admin__pwd-cell">
-                              <div className="user-admin__pwd-inner">
-                                <input
-                                  type="password"
-                                  className="user-admin__pwd-input"
-                                  autoComplete="new-password"
-                                  placeholder="新口令（≥4）"
-                                  value={pwdResetByUser[u.id] ?? ""}
-                                  disabled={rowBusyId === u.id}
-                                  onChange={(e) =>
-                                    setPwdResetByUser((prev) => ({
-                                      ...prev,
-                                      [u.id]: e.target.value,
-                                    }))
-                                  }
-                                />
-                                <button
-                                  type="button"
-                                  className="user-admin__mini-btn"
-                                  disabled={rowBusyId === u.id}
-                                  onClick={() => void applyPasswordReset(u)}
-                                >
-                                  生效
-                                </button>
-                              </div>
-                            </td>
-                            <td>
-                              <button
-                                type="button"
-                                className="user-admin__mini-btn user-admin__mini-btn--danger"
-                                disabled={rowBusyId === u.id}
-                                onClick={() => void onDeleteUser(u)}
-                              >
-                                送走
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  )}
-                </div>
-                <div className="auth-modal__actions">
-                  <button
-                    type="button"
-                    className="auth-modal__btn auth-modal__btn--ghost"
-                    onClick={() => setUserAdminOpen(false)}
-                  >
-                    收工
-                  </button>
-                </div>
-              </div>
-            </div>,
-            document.body
-          )
-        : null}
+      <UserAdminModal
+        open={userAdmin.userAdminOpen && isAdmin}
+        onClose={() => userAdmin.setUserAdminOpen(false)}
+        adminUsersErr={userAdmin.adminUsersErr}
+        userAdminFormErr={userAdmin.userAdminFormErr}
+        newUserUsername={userAdmin.newUserUsername}
+        setNewUserUsername={userAdmin.setNewUserUsername}
+        newUserPassword={userAdmin.newUserPassword}
+        setNewUserPassword={userAdmin.setNewUserPassword}
+        newUserDisplayName={userAdmin.newUserDisplayName}
+        setNewUserDisplayName={userAdmin.setNewUserDisplayName}
+        newUserRole={userAdmin.newUserRole}
+        setNewUserRole={userAdmin.setNewUserRole}
+        newUserBusy={userAdmin.newUserBusy}
+        submitNewUser={userAdmin.submitNewUser}
+        adminUsers={userAdmin.adminUsers}
+        adminUsersLoading={userAdmin.adminUsersLoading}
+        rowBusyId={userAdmin.rowBusyId}
+        pwdResetByUser={userAdmin.pwdResetByUser}
+        setPwdResetByUser={userAdmin.setPwdResetByUser}
+        onRoleChange={userAdmin.onRoleChange}
+        applyPasswordReset={userAdmin.applyPasswordReset}
+        onDeleteUser={userAdmin.onDeleteUser}
+      />
       {currentUser ? (
         <UserProfileModal
           open={userProfileModalOpen}

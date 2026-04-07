@@ -2209,19 +2209,19 @@ textarea.main__hint-editor:focus {
 }
 
 .reminder-picker-modal__btn--primary {
-  background: #0ea5e9;
+  background: var(--mikujar-logo-jar);
   color: #fff;
-  border-color: #0ea5e9;
+  border-color: var(--mikujar-logo-jar);
 }
 
 .reminder-picker-modal__btn--primary:hover:not(:disabled) {
-  background: #0284c7;
-  border-color: #0284c7;
+  background: var(--mikujar-logo-jar-deep);
+  border-color: var(--mikujar-logo-jar-deep);
 }
 
 .reminder-picker-modal__btn--primary:active:not(:disabled) {
-  background: #0369a1;
-  border-color: #0369a1;
+  background: color-mix(in srgb, var(--mikujar-logo-jar-deep) 82%, #0f172a);
+  border-color: color-mix(in srgb, var(--mikujar-logo-jar-deep) 82%, #0f172a);
 }
 
 .reminder-picker-modal__btn--primary:disabled {
@@ -3589,19 +3589,19 @@ div.card__text--readonly:not(.card__text--preview) {
 }
 
 .auth-modal__btn--primary {
-  background: #0ea5e9;
-  border-color: #0ea5e9;
+  background: var(--mikujar-logo-jar);
+  border-color: var(--mikujar-logo-jar);
   color: #ffffff;
 }
 
 .auth-modal__btn--primary:hover:not(:disabled) {
-  background: #0284c7;
-  border-color: #0284c7;
+  background: var(--mikujar-logo-jar-deep);
+  border-color: var(--mikujar-logo-jar-deep);
 }
 
 .auth-modal__btn--primary:active:not(:disabled) {
-  background: #0369a1;
-  border-color: #0369a1;
+  background: color-mix(in srgb, var(--mikujar-logo-jar-deep) 82%, #0f172a);
+  border-color: color-mix(in srgb, var(--mikujar-logo-jar-deep) 82%, #0f172a);
 }
 
 .auth-modal__btn--primary--full {
