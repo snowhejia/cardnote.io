@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { Capacitor } from "@capacitor/core";
 import { Keyboard, KeyboardStyle } from "@capacitor/keyboard";
+import { SpeedInsights } from "@vercel/speed-insights/react";
 import App from "./App";
 import { AppDataModeProvider } from "./appDataMode";
 import { AuthProvider } from "./auth/AuthContext";
@@ -38,6 +39,7 @@ createRoot(document.getElementById("root")!).render(
     <AppDataModeProvider>
       <AuthProvider>
         <App />
+        <SpeedInsights />
       </AuthProvider>
     </AppDataModeProvider>
   </StrictMode>
