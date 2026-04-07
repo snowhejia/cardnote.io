@@ -1,3 +1,4 @@
+import { Capacitor } from "@capacitor/core";
 import { authUsesHttpOnlyCookie } from "../auth/token";
 import { getAppDataMode } from "../appDataModeStorage";
 
@@ -7,14 +8,26 @@ export const DEFAULT_TAURI_REMOTE_API = "https://api.notes.hejiac.com";
 /**
  * 云端 API 根（不受「本地/云端数据模式」影响），供登录、/me 等鉴权请求使用。
  */
+/** Tauri / Capacitor 等原生壳内无 Vite 代理，须直连绝对 API 地址 */
+function isNativeWebViewShell(): boolean {
+  return (
+    (typeof __TAURI_BUILD__ !== "undefined" && __TAURI_BUILD__) ||
+    Capacitor.isNativePlatform()
+  );
+}
+
 function remoteApiBaseResolved(): string {
   const b = (import.meta.env.VITE_API_BASE as string | undefined)?.trim();
   if (b) return b.replace(/\/$/, "");
-  if (typeof __TAURI_BUILD__ !== "undefined" && __TAURI_BUILD__) {
+  if (isNativeWebViewShell()) {
     const override = (
       import.meta.env.VITE_TAURI_API_PORT as string | undefined
     )?.trim();
-    if (override && /^\d+$/.test(override)) {
+    if (
+      (typeof __TAURI_BUILD__ !== "undefined" && __TAURI_BUILD__) &&
+      override &&
+      /^\d+$/.test(override)
+    ) {
       return `http://127.0.0.1:${override}`;
     }
     return DEFAULT_TAURI_REMOTE_API.replace(/\/$/, "");
@@ -31,7 +44,7 @@ export function remoteApiBase(): string {
  * API 根地址（无尾部斜杠）。
  * - **本地数据模式**：不连远程（返回 `""`；笔记读写走本地存储）。
  * - **云端数据模式** + `VITE_API_BASE`：优先使用该地址（Vercel 等）。
- * - **云端数据模式** + Tauri 构建且未配 `VITE_API_BASE`：`DEFAULT_TAURI_REMOTE_API`。
+ * - **云端数据模式** + Tauri / Capacitor 原生且未配 `VITE_API_BASE`：`DEFAULT_TAURI_REMOTE_API`。
  * - **云端数据模式** + 浏览器开发：`""`，走 Vite 对 `/api`、`/uploads` 的代理。
  */
 export function apiBase(): string {
@@ -47,8 +60,7 @@ export function apiBase(): string {
 export function apiFetchCredentials(): RequestCredentials {
   const raw = (import.meta.env.VITE_API_BASE as string | undefined)?.trim();
   const absoluteRemote =
-    (raw && /^https?:\/\//i.test(raw)) ||
-    (typeof __TAURI_BUILD__ !== "undefined" && __TAURI_BUILD__);
+    (raw && /^https?:\/\//i.test(raw)) || isNativeWebViewShell();
   if (!absoluteRemote) return "same-origin";
   if (authUsesHttpOnlyCookie()) return "include";
   return "omit";

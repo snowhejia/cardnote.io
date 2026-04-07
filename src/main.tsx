@@ -1,9 +1,21 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { Capacitor } from "@capacitor/core";
+import { Keyboard, KeyboardStyle } from "@capacitor/keyboard";
 import App from "./App";
 import { AppDataModeProvider } from "./appDataMode";
 import { AuthProvider } from "./auth/AuthContext";
 import "./index.css";
+
+/** Capacitor iOS：辅助栏 + 浅色键盘（与页面一致，减轻黑底观感） */
+function configureCapacitorIosKeyboard() {
+  if (!Capacitor.isNativePlatform() || Capacitor.getPlatform() !== "ios") {
+    return;
+  }
+  void Keyboard.setAccessoryBarVisible({ isVisible: false }).catch(() => {});
+  void Keyboard.setStyle({ style: KeyboardStyle.Light }).catch(() => {});
+}
+configureCapacitorIosKeyboard();
 
 /** iOS WKWebView：拦截双指捏合缩放（viewport 在部分场景仍可能漏网） */
 function disableIosPinchZoom() {

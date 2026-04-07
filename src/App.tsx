@@ -14,6 +14,7 @@ import type {
   Ref,
 } from "react";
 import { createPortal, flushSync } from "react-dom";
+import { Capacitor } from "@capacitor/core";
 import { isTauri } from "@tauri-apps/api/core";
 import { DEFAULT_TAURI_REMOTE_API } from "./api/apiBase";
 import { fetchApiHealth } from "./api/health";
@@ -51,6 +52,11 @@ import { useAuth } from "./auth/AuthContext";
 import { getAdminToken } from "./auth/token";
 import { collections as initialCollections } from "./data";
 import { loadLocalCollections, saveLocalCollections } from "./localCollectionsStorage";
+import {
+  loadRemoteCollectionsSnapshot,
+  remoteSnapshotUserKey,
+  saveRemoteCollectionsSnapshot,
+} from "./remoteCollectionsCache";
 import { saveLocalMediaInlineInBrowser } from "./localMediaBrowser";
 import {
   deleteLocalMediaFile,
@@ -2022,6 +2028,8 @@ export default function App() {
     position: CollectionDropPosition;
   } | null>(null);
   const [remoteLoaded, setRemoteLoaded] = useState(false);
+  /** 云端：首屏已展示（含本地快照）但 GET /collections 仍在进行 */
+  const [remoteBootSyncing, setRemoteBootSyncing] = useState(false);
   /** 云端模式下仅在一次成功的 GET /collections 之后才开放写入（粒度化 API 内部自行检查） */
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [_remoteSaveAllowed, setRemoteSaveAllowed] = useState(false);
@@ -2105,8 +2113,20 @@ export default function App() {
     minutesOfDay: number;
     addedOn: string;
   } | null>(null);
+  /** 快速记录写入的目标合集（打开时默认当前选中，可在药丸里切换） */
+  const [mobileQuickCaptureTargetColId, setMobileQuickCaptureTargetColId] =
+    useState<string | null>(null);
   const mobileQuickCaptureDraftRef = useRef("");
   const mobileQuickCaptureAreaRef = useRef<HTMLTextAreaElement>(null);
+  const quickCaptureMediaInputRef = useRef<HTMLInputElement>(null);
+
+  const nativeQuickCaptureShell =
+    isTauri() || Capacitor.isNativePlatform();
+
+  const mobileQuickCaptureCollectionPills = useMemo(
+    () => walkCollectionsWithPath(collections, []),
+    [collections]
+  );
   const [relatedPanel, setRelatedPanel] = useState<{
     colId: string;
     cardId: string;
@@ -2394,6 +2414,7 @@ export default function App() {
       setApiOnline(true);
       setLoadError(null);
       setSaveError(null);
+      setRemoteBootSyncing(false);
       const cols = loadLocalCollections(cloneInitialCollections);
       setCollections(cols);
       const localKey = activeCollectionStorageKey("local", null);
@@ -2411,87 +2432,138 @@ export default function App() {
       return;
     }
 
-    setRemoteSaveAllowed(false);
-    // 已登录（含仅有 JWT、/me 尚未返回）：拉取完成前保持 remoteLoaded=false，避免示例数据被自动保存覆盖服务器
-    if (writeRequiresLogin && (currentUser || getAdminToken())) {
-      setRemoteLoaded(false);
-    }
-    let cancelled = false;
-    (async () => {
-      const health = await fetchApiHealth();
-      if (cancelled) return;
-      const mu = health?.mediaUpload;
-      if (mu === "cos" || mu === "local") {
-        setMediaUploadMode(mu);
-      } else {
-        setMediaUploadMode(null);
-      }
-      const online = Boolean(health?.ok);
-      /* 要求登录且未带 JWT：不加载示例数据，仅就绪；登录框由单独 effect 自动打开 */
-      if (writeRequiresLogin && !currentUser && !getAdminToken()) {
-        setCollections([]);
-        setLoadError(null);
-        setSaveError(null);
-        setApiOnline(online);
-        setRemoteSaveAllowed(false);
-        setRemoteLoaded(true);
-        return;
-      }
-      const data = await fetchCollectionsFromApi();
-      if (cancelled) return;
-      if (data !== null) {
-        let tree = migrateCollectionTree(data);
-        const authed = Boolean(currentUser || getAdminToken());
-        if (tree.length === 0 && authed && writeRequiresLogin) {
-          tree = cloneInitialCollections();
-          const seeded = await saveCollectionsToApi(tree);
-          if (!seeded) {
-            setSidebarFlash(
-              "新账号内置笔记已就绪，但首次同步到服务器失败，可稍后再试或联系管理员"
-            );
-          }
-        }
-        setCollections(tree);
-        const remoteKey = activeCollectionStorageKey(
-          "remote",
-          currentUser?.id ?? null
-        );
+    const snapshotKey = remoteSnapshotUserKey(
+      writeRequiresLogin,
+      currentUser?.id ?? null
+    );
+    const canTryRemoteCache =
+      snapshotKey !== null &&
+      (!writeRequiresLogin || Boolean(currentUser || getAdminToken()));
+
+    let usedRemoteCache = false;
+    if (canTryRemoteCache) {
+      const cached = loadRemoteCollectionsSnapshot(snapshotKey);
+      if (cached !== null) {
+        const remoteUserId = writeRequiresLogin ? currentUser?.id ?? null : null;
+        const remoteKey = activeCollectionStorageKey("remote", remoteUserId);
         const remoteCollapsedKey = collapsedFoldersStorageKey(
           "remote",
-          currentUser?.id ?? null
+          remoteUserId
         );
+        setCollections(cached);
         setActiveId(
           resolveActiveCollectionId(
-            tree,
+            cached,
             readPersistedActiveCollectionId(remoteKey)
           )
         );
         setCollapsedFolderIds(
           pruneCollapsedFolderIds(
-            tree,
+            cached,
             readCollapsedFolderIdsFromStorage(remoteCollapsedKey)
           )
         );
-        setApiOnline(true);
-        setLoadError(null);
+        setRemoteLoaded(true);
         setRemoteSaveAllowed(true);
-      } else {
-        setRemoteSaveAllowed(false);
-        if (writeRequiresLogin && (currentUser || getAdminToken())) {
-          setLoadError(
-            "笔记加载摔了一跤… 看看网络或重新登录试试？"
-          );
-          setCollections([]);
-          setApiOnline(false);
-        } else {
-          setLoadError(
-            "连不上服务器喵～请检查网络或稍后再刷新。"
-          );
-          setCollections([]);
-          setApiOnline(online);
-        }
+        usedRemoteCache = true;
       }
-      setRemoteLoaded(true);
+    }
+
+    if (!usedRemoteCache) {
+      setRemoteSaveAllowed(false);
+      setRemoteLoaded(false);
+    }
+
+    let cancelled = false;
+    setRemoteBootSyncing(true);
+    (async () => {
+      try {
+        const health = await fetchApiHealth();
+        if (cancelled) return;
+        const mu = health?.mediaUpload;
+        if (mu === "cos" || mu === "local") {
+          setMediaUploadMode(mu);
+        } else {
+          setMediaUploadMode(null);
+        }
+        const online = Boolean(health?.ok);
+        /* 要求登录且未带 JWT：不加载示例数据，仅就绪；登录框由单独 effect 自动打开 */
+        if (writeRequiresLogin && !currentUser && !getAdminToken()) {
+          setCollections([]);
+          setLoadError(null);
+          setSaveError(null);
+          setApiOnline(online);
+          setRemoteSaveAllowed(false);
+          setRemoteLoaded(true);
+          return;
+        }
+        const data = await fetchCollectionsFromApi();
+        if (cancelled) return;
+        if (data !== null) {
+          let tree = migrateCollectionTree(data);
+          const authed = Boolean(currentUser || getAdminToken());
+          if (tree.length === 0 && authed && writeRequiresLogin) {
+            tree = cloneInitialCollections();
+            const seeded = await saveCollectionsToApi(tree);
+            if (!seeded) {
+              setSidebarFlash(
+                "新账号内置笔记已就绪，但首次同步到服务器失败，可稍后再试或联系管理员"
+              );
+            }
+          }
+          setCollections(tree);
+          const remoteKey = activeCollectionStorageKey(
+            "remote",
+            currentUser?.id ?? null
+          );
+          const remoteCollapsedKey = collapsedFoldersStorageKey(
+            "remote",
+            currentUser?.id ?? null
+          );
+          setActiveId(
+            resolveActiveCollectionId(
+              tree,
+              readPersistedActiveCollectionId(remoteKey)
+            )
+          );
+          setCollapsedFolderIds(
+            pruneCollapsedFolderIds(
+              tree,
+              readCollapsedFolderIdsFromStorage(remoteCollapsedKey)
+            )
+          );
+          if (snapshotKey) {
+            saveRemoteCollectionsSnapshot(snapshotKey, tree);
+          }
+          setApiOnline(true);
+          setLoadError(null);
+          setRemoteSaveAllowed(true);
+        } else {
+          setRemoteSaveAllowed(false);
+          if (writeRequiresLogin && (currentUser || getAdminToken())) {
+            setLoadError(
+              "笔记加载摔了一跤… 看看网络或重新登录试试？"
+            );
+            if (!usedRemoteCache) {
+              setCollections([]);
+              setApiOnline(false);
+            } else {
+              setApiOnline(false);
+            }
+          } else {
+            setLoadError(
+              "连不上服务器喵～请检查网络或稍后再刷新。"
+            );
+            if (!usedRemoteCache) {
+              setCollections([]);
+              setApiOnline(online);
+            }
+          }
+        }
+        setRemoteLoaded(true);
+      } finally {
+        if (!cancelled) setRemoteBootSyncing(false);
+      }
     })();
     return () => {
       cancelled = true;
@@ -3309,13 +3381,14 @@ export default function App() {
   const appendNoteCardWithHtml = useCallback(
     async (
       htmlBody: string,
-      timeOverride?: { minutesOfDay: number; addedOn: string }
+      timeOverride?: { minutesOfDay: number; addedOn: string },
+      targetColIdOverride?: string
     ): Promise<string | null> => {
       if (!canEdit) return null;
       if (trashViewActive) return null;
       if (calendarDay !== null) return null;
       if (searchQuery.trim().length > 0) return null;
-      const targetColId = active?.id;
+      const targetColId = targetColIdOverride?.trim() || active?.id;
       if (!targetColId) return null;
       const now = new Date();
       const minutesOfDay =
@@ -3359,13 +3432,16 @@ export default function App() {
     setMobileQuickCaptureText("");
     mobileQuickCaptureDraftRef.current = "";
     setMobileQuickCaptureHead(null);
+    setMobileQuickCaptureTargetColId(null);
   }, []);
 
   const commitMobileQuickCapture = useCallback(() => {
     const plain = mobileQuickCaptureDraftRef.current.trim();
     const headSnap = mobileQuickCaptureHead;
+    const colPick =
+      mobileQuickCaptureTargetColId?.trim() || active?.id || null;
     dismissMobileQuickCapture();
-    if (!plain) return;
+    if (!plain || !colPick) return;
     void (async () => {
       const cardId = await appendNoteCardWithHtml(
         noteBodyToHtml(plain),
@@ -3374,7 +3450,8 @@ export default function App() {
               minutesOfDay: headSnap.minutesOfDay,
               addedOn: headSnap.addedOn,
             }
-          : undefined
+          : undefined,
+        colPick
       );
       if (!cardId) return;
       const scrollTimelineToEnd = () => {
@@ -3390,7 +3467,76 @@ export default function App() {
     appendNoteCardWithHtml,
     dismissMobileQuickCapture,
     mobileQuickCaptureHead,
+    mobileQuickCaptureTargetColId,
+    active?.id,
   ]);
+
+  const onQuickCaptureMediaFileSelected = useCallback(
+    (e: ChangeEvent<HTMLInputElement>) => {
+      const input = e.target;
+      const file = input.files?.[0];
+      input.value = "";
+      if (!file) return;
+      const colPick =
+        mobileQuickCaptureTargetColId?.trim() || active?.id || null;
+      if (!colPick) return;
+      const plain = mobileQuickCaptureDraftRef.current.trim();
+      const headSnap = mobileQuickCaptureHead;
+      void (async () => {
+        const cardId = await appendNoteCardWithHtml(
+          noteBodyToHtml(plain),
+          headSnap
+            ? {
+                minutesOfDay: headSnap.minutesOfDay,
+                addedOn: headSnap.addedOn,
+              }
+            : undefined,
+          colPick
+        );
+        dismissMobileQuickCapture();
+        if (cardId) await uploadFilesToCard(colPick, cardId, [file]);
+      })();
+    },
+    [
+      active?.id,
+      appendNoteCardWithHtml,
+      dismissMobileQuickCapture,
+      mobileQuickCaptureHead,
+      mobileQuickCaptureTargetColId,
+      uploadFilesToCard,
+    ]
+  );
+
+  const onQuickCaptureInsertLink = useCallback(() => {
+    const url = window.prompt("粘贴或输入链接");
+    const t = url?.trim();
+    if (!t) return;
+    const prev = mobileQuickCaptureDraftRef.current;
+    const next =
+      prev.length > 0 && !/\n$/.test(prev) ? `${prev}\n${t}` : `${prev}${t}`;
+    mobileQuickCaptureDraftRef.current = next;
+    setMobileQuickCaptureText(next);
+    requestAnimationFrame(() => {
+      mobileQuickCaptureAreaRef.current?.focus({ preventScroll: true });
+    });
+  }, []);
+
+  const onQuickCapturePasteFromClipboard = useCallback(() => {
+    void navigator.clipboard.readText().then((t) => {
+      const chunk = t?.trim();
+      if (!chunk) return;
+      const prev = mobileQuickCaptureDraftRef.current;
+      const next =
+        prev.length > 0 && !/\n$/.test(prev)
+          ? `${prev}\n${chunk}`
+          : `${prev}${chunk}`;
+      mobileQuickCaptureDraftRef.current = next;
+      setMobileQuickCaptureText(next);
+      requestAnimationFrame(() => {
+        mobileQuickCaptureAreaRef.current?.focus({ preventScroll: true });
+      });
+    });
+  }, []);
 
   /** 点遮罩：有字则保存并关闭，无字则直接关（同 flomo 类交互） */
   const onQuickCaptureBackdrop = useCallback(() => {
@@ -3426,10 +3572,57 @@ export default function App() {
     [appendNoteCardWithHtml]
   );
 
-  /* 勿对 textarea 做「先 readOnly 再下一帧取消」：iOS 会认为可编辑时机已脱离用户手势，键盘不再弹出 */
+  /**
+   * 速记层聚焦：勿在 textarea 上用 autoFocus，否则 iOS 常在底栏画完前就弹键盘。
+   * Capacitor iOS 稍延迟，与底栏入场动画同步；其它环境仍同步聚焦。
+   */
   useLayoutEffect(() => {
     if (!mobileQuickCaptureOpen) return;
+    if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === "ios") {
+      return;
+    }
     mobileQuickCaptureAreaRef.current?.focus({ preventScroll: true });
+  }, [mobileQuickCaptureOpen]);
+
+  useEffect(() => {
+    if (!mobileQuickCaptureOpen) return;
+    if (!Capacitor.isNativePlatform() || Capacitor.getPlatform() !== "ios") {
+      return;
+    }
+    const t = window.setTimeout(() => {
+      mobileQuickCaptureAreaRef.current?.focus({ preventScroll: true });
+    }, 200);
+    return () => clearTimeout(t);
+  }, [mobileQuickCaptureOpen]);
+
+  /* 按内容增高输入区，避免空态大片横线留白（参考 flomo） */
+  useLayoutEffect(() => {
+    if (!mobileQuickCaptureOpen) return;
+    const el = mobileQuickCaptureAreaRef.current;
+    if (!el) return;
+    const line = 30;
+    /* 与 CSS：底 padding = 半行距（顶为 0） */
+    const vPad = line * 0.5;
+    const minH = line * 3 + vPad;
+    const maxH = Math.min(
+      Math.round(
+        (typeof window !== "undefined" ? window.innerHeight : 640) * 0.4
+      ),
+      280
+    );
+    el.style.height = "0px";
+    const h = Math.min(Math.max(el.scrollHeight, minH), maxH);
+    el.style.height = `${h}px`;
+  }, [mobileQuickCaptureOpen, mobileQuickCaptureText]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    if (mobileQuickCaptureOpen) {
+      root.classList.add("app-ui--quick-capture-open");
+    } else {
+      root.classList.remove("app-ui--quick-capture-open");
+    }
+    return () => root.classList.remove("app-ui--quick-capture-open");
   }, [mobileQuickCaptureOpen]);
 
   useEffect(() => {
@@ -4702,6 +4895,15 @@ export default function App() {
           </div>
         </div>
       ) : null}
+      {remoteBootSyncing && remoteLoaded && dataMode === "remote" ? (
+        <div
+          className="app-remote-sync-banner"
+          role="status"
+          aria-live="polite"
+        >
+          正在与服务器同步…
+        </div>
+      ) : null}
       <div
         className="app__mobile-backdrop"
         aria-hidden
@@ -5211,7 +5413,7 @@ export default function App() {
               <button
                 type="button"
                 className={
-                  "main__header-icon-btn" +
+                  "main__header-icon-btn main__header-icon-btn--masonry" +
                   (masonryLayout ? " main__header-icon-btn--active" : "")
                 }
                 aria-pressed={masonryLayout}
@@ -5674,20 +5876,18 @@ export default function App() {
               !trashViewActive &&
               searchQuery.trim().length === 0
             ) {
-              /* 桌面网页：与时间线底部「新建」一致；Tauri 客户端仍用快速输入层 */
-              if (isTauri()) {
+              /* 网页小屏：直接插入时间线；Tauri / Capacitor 用底部速记层 */
+              if (nativeQuickCaptureShell) {
                 const t = new Date();
                 flushSync(() => {
                   setMobileQuickCaptureHead({
                     minutesOfDay: t.getHours() * 60 + t.getMinutes(),
                     addedOn: localDateString(t),
                   });
+                  setMobileQuickCaptureTargetColId(active?.id ?? null);
                   setMobileQuickCaptureText("");
                   mobileQuickCaptureDraftRef.current = "";
                   setMobileQuickCaptureOpen(true);
-                });
-                mobileQuickCaptureAreaRef.current?.focus({
-                  preventScroll: true,
                 });
                 return;
               }
@@ -5796,7 +5996,7 @@ export default function App() {
                 className="mobile-quick-capture__sheet"
                 role="dialog"
                 aria-modal="true"
-                aria-label="快速记录"
+                aria-label="新记录"
               >
                 <form
                   className="mobile-quick-capture__form"
@@ -5806,35 +6006,67 @@ export default function App() {
                     commitMobileQuickCapture();
                   }}
                 >
-                  <div className="mobile-quick-capture__field-wrap">
-                    <div className="mobile-quick-capture__lined">
-                      <div className="mobile-quick-capture__head-row">
-                        {mobileQuickCaptureHead ? (
-                          <span className="mobile-quick-capture__time">
-                            {formatCardTimeLabel({
-                              id: "qc",
-                              text: "",
-                              minutesOfDay:
-                                mobileQuickCaptureHead.minutesOfDay,
-                              addedOn: mobileQuickCaptureHead.addedOn,
-                            })}
-                          </span>
-                        ) : (
-                          <span className="mobile-quick-capture__head-row-spacer" />
-                        )}
-                        <button
-                          type="button"
-                          className="mobile-quick-capture__submit"
-                          onClick={() => commitMobileQuickCapture()}
+                  <input
+                    ref={quickCaptureMediaInputRef}
+                    type="file"
+                    className="app__hidden-file-input"
+                    aria-hidden
+                    tabIndex={-1}
+                    accept="image/*,video/*,audio/*,.pdf,.doc,.docx"
+                    onChange={onQuickCaptureMediaFileSelected}
+                  />
+                  <div className="mobile-quick-capture__chrome">
+                    <div className="mobile-quick-capture__bar">
+                      <button
+                        type="button"
+                        className="mobile-quick-capture__bar-btn mobile-quick-capture__bar-btn--ghost"
+                        aria-label="关闭，不保存"
+                        onClick={() => dismissMobileQuickCapture()}
+                      >
+                        <svg
+                          width="22"
+                          height="22"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          aria-hidden
                         >
-                          完成
-                        </button>
-                      </div>
+                          <path d="M18 6 6 18M6 6l12 12" />
+                        </svg>
+                      </button>
+                      <span className="mobile-quick-capture__title">
+                        新记录
+                      </span>
+                      <button
+                        type="submit"
+                        className="main__header-icon-btn main__header-icon-btn--active mobile-quick-capture__submit-btn"
+                        aria-label="保存笔记"
+                        title="保存"
+                      >
+                        <svg
+                          className="main__header-icon-btn__svg"
+                          width="20"
+                          height="20"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          aria-hidden
+                        >
+                          <path d="M20 6 9 17l-5-5" />
+                        </svg>
+                      </button>
+                    </div>
+                    <div className="mobile-quick-capture__body">
                       <textarea
                         ref={mobileQuickCaptureAreaRef}
                         className="mobile-quick-capture__textarea"
                         value={mobileQuickCaptureText}
-                        autoFocus
+                        placeholder="记录你的灵感…"
                         autoComplete="off"
                         autoCapitalize="sentences"
                         autoCorrect="on"
@@ -5851,6 +6083,156 @@ export default function App() {
                           setMobileQuickCaptureText(e.target.value);
                         }}
                       />
+                    </div>
+                    <div
+                      className="mobile-quick-capture__pills"
+                      role="listbox"
+                      aria-label="保存到合集"
+                    >
+                      {mobileQuickCaptureCollectionPills.map(
+                        ({ col, path }) => {
+                          const sel =
+                            (mobileQuickCaptureTargetColId ??
+                              active?.id) === col.id;
+                          return (
+                            <button
+                              key={col.id}
+                              type="button"
+                              role="option"
+                              aria-selected={sel}
+                              title={path}
+                              className={
+                                "mobile-quick-capture__pill" +
+                                (sel
+                                  ? " mobile-quick-capture__pill--selected"
+                                  : "")
+                              }
+                              onClick={() =>
+                                setMobileQuickCaptureTargetColId(col.id)
+                              }
+                            >
+                              {col.name}
+                            </button>
+                          );
+                        }
+                      )}
+                    </div>
+                    <div className="mobile-quick-capture__tools">
+                      <div className="mobile-quick-capture__tools-left">
+                        <button
+                          type="button"
+                          className="mobile-quick-capture__tool"
+                          disabled
+                          title="语音输入即将支持"
+                          aria-label="语音输入即将支持"
+                        >
+                          <svg
+                            className="mobile-quick-capture__tool-svg"
+                            width="22"
+                            height="22"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            aria-hidden
+                          >
+                            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                            <path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8" />
+                          </svg>
+                        </button>
+                        <button
+                          type="button"
+                          className="mobile-quick-capture__tool"
+                          disabled={!canAttachMedia}
+                          title={
+                            canAttachMedia
+                              ? "添加图片或附件"
+                              : "当前环境未开启附件上传"
+                          }
+                          aria-label="添加图片或附件"
+                          onClick={() => {
+                            if (!canAttachMedia) return;
+                            quickCaptureMediaInputRef.current?.click();
+                          }}
+                        >
+                          <svg
+                            className="mobile-quick-capture__tool-svg"
+                            width="22"
+                            height="22"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            aria-hidden
+                          >
+                            <rect
+                              x="3"
+                              y="3"
+                              width="18"
+                              height="18"
+                              rx="2"
+                            />
+                            <circle cx="8.5" cy="8.5" r="1.5" />
+                            <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
+                          </svg>
+                        </button>
+                        <button
+                          type="button"
+                          className="mobile-quick-capture__tool"
+                          title="插入链接"
+                          aria-label="插入链接"
+                          onClick={onQuickCaptureInsertLink}
+                        >
+                          <svg
+                            className="mobile-quick-capture__tool-svg"
+                            width="22"
+                            height="22"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            aria-hidden
+                          >
+                            <path d="M10 13a5 5 0 0 1 0-7L9 5a5 5 0 0 0 0 7" />
+                            <path d="M14 11a5 5 0 0 1 0 7l1 1a5 5 0 0 0 0-7" />
+                          </svg>
+                        </button>
+                      </div>
+                      <button
+                        type="button"
+                        className="mobile-quick-capture__tool"
+                        title="从剪贴板粘贴"
+                        aria-label="从剪贴板粘贴"
+                        onClick={onQuickCapturePasteFromClipboard}
+                      >
+                        <svg
+                          className="mobile-quick-capture__tool-svg"
+                          width="22"
+                          height="22"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          aria-hidden
+                        >
+                          <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+                          <rect
+                            x="8"
+                            y="2"
+                            width="8"
+                            height="4"
+                            rx="1"
+                          />
+                        </svg>
+                      </button>
                     </div>
                   </div>
                 </form>

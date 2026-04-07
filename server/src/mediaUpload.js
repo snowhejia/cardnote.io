@@ -17,8 +17,10 @@ import {
   putCosPublicObject,
 } from "./storage.js";
 
-/** 内嵌封面过大则跳过，避免内存与存储压力 */
+/** 写入 COS/磁盘的封面上限；再大则尝试 sharp 压图，仍过大则跳过 */
 const MAX_EMBEDDED_COVER_BYTES = 512 * 1024;
+/** 允许尝试压缩的原始内嵌图上限（避免异常大图占满内存） */
+const MAX_EMBEDDED_COVER_SHRINK_INPUT_BYTES = 12 * 1024 * 1024;
 
 /**
  * 按文件头识别内嵌图真实类型（优于依赖标签里的 format，避免错标为 jpg 导致浏览器裂图）
@@ -190,6 +192,34 @@ async function tiffCoverToJpeg(buf) {
   }
 }
 
+/**
+ * 专辑内嵌图常见 600KB～2MB，超过 MAX_EMBEDDED_COVER_BYTES 时压成 JPEG 再入库。
+ * @param {Buffer} buf
+ * @returns {Promise<{ buffer: Buffer; mimeType: string; ext: string } | null>}
+ */
+async function shrinkOversizedEmbeddedCoverToJpeg(buf) {
+  if (buf.length <= MAX_EMBEDDED_COVER_BYTES) return null;
+  if (buf.length > MAX_EMBEDDED_COVER_SHRINK_INPUT_BYTES) return null;
+  try {
+    let out = await sharp(buf)
+      .rotate()
+      .resize(1400, 1400, { fit: "inside", withoutEnlargement: true })
+      .jpeg({ quality: 82, mozjpeg: true })
+      .toBuffer();
+    if (out.length > MAX_EMBEDDED_COVER_BYTES) {
+      out = await sharp(buf)
+        .rotate()
+        .resize(800, 800, { fit: "inside", withoutEnlargement: true })
+        .jpeg({ quality: 76, mozjpeg: true })
+        .toBuffer();
+    }
+    if (!out.length || out.length > MAX_EMBEDDED_COVER_BYTES) return null;
+    return { buffer: out, mimeType: "image/jpeg", ext: "jpg" };
+  } catch {
+    return null;
+  }
+}
+
 function attachmentDisplayName(originalname) {
   const raw =
     typeof originalname === "string" && originalname.trim()
@@ -214,8 +244,12 @@ async function tryExtractEmbeddedAudioCover(buffer, mimeType) {
 
     for (const pic of pictures) {
       if (!pic?.data?.length) continue;
-      if (pic.data.length > MAX_EMBEDDED_COVER_BYTES) continue;
-      const buf = Buffer.from(pic.data);
+      let buf = Buffer.from(pic.data);
+      if (buf.length > MAX_EMBEDDED_COVER_BYTES) {
+        const shrunk = await shrinkOversizedEmbeddedCoverToJpeg(buf);
+        if (shrunk) return shrunk;
+        continue;
+      }
       const sniffed = sniffEmbeddedImageBuffer(buf);
       const fromTag = imageTypeFromPictureFormat(pic.format);
       /** 魔数优先；无法识别则不用默认 jpg，避免错类型裂图 */

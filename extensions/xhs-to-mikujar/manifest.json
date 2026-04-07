@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "未来罐 · 小红书摘录",
-  "version": "1.0.3",
+  "version": "1.0.5",
   "description": "在小红书笔记页一键保存标题、正文与图片到 mikujar 后端",
   "permissions": ["storage", "scripting", "activeTab"],
   "host_permissions": [
@@ -12,12 +12,18 @@
     "http://localhost/*"
   ],
   "optional_host_permissions": ["https://*/*", "http://*/*"],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
   "action": {
     "default_title": "保存当前笔记到未来罐",
     "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/icon16.png",
-      "48": "icons/icon48.png"
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
     }
   },
   "background": {

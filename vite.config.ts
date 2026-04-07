@@ -13,6 +13,8 @@ export default defineConfig(({ mode }) => {
   const target = `http://127.0.0.1:${apiPort}`;
 
   return {
+    // Capacitor / file 协议下必须用相对资源路径；根路径部署的 SPA 仍可用
+    base: "./",
     clearScreen: false,
     plugins: [react()],
     envPrefix: ["VITE_", "TAURI_"],

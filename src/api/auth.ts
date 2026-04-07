@@ -83,8 +83,12 @@ export async function loginWithCredentials(
       return { ok: false, error: "响应无效" };
     }
     return { ok: true, token: j.token, user: u };
-  } catch {
-    return { ok: false, error: "网络错误" };
+  } catch (e: unknown) {
+    const detail = e instanceof Error ? e.message.trim() : "";
+    return {
+      ok: false,
+      error: detail ? `网络错误：${detail}` : "网络错误",
+    };
   }
 }
 
