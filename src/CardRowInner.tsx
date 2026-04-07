@@ -12,6 +12,12 @@ const NOTE_LINE_PX = 30;
 /** 正文 ProseMirror min-height 为 3 行；超过约第 4 行起视为长笔记 */
 const SHORT_BODY_MAX_SCROLL_PX =
   3 * NOTE_LINE_PX + NOTE_LINE_PX * 0.92;
+/**
+ * 是否上下叠放图库依赖 ProseMirror scrollHeight，而 scrollHeight 会随左右/上下布局变化（窄栏更高、宽栏更矮），
+ * 单阈值会在边界附近来回切换造成闪屏。用双阈值滞回避免振荡。
+ */
+const STACK_GALLERY_UPPER_PX = SHORT_BODY_MAX_SCROLL_PX + 10;
+const STACK_GALLERY_LOWER_PX = 2.5 * NOTE_LINE_PX;
 
 type CardRowInnerProps = {
   hasGallery: boolean;
@@ -55,9 +61,12 @@ export function CardRowInner({
         setStackGallery(false);
         return;
       }
-      setStackGallery(
-        pm.scrollHeight > SHORT_BODY_MAX_SCROLL_PX
-      );
+      const h = pm.scrollHeight;
+      setStackGallery((prev) => {
+        if (!prev && h > STACK_GALLERY_UPPER_PX) return true;
+        if (prev && h < STACK_GALLERY_LOWER_PX) return false;
+        return prev;
+      });
     };
 
     measure();
