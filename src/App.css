@@ -2565,29 +2565,33 @@ textarea.main__hint-editor:focus {
   min-width: 0;
 }
 
+.app--masonry .card__time {
+  flex: 1 1 0;
+  min-width: 0;
+  font-size: 0.625rem;
+  letter-spacing: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (min-width: 901px) {
+  .app--masonry .card__time {
+    font-size: 0.6875rem;
+    letter-spacing: 0.01em;
+  }
+}
+
 .card__time-reminder {
   font-weight: 600;
   color: var(--app-reminder-pink-text);
   white-space: nowrap;
 }
 
-/* 小屏瀑布流双列时栏位紧：隐藏「· 提醒M月D日」；日期时刻与分节标题略缩小 */
+/* 小屏瀑布流双列时栏位紧，隐藏「· 提醒M月D日」省宽（与 narrowUi 900px 一致） */
 @media (max-width: 900px) {
   .app--masonry .card__time-reminder {
     display: none !important;
-  }
-
-  .app--masonry .card__time {
-    font-size: 0.625rem;
-    letter-spacing: 0.01em;
-  }
-
-  .app--masonry .timeline__pin-heading {
-    font-size: 0.625rem;
-  }
-
-  .app--masonry .timeline__cal-group-title {
-    font-size: 0.75rem;
   }
 }
 
