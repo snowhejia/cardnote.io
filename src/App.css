@@ -348,16 +348,16 @@
 }
 
 .sidebar__admin-icon-btn:focus-visible {
-  outline: 2px solid rgba(37, 99, 235, 0.45);
+  outline: 2px solid color-mix(in srgb, var(--mikujar-logo-jar) 45%, transparent);
   outline-offset: 1px;
 }
 
 .sidebar__admin-icon-btn--on {
-  color: rgba(37, 99, 235, 0.88);
+  color: var(--mikujar-logo-jar);
 }
 
 .sidebar__admin-icon-btn--on:hover {
-  color: rgba(29, 78, 216, 0.95);
+  color: var(--mikujar-logo-jar-deep);
 }
 
 .sidebar__admin-icon-svg {
@@ -603,7 +603,7 @@
 .sidebar__cal-year-field:focus,
 .sidebar__cal-month-field:focus {
   outline: none;
-  border-color: rgba(37, 99, 235, 0.45);
+  border-color: color-mix(in srgb, var(--mikujar-logo-jar) 45%, transparent);
   background: #fff;
 }
 
@@ -664,12 +664,13 @@
 }
 
 .sidebar__cal-day.is-today {
-  box-shadow: inset 0 0 0 1.5px rgba(37, 99, 235, 0.45);
+  box-shadow: inset 0 0 0 1.5px
+    color-mix(in srgb, var(--mikujar-logo-jar) 45%, transparent);
 }
 
 .sidebar__cal-day.is-selected {
-  background: rgba(37, 99, 235, 0.18);
-  color: #1d4ed8;
+  background: color-mix(in srgb, var(--mikujar-logo-jar) 18%, transparent);
+  color: var(--mikujar-logo-jar-deep);
   font-weight: 700;
 }
 
@@ -682,10 +683,10 @@
   width: 4px;
   height: 4px;
   border-radius: 50%;
-  background: rgba(37, 99, 235, 0.65);
+  background: color-mix(in srgb, var(--mikujar-logo-jar) 65%, transparent);
 }
 
-/* 有提醒的日期：右上角粉色角标（与底部「有笔记」蓝点可同时存在） */
+/* 有提醒的日期：右上角红色圆点（与底部「有笔记」蓝点可同时存在） */
 .sidebar__cal-day.has-reminder::before {
   content: "";
   position: absolute;
@@ -693,13 +694,12 @@
   right: 2px;
   width: 6px;
   height: 6px;
-  border-radius: 2px;
+  border-radius: 50%;
   background: linear-gradient(
     135deg,
     color-mix(in srgb, var(--app-reminder-pink-bright) 92%, #fff) 0%,
     color-mix(in srgb, var(--app-reminder-pink) 95%, #000) 100%
   );
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.95);
   pointer-events: none;
 }
 
@@ -2217,7 +2217,12 @@ textarea.main__hint-editor:focus {
 }
 
 .trash-empty {
+  box-sizing: border-box;
+  width: 100%;
   max-width: 42rem;
+  margin-left: auto;
+  margin-right: auto;
+  text-align: center;
 }
 
 .timeline__empty {
