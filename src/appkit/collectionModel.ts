@@ -11,6 +11,40 @@ export function walkCollections(
   }
 }
 
+/**
+ * 以 server 树为准，把 local 各合集中「服务端尚无同 id」的卡片追加回去。
+ * 用于首包种子 PUT 后立刻 GET：GET 若早于用户 POST 建卡完成，可避免乐观插入被整树覆盖而消失。
+ */
+export function mergeServerTreeWithLocalExtraCards(
+  serverTree: Collection[],
+  localTree: Collection[]
+): Collection[] {
+  const localById = new Map<string, Collection>();
+  walkCollections(localTree, (c) => {
+    localById.set(c.id, c);
+  });
+
+  function mergeCol(col: Collection): Collection {
+    const mergedChildren = col.children?.length
+      ? col.children.map(mergeCol)
+      : col.children;
+    const localCol = localById.get(col.id);
+    let cards = col.cards ?? [];
+    if (localCol?.cards?.length) {
+      const haveIds = new Set(cards.map((c) => c.id));
+      const extra = (localCol.cards ?? []).filter((c) => !haveIds.has(c.id));
+      if (extra.length) cards = [...cards, ...extra];
+    }
+    return {
+      ...col,
+      ...(mergedChildren !== undefined ? { children: mergedChildren } : {}),
+      cards,
+    };
+  }
+
+  return serverTree.map(mergeCol);
+}
+
 /** 去掉已删除合集的折叠记录，避免 Set 无限增长 */
 export function pruneCollapsedFolderIds(
   cols: Collection[],

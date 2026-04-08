@@ -1,4 +1,5 @@
 import { useEffect, type Dispatch, type SetStateAction } from "react";
+import { flushSync } from "react-dom";
 import { fetchApiHealth } from "../api/health";
 import {
   fetchCollectionsFromApi,
@@ -22,6 +23,7 @@ import {
   readPersistedActiveCollectionId,
 } from "./workspaceStorage";
 import {
+  mergeServerTreeWithLocalExtraCards,
   pruneCollapsedFolderIds,
   resolveActiveCollectionId,
 } from "./collectionModel";
@@ -160,17 +162,39 @@ export function useRemoteCollectionsSync(p: {
         if (cancelled) return;
         if (data !== null) {
           let tree = migrateCollectionTree(data);
+          let useMergeWithPrevAfterSeed = false;
           const authed = Boolean(currentUser || getAdminToken());
           if (tree.length === 0 && authed && writeRequiresLogin) {
             tree = cloneInitialCollections();
             const seeded = await saveCollectionsToApi(tree);
+            if (cancelled) return;
             if (!seeded) {
               setSidebarFlash(
                 "新账号内置笔记已就绪，但首次同步到服务器失败，可稍后再试或联系管理员"
               );
+            } else {
+              // await 期间用户可能已新建笔记；勿用保存前的 tree 覆盖乐观更新
+              const pulled = await fetchCollectionsFromApi();
+              if (cancelled) return;
+              if (pulled !== null) {
+                tree = migrateCollectionTree(pulled);
+                useMergeWithPrevAfterSeed = true;
+              }
             }
           }
-          setCollections(tree);
+          if (cancelled) return;
+          if (useMergeWithPrevAfterSeed) {
+            let merged = tree;
+            flushSync(() => {
+              setCollections((prev) => {
+                merged = mergeServerTreeWithLocalExtraCards(tree, prev);
+                return merged;
+              });
+            });
+            tree = merged;
+          } else {
+            setCollections(tree);
+          }
           const remoteKey = activeCollectionStorageKey(
             "remote",
             currentUser?.id ?? null
