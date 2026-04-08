@@ -2505,10 +2505,7 @@ export default function App() {
               ) : null}
               <button
                 type="button"
-                className={
-                  "main__header-icon-btn main__header-icon-btn--masonry" +
-                  (masonryLayout ? " main__header-icon-btn--active" : "")
-                }
+                className="main__header-icon-btn main__header-icon-btn--masonry"
                 aria-pressed={masonryLayout}
                 aria-label={
                   masonryLayout
@@ -2518,23 +2515,44 @@ export default function App() {
                 title={masonryLayout ? "列表布局" : "瀑布流"}
                 onClick={toggleMasonryLayout}
               >
-                <svg
-                  className="main__header-icon-btn__svg"
-                  width="20"
-                  height="20"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinejoin="round"
-                  aria-hidden
-                >
-                  {/* 两列错落砖块：瀑布流 */}
-                  <rect x="3" y="5" width="7.5" height="8" rx="1.5" />
-                  <rect x="3" y="15" width="7.5" height="5" rx="1.5" />
-                  <rect x="13.5" y="4" width="7.5" height="6" rx="1.5" />
-                  <rect x="13.5" y="12" width="7.5" height="8" rx="1.5" />
-                </svg>
+                {masonryLayout ? (
+                  <svg
+                    className="main__header-icon-btn__svg"
+                    width="20"
+                    height="20"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden
+                  >
+                    {/* 单列列表：点击切换回列表 */}
+                    <path
+                      d="M4 7.5h16M4 12h16M4 16.5h10"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                ) : (
+                  <svg
+                    className="main__header-icon-btn__svg"
+                    width="20"
+                    height="20"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinejoin="round"
+                    aria-hidden
+                  >
+                    {/* 两列错落砖块：瀑布流 */}
+                    <rect x="3" y="5" width="7.5" height="8" rx="1.5" />
+                    <rect x="3" y="15" width="7.5" height="5" rx="1.5" />
+                    <rect x="13.5" y="4" width="7.5" height="6" rx="1.5" />
+                    <rect x="13.5" y="12" width="7.5" height="8" rx="1.5" />
+                  </svg>
+                )}
               </button>
               {canEdit &&
               trashViewActive &&
