@@ -100,6 +100,7 @@ import {
   favoriteCollectionsStorageKey,
   findCollectionById,
   formatChineseDayTitle,
+  initMasonryLayoutPreferenceIfNeeded,
   insertChildCollection,
   INITIAL_WORKSPACE,
   loadFavoriteCollectionIds,
@@ -357,6 +358,10 @@ export default function App() {
   } | null>(null);
   /** 新建合集/子合集会改 activeId；勿因此关掉手机侧栏，便于当场改名称 */
   const skipCloseMobileNavOnActiveChangeRef = useRef(false);
+
+  useEffect(() => {
+    initMasonryLayoutPreferenceIfNeeded();
+  }, []);
 
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 900px)");
