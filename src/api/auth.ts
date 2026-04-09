@@ -71,18 +71,38 @@ export function needsCosReadUrl(resolvedUrl: string): boolean {
   return false;
 }
 
+/** 与 upload/users 等接口一致：Bearer JWT、构建期 API 令牌，或仅依赖 httpOnly Cookie */
+function cosReadAuthHeaders(): Record<string, string> {
+  const t = getAdminToken();
+  if (t) return { Authorization: `Bearer ${t}` };
+  const vt = (import.meta.env.VITE_API_TOKEN as string | undefined)?.trim();
+  if (vt) return { Authorization: `Bearer ${vt}` };
+  return {};
+}
+
+/** 是否存在任一会话手段（避免未登录时反复请求 cos-read → 401 刷屏） */
+function mightHaveApiSession(): boolean {
+  if (getAdminToken()) return true;
+  if (authUsesHttpOnlyCookie()) return true;
+  if ((import.meta.env.VITE_API_TOKEN as string | undefined)?.trim()) return true;
+  return false;
+}
+
 /** 将 COS 对外 URL 换为短时 GET 预签名（需已登录且有权访问该对象） */
 export async function resolveCosMediaUrlIfNeeded(
   resolvedUrl: string
 ): Promise<string> {
   if (!needsCosReadUrl(resolvedUrl)) return resolvedUrl;
+  if (!mightHaveApiSession()) return resolvedUrl;
   const now = Date.now();
   const hit = cosReadUrlCache.get(resolvedUrl);
   if (hit && hit.expiresAt > now + COS_READ_MARGIN_MS) return hit.url;
 
   const base = apiBase();
   const q = new URLSearchParams({ url: resolvedUrl });
-  const r = await fetch(`${base}/api/upload/cos-read?${q}`, apiFetchInit());
+  const r = await fetch(`${base}/api/upload/cos-read?${q}`, apiFetchInit({
+    headers: cosReadAuthHeaders(),
+  }));
   if (!r.ok) return resolvedUrl;
   const j = (await r.json().catch(() => ({}))) as {
     url?: unknown;
