@@ -3198,7 +3198,7 @@ video.image-lightbox__video {
   border: none;
   border-radius: 6px;
   background: transparent;
-  color: #b91c1c;
+  color: #171717;
   font: inherit;
   font-size: 0.875rem;
   text-align: left;
@@ -3207,6 +3207,14 @@ video.image-lightbox__video {
 }
 
 .attachment-ctx-menu__item:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.attachment-ctx-menu__item--danger {
+  color: #b91c1c;
+}
+
+.attachment-ctx-menu__item--danger:hover {
   background: rgba(185, 28, 28, 0.08);
 }
 
@@ -3308,6 +3316,66 @@ video.image-lightbox__video {
 .card__gallery-dot.is-active {
   background: #fff;
   transform: scale(1.15);
+}
+
+/* 上传中：底部条占位，分页点上移避免重叠 */
+.card__gallery-viewport:has(.card__gallery-upload-strip) .card__gallery-dots {
+  bottom: 50px;
+}
+
+.card__gallery-upload-spinner {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border: 2px solid rgba(55, 53, 47, 0.12);
+  border-top-color: rgba(37, 99, 235, 0.75);
+  border-radius: 50%;
+  animation: card-media-spin 0.65s linear infinite;
+}
+
+.card__gallery-upload-slot--solo {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  box-sizing: border-box;
+  background: repeating-linear-gradient(
+      -45deg,
+      rgba(0, 0, 0, 0.03),
+      rgba(0, 0, 0, 0.03) 8px,
+      transparent 8px,
+      transparent 16px
+    ),
+    #e8e6e1;
+  border: 1px dashed rgba(0, 0, 0, 0.14);
+}
+
+.card__gallery-upload-slot__text,
+.card__gallery-upload-strip__text {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: rgba(55, 53, 47, 0.72);
+}
+
+.card__gallery-upload-strip {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 6px 8px;
+  box-sizing: border-box;
+  background: rgba(255, 255, 255, 0.93);
+  border-top: 1px dashed rgba(0, 0, 0, 0.12);
+  pointer-events: none;
 }
 
 .card__text {
@@ -4234,11 +4302,17 @@ div.card__text--readonly:not(.card__text--preview) {
     overflow: visible;
   }
 
+  /* 勿再加左右 padding：内部 .sidebar__section-row 已有 16px，否则「收藏」会比「合集」多缩进一层 */
   .app--mobile-nav-open .sidebar__collections > .sidebar__favorites {
-    padding-left: 16px;
-    padding-right: 16px;
+    padding-left: 0;
+    padding-right: 0;
     border-bottom: 1px solid rgba(55, 53, 47, 0.08);
     margin-bottom: 4px;
+  }
+
+  .app--mobile-nav-open .sidebar__favorites-empty {
+    padding-left: 16px;
+    padding-right: 16px;
   }
 
   .app--mobile-nav-open .sidebar__collections > .sidebar__section-row {
@@ -4415,11 +4489,11 @@ div.card__text--readonly:not(.card__text--preview) {
     display: none;
   }
 
-  /* 小屏：搜索展开时输入条独占首行，标题与按钮在下一行 */
+  /* 小屏：搜索展开时首行 [返回][搜索框][瀑布流]；标题下一行；其余操作按钮再下一行 */
   .main__header-row--search-open {
     flex-wrap: wrap;
     row-gap: 0.5rem;
-    column-gap: 0.75rem;
+    column-gap: 0.5rem;
   }
 
   .main__header-row--search-open .main__mobile-back {
@@ -4435,6 +4509,22 @@ div.card__text--readonly:not(.card__text--preview) {
     max-width: none;
   }
 
+  /* 让瀑布流按钮参与顶栏 flex，排在搜索框右侧 */
+  .main__header-row--search-open .main__header-actions {
+    display: contents;
+  }
+
+  .main__header-row--search-open .main__header-icon-btn--masonry {
+    order: 0;
+    flex: 0 0 auto;
+  }
+
+  .main__header-row--search-open
+    .main__header-actions
+    > .main__header-icon-btn:not(.main__header-icon-btn--masonry) {
+    order: 4;
+  }
+
   .main__header-row--search-open .main__nav-toggle {
     order: 1;
   }
@@ -4443,10 +4533,6 @@ div.card__text--readonly:not(.card__text--preview) {
     order: 2;
     flex: 1 1 100%;
     min-width: 0;
-  }
-
-  .main__header-row--search-open .main__header-actions {
-    order: 3;
   }
 
   .main {
@@ -5929,6 +6015,17 @@ div.card__text--readonly:not(.card__text--preview) {
   min-height: 0;
   width: 100%;
   background: #f2f3f6;
+}
+
+.card--detail-modal--has-gallery .card__gallery-upload-slot--solo {
+  background: repeating-linear-gradient(
+      -45deg,
+      rgba(0, 0, 0, 0.03),
+      rgba(0, 0, 0, 0.03) 8px,
+      transparent 8px,
+      transparent 16px
+    ),
+    #f2f3f6;
 }
 
 .card--detail-modal--has-gallery .card__gallery-thumb-hit:not(.card__gallery-thumb-hit--audio-inline) {

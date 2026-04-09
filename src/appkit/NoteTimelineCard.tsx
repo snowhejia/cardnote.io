@@ -76,6 +76,11 @@ export type NoteTimelineCardProps = {
     cardId: string,
     item: NoteMediaItem
   ) => void;
+  setCardMediaCoverItem: (
+    colId: string,
+    cardId: string,
+    item: NoteMediaItem
+  ) => void;
   setReminderPicker: Dispatch<
     SetStateAction<{ colId: string; cardId: string } | null>
   >;
@@ -112,6 +117,7 @@ export function NoteTimelineCard(p: NoteTimelineCardProps) {
     clearCardMedia,
     uploadFilesToCard,
     removeCardMediaItem,
+    setCardMediaCoverItem,
     setReminderPicker,
     togglePin,
     deleteCard,
@@ -120,7 +126,8 @@ export function NoteTimelineCard(p: NoteTimelineCardProps) {
   } = p;
 
   const media = (card.media ?? []).filter((m) => m.url?.trim());
-  const hasGallery = media.length > 0;
+  const mediaUploadPending = uploadBusyCardId === card.id;
+  const hasGallery = media.length > 0 || mediaUploadPending;
   const reminderBesideTime = formatCardReminderBesideTime(card);
   const hugeForMasonry =
     masonryLayout && cardNeedsMasonryCollapse(card);
@@ -497,6 +504,13 @@ export function NoteTimelineCard(p: NoteTimelineCardProps) {
                     removeCardMediaItem(colId, card.id, item)
                 : undefined
             }
+            onSetCoverItem={
+              canEdit
+                ? (item) =>
+                    setCardMediaCoverItem(colId, card.id, item)
+                : undefined
+            }
+            uploadPending={mediaUploadPending}
           />
         ) : null}
       </CardRowInner>

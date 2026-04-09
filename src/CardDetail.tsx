@@ -115,6 +115,8 @@ export interface CardDetailProps {
   onTagsCommit: (colId: string, cardId: string, tags: string[]) => void;
   onPasteFiles?: (files: File[]) => void;
   onRemoveGalleryItem?: (item: NoteMediaItem) => void;
+  /** 将附件设为轮播首项（封面） */
+  onSetGalleryCoverItem?: (item: NoteMediaItem) => void;
 }
 
 /** 详情覆层：与主时间线相同的 card / card__paper / 轮播结构；音视频在侧栏内直接播放 */
@@ -138,6 +140,7 @@ export function CardDetail({
   onTagsCommit,
   onPasteFiles,
   onRemoveGalleryItem,
+  onSetGalleryCoverItem,
 }: CardDetailProps) {
   const menuId = useMemo(() => detailMenuId(card.id), [card.id]);
   const menuOpen = cardMenuId === menuId;
@@ -239,7 +242,7 @@ export function CardDetail({
   }, [onClose]);
 
   const media = (card.media ?? []).filter((m) => m.url?.trim());
-  const hasGallery = media.length > 0;
+  const hasGallery = media.length > 0 || uploadBusy;
 
   const panel = (
     <div className="card-detail-overlay" onMouseDown={onClose}>
@@ -431,6 +434,8 @@ export function CardDetail({
                 items={media}
                 playback="inlineAv"
                 onRemoveItem={onRemoveGalleryItem}
+                onSetCoverItem={onSetGalleryCoverItem}
+                uploadPending={uploadBusy}
               />
             ) : null}
           </div>

@@ -5,6 +5,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import type { NoteMediaItem, NoteMediaKind } from "./types";
+import { resolveMediaUrl } from "./api/auth";
 import { LOCAL_MEDIA_PREFIX } from "./localMediaTauri";
 import {
   MediaLightboxAudio,
@@ -17,6 +18,33 @@ import {
   MediaThumbVideo,
   useMediaDisplaySrc,
 } from "./mediaDisplay";
+
+function noteMediaItemsEqual(a: NoteMediaItem, b: NoteMediaItem): boolean {
+  return (
+    a.url === b.url &&
+    a.kind === b.kind &&
+    (a.name ?? "") === (b.name ?? "") &&
+    (a.coverUrl ?? "") === (b.coverUrl ?? "")
+  );
+}
+
+/** 仅图片：抓取像素数据写入剪贴板（可粘贴到聊天、文档等） */
+async function copyImageToClipboard(item: NoteMediaItem) {
+  if (item.kind !== "image") return;
+  const url = resolveMediaUrl(item.url);
+  try {
+    const res = await fetch(url);
+    const blob = await res.blob();
+    const mime =
+      blob.type && blob.type.startsWith("image/") ? blob.type : "image/png";
+    if (typeof ClipboardItem === "undefined") return;
+    await navigator.clipboard.write([
+      new ClipboardItem({ [mime]: blob }),
+    ]);
+  } catch {
+    /* 跨域未放行 CORS、或浏览器不支持写图时静默失败 */
+  }
+}
 
 function fileLabelFromUrl(url: string): string {
   if (url.startsWith(LOCAL_MEDIA_PREFIX)) {
@@ -133,11 +161,17 @@ export type CardGalleryPlayback = "default" | "inlineAv";
 export function CardGallery({
   items,
   onRemoveItem,
+  onSetCoverItem,
   playback = "default",
+  uploadPending = false,
 }: {
   items: NoteMediaItem[];
   onRemoveItem?: (item: NoteMediaItem) => void;
+  /** 将该项移到 media 数组首位，作为默认首帧 */
+  onSetCoverItem?: (item: NoteMediaItem) => void;
   playback?: CardGalleryPlayback;
+  /** 正在上传附件：在轮播区显示占位与进度圈 */
+  uploadPending?: boolean;
 }) {
   const [i, setI] = useState(0);
   const [lightbox, setLightbox] = useState<LightboxState | null>(null);
@@ -202,7 +236,24 @@ export function CardGallery({
     };
   }, [lightbox]);
 
-  if (n === 0) return null;
+  if (n === 0 && !uploadPending) return null;
+
+  if (n === 0 && uploadPending) {
+    return (
+      <div className="card__gallery">
+        <div className="card__gallery-viewport">
+          <div
+            className="card__gallery-upload-slot card__gallery-upload-slot--solo"
+            aria-busy
+            aria-label="上传中"
+          >
+            <span className="card__gallery-upload-spinner" aria-hidden />
+            <span className="card__gallery-upload-slot__text">上传中</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const safeI = ((i % n) + n) % n;
   const current = items[safeI];
@@ -225,7 +276,12 @@ export function CardGallery({
     e: MouseEvent<HTMLElement>,
     item: NoteMediaItem
   ) => {
-    if (!onRemoveItem) return;
+    const idx = items.findIndex((m) => noteMediaItemsEqual(m, item));
+    const showSetCover =
+      Boolean(onSetCoverItem) && n > 1 && idx > 0;
+    const showCopyImage = item.kind === "image";
+    const showRemove = Boolean(onRemoveItem);
+    if (!showSetCover && !showCopyImage && !showRemove) return;
     e.preventDefault();
     e.stopPropagation();
     setAttachMenu({ x: e.clientX, y: e.clientY, item });
@@ -361,7 +417,6 @@ export function CardGallery({
 
   const attachMenuPortal =
     attachMenu &&
-    onRemoveItem &&
     createPortal(
       <div
         data-attachment-ctx-menu
@@ -371,7 +426,7 @@ export function CardGallery({
           left: Math.min(
             attachMenu.x,
             typeof window !== "undefined"
-              ? window.innerWidth - 148
+              ? window.innerWidth - 180
               : attachMenu.x
           ),
           top: attachMenu.y,
@@ -379,18 +434,50 @@ export function CardGallery({
         }}
         role="menu"
       >
-        <button
-          type="button"
-          className="attachment-ctx-menu__item"
-          role="menuitem"
-          onClick={() => {
-            onRemoveItem(attachMenu.item);
-            setAttachMenu(null);
-            setLightbox(null);
-          }}
-        >
-          删除附件
-        </button>
+        {onSetCoverItem &&
+        n > 1 &&
+        items.findIndex((m) => noteMediaItemsEqual(m, attachMenu.item)) > 0 ? (
+          <button
+            type="button"
+            className="attachment-ctx-menu__item"
+            role="menuitem"
+            onClick={() => {
+              onSetCoverItem(attachMenu.item);
+              setI(0);
+              setAttachMenu(null);
+              setLightbox(null);
+            }}
+          >
+            设为封面
+          </button>
+        ) : null}
+        {attachMenu.item.kind === "image" ? (
+          <button
+            type="button"
+            className="attachment-ctx-menu__item"
+            role="menuitem"
+            onClick={() => {
+              void copyImageToClipboard(attachMenu.item);
+              setAttachMenu(null);
+            }}
+          >
+            复制图片
+          </button>
+        ) : null}
+        {onRemoveItem ? (
+          <button
+            type="button"
+            className="attachment-ctx-menu__item attachment-ctx-menu__item--danger"
+            role="menuitem"
+            onClick={() => {
+              onRemoveItem(attachMenu.item);
+              setAttachMenu(null);
+              setLightbox(null);
+            }}
+          >
+            删除附件
+          </button>
+        ) : null}
       </div>,
       document.body
     );
@@ -411,6 +498,9 @@ export function CardGallery({
           }
           onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => e.stopPropagation()}
+          onContextMenu={(e) => {
+            openAttachmentMenu(e, current);
+          }}
         >
           {current.kind === "video" ? (
             <GalleryInlineVideo url={current.url} />
@@ -459,17 +549,21 @@ export function CardGallery({
               : "")
         }
         title={
-          onRemoveItem
-            ? current.kind === "file"
-              ? "点击查看，右键可删除"
-              : current.kind === "audio"
-                ? "点击放大播放音频，右键可删除"
-                : "点击放大，右键可删除"
-            : current.kind === "file"
-              ? "点击查看"
-              : current.kind === "audio"
-                ? "点击放大播放音频"
-                : "点击放大"
+          onRemoveItem || onSetCoverItem
+            ? current.kind === "image"
+              ? "点击放大，右键可复制图片或更多"
+              : current.kind === "file"
+                ? "点击查看，右键更多"
+                : current.kind === "audio"
+                  ? "点击放大播放音频，右键更多"
+                  : "点击放大，右键更多"
+            : current.kind === "image"
+              ? "点击放大，右键可复制图片"
+              : current.kind === "file"
+                ? "点击查看"
+                : current.kind === "audio"
+                  ? "点击放大播放音频"
+                  : "点击放大"
         }
         aria-label={
           current.kind === "video"
@@ -485,7 +579,7 @@ export function CardGallery({
           openCurrentLightbox();
         }}
         onContextMenu={(e) => {
-          if (onRemoveItem) openAttachmentMenu(e, current);
+          openAttachmentMenu(e, current);
         }}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
@@ -556,6 +650,16 @@ export function CardGallery({
       {attachMenuPortal}
       <div className="card__gallery-viewport">
         {thumbInteractive}
+        {uploadPending && n > 0 ? (
+          <div
+            className="card__gallery-upload-strip"
+            aria-busy
+            aria-label="上传中"
+          >
+            <span className="card__gallery-upload-spinner" aria-hidden />
+            <span className="card__gallery-upload-strip__text">上传中</span>
+          </div>
+        ) : null}
         {n > 1 ? (
           <span className="card__gallery-count">
             {safeI + 1}/{n}

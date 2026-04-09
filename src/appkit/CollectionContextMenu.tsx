@@ -32,7 +32,7 @@ export function CollectionContextMenu({ menu, onRemove }: Props) {
     >
       <button
         type="button"
-        className="attachment-ctx-menu__item"
+        className="attachment-ctx-menu__item attachment-ctx-menu__item--danger"
         role="menuitem"
         onClick={(e) => {
           e.stopPropagation();

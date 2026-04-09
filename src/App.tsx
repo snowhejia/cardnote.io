@@ -1318,6 +1318,41 @@ export default function App() {
     [dataMode]
   );
 
+  /** 将指定附件移到 media 数组首位，作为轮播默认首帧（封面） */
+  const setCardMediaCoverItem = useCallback(
+    (colId: string, cardId: string, item: NoteMediaItem) => {
+      let nextMedia: NoteMediaItem[] | undefined;
+      flushSync(() => {
+        setCollections((prev) =>
+          mapCollectionById(prev, colId, (col) => ({
+            ...col,
+            cards: col.cards.map((card) => {
+              if (card.id !== cardId) return card;
+              const raw = card.media ?? [];
+              const idx = raw.findIndex(
+                (m) =>
+                  m.url === item.url &&
+                  m.kind === item.kind &&
+                  (m.name ?? "") === (item.name ?? "") &&
+                  (m.coverUrl ?? "") === (item.coverUrl ?? "")
+              );
+              if (idx <= 0) return card;
+              const next = [...raw];
+              const [picked] = next.splice(idx, 1);
+              next.unshift(picked);
+              nextMedia = next;
+              return { ...card, media: next };
+            }),
+          }))
+        );
+      });
+      if (dataMode !== "local" && nextMedia !== undefined) {
+        void updateCardApi(cardId, { media: nextMedia });
+      }
+    },
+    [dataMode]
+  );
+
   /**
    * 向当前选中合集追加一张小笔记；返回新卡片 id，条件不满足时返回 null。
    * 云端模式下会 await POST 完成后再返回，避免紧接着的 PATCH 早于建卡导致正文未写入。
@@ -1877,6 +1912,7 @@ export default function App() {
         clearCardMedia={clearCardMedia}
         uploadFilesToCard={uploadFilesToCard}
         removeCardMediaItem={removeCardMediaItem}
+        setCardMediaCoverItem={setCardMediaCoverItem}
         setReminderPicker={setReminderPicker}
         togglePin={togglePin}
         deleteCard={deleteCard}
@@ -3455,6 +3491,16 @@ export default function App() {
             canEdit
               ? (item) =>
                   removeCardMediaItem(
+                    detailCardLive.colId,
+                    detailCardLive.card.id,
+                    item
+                  )
+              : undefined
+          }
+          onSetGalleryCoverItem={
+            canEdit
+              ? (item) =>
+                  setCardMediaCoverItem(
                     detailCardLive.colId,
                     detailCardLive.card.id,
                     item
