@@ -15,13 +15,13 @@ import { useAppUiLang } from "./appUiLang";
 import { useAppChrome } from "./i18n/useAppChrome";
 import { NoteCardTiptap } from "./noteEditor/NoteCardTiptap";
 import type { NoteCard, NoteMediaItem } from "./types";
+import { MOBILE_CHROME_MEDIA } from "./appkit/appConstants";
 
 const detailMenuId = (cardId: string) => `__detail__${cardId}`;
 
 const CARD_DETAIL_LAYOUT_KEY = "mikujar-card-detail-layout";
 
-/** 与时间线 CardRowInner 一致：手机端固定上下布局 */
-const CARD_DETAIL_MOBILE_MQ = "(max-width: 900px)";
+/** 与时间线 CardRowInner 一致：窄屏或大屏触控平板 */
 
 /** 左右分栏：方框 + 正中竖线 */
 function IconDetailLayoutSplit() {
@@ -161,11 +161,11 @@ export function CardDetail({
   const [detailNarrow, setDetailNarrow] = useState(
     () =>
       typeof window !== "undefined" &&
-      window.matchMedia(CARD_DETAIL_MOBILE_MQ).matches
+      window.matchMedia(MOBILE_CHROME_MEDIA).matches
   );
 
   useEffect(() => {
-    const mq = window.matchMedia(CARD_DETAIL_MOBILE_MQ);
+    const mq = window.matchMedia(MOBILE_CHROME_MEDIA);
     const onChange = () => setDetailNarrow(mq.matches);
     mq.addEventListener("change", onChange);
     return () => mq.removeEventListener("change", onChange);

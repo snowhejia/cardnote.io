@@ -134,7 +134,7 @@ flowchart TB
 
 - **模型与存储键**：`collectionModel`、`workspaceStorage`、`initialWorkspace`
 - **日历与搜索**：`searchAndCalendar`、`CalendarBrowse`、`dateUtils`
-- **布局与常量**：`masonryLayout`、`appConstants`、`mobileNavSwipe`
+- **布局与常量**：时间线列数偏好（`mikujar-timeline-columns`）、`appConstants`、`mobileNavSwipe`
 - **拖拽**：`noteCardDrag`、`collectionDrag`；UI 侧 `useCollectionRowDnD`
 - **远程加载**：`useRemoteCollectionsSync`
 - **用户管理**：`useUserAdmin`、`UserAdminModal`

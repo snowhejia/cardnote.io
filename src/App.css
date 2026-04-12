@@ -1916,6 +1916,68 @@
   flex-shrink: 0;
 }
 
+/* 时间线列数：上下步进（与顶栏控件同高） */
+.main__header-column-stepper {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 2px;
+  height: var(--main-header-control-h);
+  padding: 0 4px;
+  border-radius: 8px;
+  border: 1px solid var(--vp-c-divider);
+  background: var(--vp-c-bg-soft);
+  box-sizing: border-box;
+}
+
+.main__header-column-stepper__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  min-width: 26px;
+  height: calc(var(--main-header-control-h) - 6px);
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--vp-c-text-2);
+  cursor: pointer;
+  line-height: 0;
+}
+
+.main__header-column-stepper__btn:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--vp-c-text-1);
+}
+
+.main__header-column-stepper__btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.main__header-column-stepper__btn:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.45);
+  outline-offset: 1px;
+}
+
+.main__header-column-stepper__chev {
+  display: block;
+}
+
+.main__header-column-stepper__value {
+  min-width: 1.5rem;
+  padding: 0 0.15rem;
+  font-size: var(--main-header-control-font);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--vp-c-text-1);
+  text-align: center;
+  line-height: 1;
+  user-select: none;
+}
+
 /* 外边距只在包裹层上，避免 p 与 textarea 折叠规则不同导致双击时跳动 */
 .main__hint-wrap {
   margin-top: 0.55rem;
@@ -2554,6 +2616,39 @@ textarea.main__hint-editor:focus {
   background: #ffffff;
 }
 
+/* 上下布局（含桌面长文、回收站无拖条等）：手机壳内 @media 另有同系规则，此处保证非 max-width:900 视口也生效 */
+.card__inner--split.card__inner--mobile-gallery-stack {
+  flex-direction: column;
+}
+
+.card__inner--split.card__inner--mobile-gallery-stack .card__paper--with-gallery {
+  border-radius: 12px 12px 0 0;
+  border-right: none;
+  border-bottom: 1px solid rgba(60, 60, 67, 0.08);
+}
+
+.card__inner--split.card__inner--mobile-gallery-stack
+  .card__paper--with-move-rail.card__paper--with-gallery {
+  border-radius: 12px 12px 0 0;
+}
+
+.card__inner--split.card__inner--mobile-gallery-stack .card__gallery {
+  flex: 0 0 auto;
+  max-width: none;
+  width: 100%;
+  min-width: 0;
+  border-radius: 0 0 12px 0;
+}
+
+.card__inner--split.card__inner--mobile-gallery-stack .card__gallery-viewport {
+  min-height: 140px;
+  max-height: min(42vh, 280px);
+}
+
+.card__inner--split.card__inner--mobile-gallery-stack .card__paper {
+  background-attachment: local;
+}
+
 .card__move-rail {
   flex: 0 0 30px;
   align-self: stretch;
@@ -2703,8 +2798,9 @@ textarea.main__hint-editor:focus {
   white-space: nowrap;
 }
 
-/* 小屏瀑布流双列时栏位紧，隐藏「· 提醒M月D日」与标签行（与 narrowUi 900px 一致） */
-@media (max-width: 900px) {
+/* 小屏 + 大屏触控平板：与 narrowUi / matchesMobileChromeMedia 一致 */
+@media (max-width: 900px),
+  ((min-width: 901px) and (hover: none) and (pointer: coarse)) {
   .app--masonry .card__time-reminder {
     display: none !important;
   }
@@ -4235,7 +4331,8 @@ div.card__text--readonly:not(.card__text--preview) {
   color: rgba(55, 53, 47, 0.82);
 }
 
-@media (max-width: 900px) {
+@media (max-width: 900px),
+  ((min-width: 901px) and (hover: none) and (pointer: coarse)) {
   /* 避免窄栏正文被系统放大，行高与 30px 横格错位导致「换行缺线」 */
   .card {
     -webkit-text-size-adjust: 100%;
@@ -4830,7 +4927,7 @@ div.card__text--readonly:not(.card__text--preview) {
     max-height: min(220px, 36vh);
   }
 
-  /* 顶栏汉堡/搜索/加号改由底部 mobile-dock 提供，此处隐藏；右上角保留瀑布流切换 */
+  /* 顶栏汉堡/搜索/加号改由底部 mobile-dock 提供，此处隐藏；右上角保留列数分段 */
   .main__nav-toggle {
     display: none !important;
   }
@@ -4840,7 +4937,7 @@ div.card__text--readonly:not(.card__text--preview) {
   }
 
   .main__header-actions
-    > .main__header-icon-btn:not(.main__header-icon-btn--danger-text):not(.main__header-icon-btn--masonry) {
+    > .main__header-icon-btn:not(.main__header-icon-btn--danger-text) {
     display: none;
   }
 
@@ -4864,19 +4961,19 @@ div.card__text--readonly:not(.card__text--preview) {
     max-width: none;
   }
 
-  /* 让瀑布流按钮参与顶栏 flex，排在搜索框右侧 */
+  /* 让列数分段参与顶栏 flex，排在搜索框右侧 */
   .main__header-row--search-open .main__header-actions {
     display: contents;
   }
 
-  .main__header-row--search-open .main__header-icon-btn--masonry {
+  .main__header-row--search-open .main__header-column-stepper {
     order: 0;
     flex: 0 0 auto;
   }
 
   .main__header-row--search-open
     .main__header-actions
-    > .main__header-icon-btn:not(.main__header-icon-btn--masonry) {
+    > .main__header-icon-btn {
     order: 4;
   }
 
@@ -5133,7 +5230,7 @@ div.card__text--readonly:not(.card__text--preview) {
     border-radius: 12px 0 0 12px;
   }
 
-  /* 有附件：小屏固定上下布局（见 CardRowInner） */
+  /* 有附件：手机窄屏固定上下布局；大屏触控平板 1 列时左右分栏（见 CardRowInner） */
   .card__inner--split.card__inner--mobile-gallery-stack {
     flex-direction: column;
   }
@@ -5155,7 +5252,7 @@ div.card__text--readonly:not(.card__text--preview) {
     max-width: none;
     width: 100%;
     min-width: 0;
-    border-radius: 0 0 12px 12px;
+    border-radius: 0 0 12px 0;
   }
 
   .card__inner--split.card__inner--mobile-gallery-stack
@@ -6757,9 +6854,218 @@ div.card__text--readonly:not(.card__text--preview) {
     .sidebar,
     .app--mobile-nav-open .sidebar,
     .main,
-    .app--mobile-nav-open .main {
+    .app--mobile-nav-open .main,
+    .app.app--tablet-split-nav .sidebar,
+    .app.app--tablet-split-nav .main {
       transition-duration: 0.01ms !important;
     }
+  }
+}
+
+/* 大屏触控平板：左侧固定合集侧栏，主区 / 底栏仍按手机窄屏（非桌面分栏） */
+.app.app--tablet-split-nav {
+  display: grid !important;
+  grid-template-columns: min(280px, 34vw) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  min-height: 100dvh;
+  min-height: 100svh;
+  max-height: 100dvh;
+  max-height: 100svh;
+  overflow: hidden !important;
+  box-sizing: border-box;
+}
+
+.app.app--tablet-split-nav .app__mobile-backdrop {
+  display: none !important;
+}
+
+.app.app--tablet-split-nav .sidebar {
+  position: relative !important;
+  top: auto !important;
+  left: auto !important;
+  right: auto !important;
+  bottom: auto !important;
+  width: 100% !important;
+  max-width: none !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  transform: none !important;
+  pointer-events: auto !important;
+  flex-shrink: 0;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  z-index: 41;
+  display: flex !important;
+  flex-direction: column !important;
+  box-sizing: border-box;
+  padding-top: calc(env(safe-area-inset-top, 0px) + 6px);
+  padding-bottom: max(12px, env(safe-area-inset-bottom, 0px));
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+.app.app--tablet-split-nav .main {
+  position: relative !important;
+  inset: auto !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  transform: none !important;
+  pointer-events: auto !important;
+  z-index: 10;
+  box-sizing: border-box;
+}
+
+.app.app--tablet-split-nav.app--mobile-nav-open .main {
+  transform: none !important;
+  pointer-events: auto !important;
+}
+
+.app.app--tablet-split-nav.app--mobile-nav-open .mobile-dock {
+  display: flex !important;
+}
+
+.app.app--tablet-split-nav .main__mobile-back {
+  display: none !important;
+}
+
+.app.app--tablet-split-nav .sidebar__header-row .sidebar__mobile-close {
+  display: none !important;
+}
+
+body.app--related-panel-open .app.app--tablet-split-nav .main {
+  transform: translate3d(-100%, 0, 0) !important;
+  pointer-events: none !important;
+}
+
+/* 大屏触控平板：恢复时间线卡片左侧拖动条（小屏 @media 内曾为 display:none） */
+.app.app--tablet-split-nav .card__move-rail {
+  display: block;
+  flex: 0 0 30px;
+  min-height: 0;
+  align-self: stretch;
+}
+
+/* 与桌面一致：有拖条时的纸张圆角（覆盖小屏「无拖条」的整卡圆角） */
+.app.app--tablet-split-nav
+  .card__inner--split:not(.card__inner--mobile-gallery-stack)
+  .card__paper--with-move-rail:not(.card__paper--with-gallery) {
+  border-radius: 0 12px 12px 0;
+}
+
+.app.app--tablet-split-nav
+  .card__inner--split:not(.card__inner--mobile-gallery-stack)
+  .card__paper--with-move-rail.card__paper--with-gallery {
+  border-radius: 0;
+}
+
+/*
+ * 上下叠放 + 平板：拖拽条仍在左侧（grid：第 1 列跨两行；第 2 列上正文、下附件）
+ * 避免仅用 column flex 时拖条成为顶栏第一条。
+ */
+.app.app--tablet-split-nav
+  .card__inner--split.card__inner--mobile-gallery-stack {
+  display: grid !important;
+  grid-template-columns: 30px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  align-items: stretch;
+}
+
+.app.app--tablet-split-nav
+  .card__inner--split.card__inner--mobile-gallery-stack
+  .card__move-rail {
+  grid-column: 1;
+  grid-row: 1 / -1;
+  width: 100%;
+  min-height: 0;
+  align-self: stretch;
+  flex: initial;
+  border-radius: 12px 0 0 12px;
+  border-right: 1px solid rgba(60, 60, 67, 0.08);
+  border-bottom: none;
+}
+
+.app.app--tablet-split-nav
+  .card__inner--split.card__inner--mobile-gallery-stack
+  .card__paper--with-gallery {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  border-radius: 0 12px 0 0;
+  border-right: none;
+  border-bottom: 1px solid rgba(60, 60, 67, 0.08);
+}
+
+.app.app--tablet-split-nav
+  .card__inner--split.card__inner--mobile-gallery-stack
+  .card__paper--with-move-rail.card__paper--with-gallery {
+  border-radius: 0 12px 0 0;
+}
+
+.app.app--tablet-split-nav
+  .card__inner--split.card__inner--mobile-gallery-stack
+  .card__gallery {
+  grid-column: 2;
+  grid-row: 2;
+  min-width: 0;
+  width: 100%;
+  max-width: none;
+  border-radius: 0 0 12px 0;
+}
+
+/*
+ * 桌面（精指针、宽窗口）：长文上下布局时拖条仍在左侧（与平板分栏主区同构）
+ * 使用 :has(> .card__move-rail) 区分无拖条的回收站等。
+ */
+@media (min-width: 901px) and (pointer: fine) {
+  .card__inner--split.card__inner--mobile-gallery-stack:has(> .card__move-rail) {
+    display: grid !important;
+    grid-template-columns: 30px minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    align-items: stretch;
+  }
+
+  .card__inner--split.card__inner--mobile-gallery-stack:has(> .card__move-rail)
+    .card__move-rail {
+    grid-column: 1;
+    grid-row: 1 / -1;
+    width: 100%;
+    min-height: 0;
+    align-self: stretch;
+    flex: initial;
+    border-radius: 12px 0 0 12px;
+    border-right: 1px solid rgba(60, 60, 67, 0.08);
+    border-bottom: none;
+  }
+
+  .card__inner--split.card__inner--mobile-gallery-stack:has(> .card__move-rail)
+    .card__paper--with-gallery {
+    grid-column: 2;
+    grid-row: 1;
+    min-width: 0;
+    border-radius: 0 12px 0 0;
+    border-right: none;
+    border-bottom: 1px solid rgba(60, 60, 67, 0.08);
+  }
+
+  .card__inner--split.card__inner--mobile-gallery-stack:has(> .card__move-rail)
+    .card__paper--with-move-rail.card__paper--with-gallery {
+    border-radius: 0 12px 0 0;
+  }
+
+  .card__inner--split.card__inner--mobile-gallery-stack:has(> .card__move-rail)
+    .card__gallery {
+    grid-column: 2;
+    grid-row: 2;
+    min-width: 0;
+    width: 100%;
+    max-width: none;
+    border-radius: 0 0 12px 0;
   }
 }
 

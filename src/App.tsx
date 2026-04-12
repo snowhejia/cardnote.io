@@ -119,24 +119,28 @@ import {
   readCollapsedFolderIdsFromStorage,
   readPersistedActiveCollectionId,
   formatCalendarDayTitle,
-  initMasonryLayoutPreferenceIfNeeded,
+  initTimelineColumnPreferenceIfNeeded,
   insertChildCollection,
   INITIAL_WORKSPACE,
   loadFavoriteCollectionIds,
   loadTrashedNoteEntries,
   localDateString,
-  MASONRY_LAYOUT_STORAGE_KEY,
   mapCollectionById,
+  MOBILE_CHROME_MEDIA,
+  matchesMobileChromeMedia,
+  TABLET_WIDE_TOUCH_MEDIA,
+  TIMELINE_COLUMN_STEPS_WIDE,
   MasonryShortestColumns,
-  useMasonryColumnCount,
+  type TimelineColumnPreference,
   mediaItemFromUploadResult,
   MobileDockJarIcon,
   NoteTimelineCard,
   pruneCollapsedFolderIds,
   resolveActiveCollectionId,
   randomDotColor,
-  readMasonryLayoutFromStorage,
+  readTimelineColumnPreferenceFromStorage,
   RelatedCardsSidePanel,
+  writeTimelineColumnPreferenceToStorage,
   removeBidirectionalRelated,
   removeCollectionFromTree,
   saveFavoriteCollectionIds,
@@ -296,10 +300,10 @@ export default function App() {
     cardId: string;
   } | null>(null);
   /**
-   * 瀑布流布局（localStorage 持久化）。
-   * 首帧固定为时间线列表：若首屏直接套 `app--masonry`，WebKit 偶发算错；先列表再 `useEffect` 恢复偏好，与手动「列表→瀑布流」同一路径。
+   * 时间线列数（默认 2 列；localStorage 持久化）。
    */
-  const [masonryLayout, setMasonryLayout] = useState(false);
+  const [timelineColumnPref, setTimelineColumnPrefState] =
+    useState<TimelineColumnPreference>(2);
   const [detailCard, setDetailCard] = useState<{
     card: NoteCard;
     colId: string;
@@ -422,12 +426,17 @@ export default function App() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [mobileBrowseEditMode, setMobileBrowseEditMode] = useState(false);
   const [mobileCalendarOpen, setMobileCalendarOpen] = useState(false);
-  /** 与 CSS @media (max-width: 900px) 一致，用于小屏专属控件 */
-  const [narrowUi, setNarrowUi] = useState(
-    () =>
-      typeof window !== "undefined" &&
-      window.matchMedia("(max-width: 900px)").matches
+  /** 窄屏或大屏触控平板（与 App.css 抽屉、`matchesMobileChromeMedia` 一致） */
+  const [narrowUi, setNarrowUi] = useState(() =>
+    matchesMobileChromeMedia()
   );
+  /** 大屏触控平板（宽屏）：左侧合集栏固定露出，主区仍用手机布局 */
+  const [tabletSplitNav, setTabletSplitNav] = useState(() =>
+    typeof window !== "undefined" &&
+    window.matchMedia(TABLET_WIDE_TOUCH_MEDIA).matches
+  );
+  /** 横竖屏切换时重算平板列数上限（2/3） */
+  const [layoutTick, setLayoutTick] = useState(0);
   const [relatedPanel, setRelatedPanel] = useState<{
     colId: string;
     cardId: string;
@@ -440,14 +449,106 @@ export default function App() {
   const skipCloseMobileNavOnActiveChangeRef = useRef(false);
 
   useEffect(() => {
-    initMasonryLayoutPreferenceIfNeeded();
-    setMasonryLayout(readMasonryLayoutFromStorage());
+    initTimelineColumnPreferenceIfNeeded();
+    setTimelineColumnPrefState(readTimelineColumnPreferenceFromStorage());
   }, []);
 
-  const masonryColumnCount = useMasonryColumnCount();
+  const commitTimelineColumnPref = useCallback(
+    (p: TimelineColumnPreference) => {
+      setTimelineColumnPrefState(p);
+      writeTimelineColumnPreferenceToStorage(p);
+    },
+    []
+  );
 
   useEffect(() => {
-    const mq = window.matchMedia("(max-width: 900px)");
+    const bump = () => setLayoutTick((n) => n + 1);
+    window.addEventListener("orientationchange", bump);
+    window.addEventListener("resize", bump);
+    return () => {
+      window.removeEventListener("orientationchange", bump);
+      window.removeEventListener("resize", bump);
+    };
+  }, []);
+
+  /**
+   * 手机（视口≤900）：最多 2 列；
+   * 大屏触控平板：竖屏最多 2 列，横屏最多 3 列；
+   * 桌面：不限制。
+   */
+  const columnLayoutProfile = useMemo(() => {
+    if (typeof window === "undefined") {
+      return {
+        desktop: true as const,
+        cap: 6,
+        steps: [...TIMELINE_COLUMN_STEPS_WIDE],
+      };
+    }
+    if (!matchesMobileChromeMedia()) {
+      return {
+        desktop: true as const,
+        cap: 6,
+        steps: [...TIMELINE_COLUMN_STEPS_WIDE],
+      };
+    }
+    const phoneNarrow = window.matchMedia("(max-width: 900px)").matches;
+    const tabletWide = window.matchMedia(TABLET_WIDE_TOUCH_MEDIA).matches;
+    const landscape =
+      window.matchMedia("(orientation: landscape)").matches;
+    if (phoneNarrow) {
+      return {
+        desktop: false as const,
+        cap: 2,
+        steps: [1, 2] as const,
+      };
+    }
+    if (tabletWide) {
+      if (landscape) {
+        return {
+          desktop: false as const,
+          cap: 3,
+          steps: [1, 2, 3] as const,
+        };
+      }
+      return {
+        desktop: false as const,
+        cap: 2,
+        steps: [1, 2] as const,
+      };
+    }
+    return { desktop: false as const, cap: 2, steps: [1, 2] as const };
+  }, [narrowUi, layoutTick]);
+
+  const timelineColumnCount = useMemo((): 1 | 2 | 3 | 4 | 5 | 6 => {
+    if (columnLayoutProfile.desktop) return timelineColumnPref;
+    return Math.min(
+      timelineColumnPref,
+      columnLayoutProfile.cap
+    ) as 1 | 2 | 3 | 4 | 5 | 6;
+  }, [columnLayoutProfile, timelineColumnPref]);
+
+  const columnStepList = useMemo(
+    () => [...columnLayoutProfile.steps],
+    [columnLayoutProfile]
+  );
+
+  const columnStepIndex = useMemo(() => {
+    const i = columnStepList.indexOf(timelineColumnCount);
+    return i >= 0 ? i : 0;
+  }, [columnStepList, timelineColumnCount]);
+
+  const stepColumnPrefUp = useCallback(() => {
+    const next = columnStepList[columnStepIndex + 1];
+    if (next !== undefined) commitTimelineColumnPref(next);
+  }, [columnStepList, columnStepIndex, commitTimelineColumnPref]);
+
+  const stepColumnPrefDown = useCallback(() => {
+    const next = columnStepList[columnStepIndex - 1];
+    if (next !== undefined) commitTimelineColumnPref(next);
+  }, [columnStepList, columnStepIndex, commitTimelineColumnPref]);
+
+  useEffect(() => {
+    const mq = window.matchMedia(MOBILE_CHROME_MEDIA);
     const onMq = () => {
       setNarrowUi(mq.matches);
       if (!mq.matches) {
@@ -455,13 +556,31 @@ export default function App() {
         setMobileCalendarOpen(false);
       }
     };
+    onMq();
     mq.addEventListener("change", onMq);
     return () => mq.removeEventListener("change", onMq);
   }, []);
 
   useEffect(() => {
-    if (!mobileNavOpen) setMobileBrowseEditMode(false);
-  }, [mobileNavOpen]);
+    const mq = window.matchMedia(TABLET_WIDE_TOUCH_MEDIA);
+    const onMq = () => setTabletSplitNav(mq.matches);
+    onMq();
+    mq.addEventListener("change", onMq);
+    return () => mq.removeEventListener("change", onMq);
+  }, []);
+
+  /** 进入平板分栏时收起「抽屉」态，避免 body overflow 被锁死 */
+  useEffect(() => {
+    if (tabletSplitNav) setMobileNavOpen(false);
+  }, [tabletSplitNav]);
+
+  /** 手机抽屉打开或平板固定侧栏：侧栏按手机「浏览态」展示 */
+  const showMobileSidebarBrowseChrome =
+    mobileNavOpen || tabletSplitNav;
+
+  useEffect(() => {
+    if (!mobileNavOpen && !tabletSplitNav) setMobileBrowseEditMode(false);
+  }, [mobileNavOpen, tabletSplitNav]);
 
   useEffect(() => {
     const lockScroll =
@@ -561,8 +680,8 @@ export default function App() {
   }, [userAccountMenuOpen]);
 
   useEffect(() => {
-    if (!mobileNavOpen) setUserAccountMenuOpen(false);
-  }, [mobileNavOpen]);
+    if (!mobileNavOpen && !tabletSplitNav) setUserAccountMenuOpen(false);
+  }, [mobileNavOpen, tabletSplitNav]);
 
   useEffect(() => {
     if (!currentUser) {
@@ -701,6 +820,7 @@ export default function App() {
   const blockMainEdgeSwipe = useMemo(
     () =>
       mobileNavOpen ||
+      tabletSplitNav ||
       mobileCalendarOpen ||
       relatedPanel !== null ||
       detailCard !== null ||
@@ -713,6 +833,7 @@ export default function App() {
       showRemoteLoading,
     [
       mobileNavOpen,
+      tabletSplitNav,
       mobileCalendarOpen,
       relatedPanel,
       detailCard,
@@ -1009,24 +1130,12 @@ export default function App() {
     setMobileCalendarOpen(false);
   }, [remindersViewActive]);
 
-  const toggleMasonryLayout = useCallback(() => {
-    setMasonryLayout((v) => {
-      const n = !v;
-      try {
-        localStorage.setItem(MASONRY_LAYOUT_STORAGE_KEY, n ? "1" : "0");
-      } catch {
-        /* ignore */
-      }
-      return n;
-    });
-  }, []);
-
   /**
    * WebKit（含 iOS）：`.cards` 从 flex 列表切到瀑布流 Grid 时，首帧偶发未完成重算；
    * 开启后强制读几何并派发 resize，触发稳定重排。
    */
   useLayoutEffect(() => {
-    if (!masonryLayout) return;
+    if (timelineColumnCount <= 1) return;
     const root = timelineRef.current;
     if (!root) return;
 
@@ -1048,7 +1157,7 @@ export default function App() {
       cancelAnimationFrame(id1);
       if (id2 !== 0) cancelAnimationFrame(id2);
     };
-  }, [masonryLayout]);
+  }, [timelineColumnCount]);
 
   const dayReminderEntries = useMemo(() => {
     if (!calendarDay) return [];
@@ -1686,7 +1795,7 @@ export default function App() {
   const onMobileHeaderRowTapToTop = useCallback(
     (e: ReactMouseEvent<HTMLDivElement>) => {
       if (typeof window === "undefined") return;
-      if (!window.matchMedia("(max-width: 900px)").matches) return;
+      if (!matchesMobileChromeMedia()) return;
       const t = e.target as HTMLElement | null;
       if (!t) return;
       if (t.closest("button, a, input, textarea, select, [role='search']")) {
@@ -1702,7 +1811,7 @@ export default function App() {
     (e: ReactMouseEvent<HTMLElement>) => {
       if (e.target !== e.currentTarget) return;
       if (typeof window === "undefined") return;
-      if (!window.matchMedia("(max-width: 900px)").matches) return;
+      if (!matchesMobileChromeMedia()) return;
       scrollTimelineToTop("smooth");
     },
     [scrollTimelineToTop]
@@ -2114,10 +2223,10 @@ export default function App() {
   const listEmpty = pinned.length === 0 && rest.length === 0;
 
   const hideAddsInMobileBrowse =
-    mobileNavOpen && !mobileBrowseEditMode;
+    showMobileSidebarBrowseChrome && !mobileBrowseEditMode;
   /** 小屏编辑态：整行 draggable 易与滚动冲突，仅右侧三杠发起拖拽 */
   const mobileCollectionDragByHandle =
-    mobileNavOpen && mobileBrowseEditMode;
+    showMobileSidebarBrowseChrome && mobileBrowseEditMode;
 
   function renderNoteTimelineCard(card: NoteCard, colId: string) {
     return (
@@ -2154,6 +2263,7 @@ export default function App() {
         deleteCard={deleteCard}
         setCardText={setCardText}
         setCardTags={setCardTags}
+        timelineColumnCount={timelineColumnCount}
       />
     );
   }
@@ -2227,8 +2337,9 @@ export default function App() {
     <div
       className={
         "app" +
-        (mobileNavOpen ? " app--mobile-nav-open" : "") +
-        (masonryLayout ? " app--masonry" : "")
+        (showMobileSidebarBrowseChrome ? " app--mobile-nav-open" : "") +
+        (tabletSplitNav ? " app--tablet-split-nav" : "") +
+        (timelineColumnCount > 1 ? " app--masonry" : "")
       }
     >
       {showRemoteLoading ? (
@@ -2265,7 +2376,7 @@ export default function App() {
         onTouchCancel={onMobileSidebarTouchCancel}
       >
         <div className="sidebar__mobile-browse-bar">
-          {mobileNavOpen ? (
+          {showMobileSidebarBrowseChrome ? (
             <div className="sidebar__mobile-browse-user">
               <SidebarWorkspaceIdentity
                 writeRequiresLogin={writeRequiresLogin}
@@ -2359,7 +2470,7 @@ export default function App() {
         </div>
         <div className="sidebar__header">
           <div className="sidebar__header-row">
-            {!mobileNavOpen ? (
+            {!showMobileSidebarBrowseChrome ? (
               <SidebarWorkspaceIdentity
                 writeRequiresLogin={writeRequiresLogin}
                 currentUser={currentUser}
@@ -2631,7 +2742,7 @@ export default function App() {
               </span>
               <span className="sidebar__section">{c.sidebarCollections}</span>
             </button>
-            {canEdit && !mobileNavOpen ? (
+            {canEdit && !showMobileSidebarBrowseChrome ? (
               <button
                 type="button"
                 className="sidebar__section-add"
@@ -2943,23 +3054,25 @@ export default function App() {
                   </svg>
                 </button>
               ) : null}
-              <button
-                type="button"
-                className="main__header-icon-btn main__header-icon-btn--masonry"
-                aria-pressed={masonryLayout}
-                aria-label={
-                  masonryLayout
-                    ? c.layoutListAria
-                    : c.layoutMasonryAria
-                }
-                title={masonryLayout ? c.layoutListTitle : c.layoutMasonryTitle}
-                onClick={toggleMasonryLayout}
+              <div
+                className="main__header-column-stepper"
+                role="group"
+                aria-label={c.masonryColumnsGroupAria}
               >
-                {masonryLayout ? (
+                <button
+                  type="button"
+                  className="main__header-column-stepper__btn"
+                  aria-label={c.masonryColumnIncAria}
+                  title={c.masonryColumnIncAria}
+                  disabled={
+                    columnStepIndex >= columnStepList.length - 1
+                  }
+                  onClick={stepColumnPrefUp}
+                >
                   <svg
-                    className="main__header-icon-btn__svg"
-                    width="20"
-                    height="20"
+                    className="main__header-column-stepper__chev"
+                    width="16"
+                    height="16"
                     viewBox="0 0 24 24"
                     fill="none"
                     stroke="currentColor"
@@ -2968,32 +3081,47 @@ export default function App() {
                     strokeLinejoin="round"
                     aria-hidden
                   >
-                    {/* 单列列表：点击切换回列表 */}
-                    <path
-                      d="M4 7.5h16M4 12h16M4 16.5h10"
-                      strokeLinecap="round"
-                    />
+                    <path d="m18 15-6-6-6 6" />
                   </svg>
-                ) : (
+                </button>
+                <span
+                  className="main__header-column-stepper__value"
+                  title={
+                    timelineColumnCount === 1
+                      ? c.masonryCol1Title
+                      : c.masonryColFixedTitle.replace(
+                          "{n}",
+                          String(timelineColumnCount)
+                        )
+                  }
+                  aria-live="polite"
+                >
+                  {String(timelineColumnCount)}
+                </span>
+                <button
+                  type="button"
+                  className="main__header-column-stepper__btn"
+                  aria-label={c.masonryColumnDecAria}
+                  title={c.masonryColumnDecAria}
+                  disabled={columnStepIndex <= 0}
+                  onClick={stepColumnPrefDown}
+                >
                   <svg
-                    className="main__header-icon-btn__svg"
-                    width="20"
-                    height="20"
+                    className="main__header-column-stepper__chev"
+                    width="16"
+                    height="16"
                     viewBox="0 0 24 24"
                     fill="none"
                     stroke="currentColor"
                     strokeWidth="2"
+                    strokeLinecap="round"
                     strokeLinejoin="round"
                     aria-hidden
                   >
-                    {/* 两列错落砖块：瀑布流 */}
-                    <rect x="3" y="5" width="7.5" height="8" rx="1.5" />
-                    <rect x="3" y="15" width="7.5" height="5" rx="1.5" />
-                    <rect x="13.5" y="4" width="7.5" height="6" rx="1.5" />
-                    <rect x="13.5" y="12" width="7.5" height="8" rx="1.5" />
+                    <path d="m6 9 6 6 6-6" />
                   </svg>
-                )}
-              </button>
+                </button>
+              </div>
               {canEdit &&
               trashViewActive &&
               !searchActive &&
@@ -3231,8 +3359,7 @@ export default function App() {
                           </button>
                         </div>
                         <MasonryShortestColumns
-                          enabled={masonryLayout}
-                          columnCount={masonryColumnCount}
+                          columnCount={timelineColumnCount}
                         >
                           {cards.map((card) =>
                             renderNoteTimelineCard(card, col.id)
@@ -3251,8 +3378,7 @@ export default function App() {
               </div>
             ) : (
               <MasonryShortestColumns
-                enabled={masonryLayout}
-                columnCount={masonryColumnCount}
+                columnCount={timelineColumnCount}
                 ariaLabel={c.deletedNotesAria}
               >
                 {trashEntries.map((entry) => (
@@ -3264,6 +3390,7 @@ export default function App() {
                     setCardMenuId={setCardMenuId}
                     restoreTrashedEntry={restoreTrashedEntry}
                     purgeTrashedEntry={purgeTrashedEntry}
+                    timelineColumnCount={timelineColumnCount}
                   />
                 ))}
               </MasonryShortestColumns>
@@ -3271,7 +3398,7 @@ export default function App() {
           ) : remindersViewActive ? (
             <AllRemindersView
               entries={allReminderEntries}
-              masonryLayout={masonryLayout}
+              columnCount={timelineColumnCount}
               renderCard={(colId, card) =>
                 renderNoteTimelineCard(card, colId)
               }
@@ -3294,8 +3421,7 @@ export default function App() {
                       {c.headingReminders}
                     </h2>
                     <MasonryShortestColumns
-                      enabled={masonryLayout}
-                      columnCount={masonryColumnCount}
+                      columnCount={timelineColumnCount}
                     >
                       {dayReminderEntries.map(({ card }) =>
                         renderNoteTimelineCard(
@@ -3321,8 +3447,7 @@ export default function App() {
                   >
                     <h2 className="timeline__pin-heading">{c.headingPinned}</h2>
                     <MasonryShortestColumns
-                      enabled={masonryLayout}
-                      columnCount={masonryColumnCount}
+                      columnCount={timelineColumnCount}
                     >
                       {dayPinned.map((card) =>
                         renderNoteTimelineCard(
@@ -3349,8 +3474,7 @@ export default function App() {
                       「{col.name}」
                     </h2>
                     <MasonryShortestColumns
-                      enabled={masonryLayout}
-                      columnCount={masonryColumnCount}
+                      columnCount={timelineColumnCount}
                     >
                       {dayColCards.map((card) =>
                         renderNoteTimelineCard(card, col.id)
@@ -3377,8 +3501,7 @@ export default function App() {
                 >
                   <h2 className="timeline__pin-heading">{c.headingPinned}</h2>
                   <MasonryShortestColumns
-                    enabled={masonryLayout}
-                    columnCount={masonryColumnCount}
+                    columnCount={timelineColumnCount}
                   >
                     {pinned.map((card) =>
                       renderNoteTimelineCard(card, active!.id)
@@ -3394,8 +3517,7 @@ export default function App() {
                 />
               )}
               <MasonryShortestColumns
-                enabled={masonryLayout}
-                columnCount={masonryColumnCount}
+                columnCount={timelineColumnCount}
               >
                 {rest.map((card) => renderNoteTimelineCard(card, active!.id))}
               </MasonryShortestColumns>
@@ -3425,7 +3547,7 @@ export default function App() {
       !calendarDay &&
       !searchActive &&
       !trashViewActive &&
-      !mobileNavOpen &&
+      (!mobileNavOpen || tabletSplitNav) &&
       !mobileCalendarOpen &&
       !remindersViewActive ? (
         <button

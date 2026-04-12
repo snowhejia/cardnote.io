@@ -18,6 +18,7 @@ export type TrashNoteCardRowProps = {
   setCardMenuId: Dispatch<SetStateAction<string | null>>;
   restoreTrashedEntry: (entry: TrashedNoteEntry) => void;
   purgeTrashedEntry: (trashId: string) => void;
+  timelineColumnCount: number;
 };
 
 export function TrashNoteCardRow(p: TrashNoteCardRowProps) {
@@ -28,6 +29,7 @@ export function TrashNoteCardRow(p: TrashNoteCardRowProps) {
     setCardMenuId,
     restoreTrashedEntry,
     purgeTrashedEntry,
+    timelineColumnCount,
   } = p;
 
   const { lang } = useAppUiLang();
@@ -52,6 +54,7 @@ export function TrashNoteCardRow(p: TrashNoteCardRowProps) {
     >
       <CardRowInner
         hasGallery={hasGallery}
+        timelineColumnCount={timelineColumnCount}
         className={
           "card__inner" + (hasGallery ? " card__inner--split" : "")
         }

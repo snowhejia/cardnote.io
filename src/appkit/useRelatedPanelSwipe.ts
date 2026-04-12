@@ -1,8 +1,8 @@
 import { useCallback, useRef } from "react";
 import type { TouchEvent } from "react";
 import {
+  matchesMobileChromeMedia,
   MOBILE_NAV_SWIPE_CLOSE_MIN_DX,
-  MOBILE_NAV_SWIPE_LAYOUT_MAX_PX,
 } from "./appConstants";
 import {
   mobileNavSwipeMostlyHorizontal,
@@ -18,10 +18,7 @@ export function useRelatedPanelSwipe(p: { onClose: () => void }) {
 
   const onTouchStart = useCallback(
     (e: TouchEvent) => {
-      if (
-        typeof window === "undefined" ||
-        window.innerWidth > MOBILE_NAV_SWIPE_LAYOUT_MAX_PX
-      ) {
+      if (typeof window === "undefined" || !matchesMobileChromeMedia()) {
         return;
       }
       if (mobileNavSwipeTargetIsTextual(e.target)) return;
@@ -37,10 +34,7 @@ export function useRelatedPanelSwipe(p: { onClose: () => void }) {
       const start = swipeRef.current;
       swipeRef.current = null;
       if (!start) return;
-      if (
-        typeof window !== "undefined" &&
-        window.innerWidth > MOBILE_NAV_SWIPE_LAYOUT_MAX_PX
-      ) {
+      if (typeof window !== "undefined" && !matchesMobileChromeMedia()) {
         return;
       }
       const t = e.changedTouches[0];

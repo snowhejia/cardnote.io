@@ -7,39 +7,6 @@ import {
   type ReactElement,
   type ReactNode,
 } from "react";
-
-/** 视口 ≥ 此宽度用 3 列（原 1180 偏苛刻，大屏仍像「只排两列」） */
-export const MASONRY_BREAKPOINT_3COL_PX = 1024;
-/** 更宽屏再开第 4 列，利用右侧留白 */
-export const MASONRY_BREAKPOINT_4COL_PX = 1480;
-
-export function useMasonryColumnCount(): 2 | 3 | 4 {
-  const [n, setN] = useState<2 | 3 | 4>(2);
-  useLayoutEffect(() => {
-    const sync = () => {
-      const w = window.innerWidth;
-      if (w >= MASONRY_BREAKPOINT_4COL_PX) setN(4);
-      else if (w >= MASONRY_BREAKPOINT_3COL_PX) setN(3);
-      else setN(2);
-    };
-    sync();
-    const mq3 = window.matchMedia(
-      `(min-width: ${MASONRY_BREAKPOINT_3COL_PX}px)`
-    );
-    const mq4 = window.matchMedia(
-      `(min-width: ${MASONRY_BREAKPOINT_4COL_PX}px)`
-    );
-    const onChange = () => sync();
-    mq3.addEventListener("change", onChange);
-    mq4.addEventListener("change", onChange);
-    return () => {
-      mq3.removeEventListener("change", onChange);
-      mq4.removeEventListener("change", onChange);
-    };
-  }, []);
-  return n;
-}
-
 function escapeAttrSelector(s: string): string {
   if (typeof CSS !== "undefined" && typeof CSS.escape === "function") {
     return CSS.escape(s);
@@ -125,19 +92,20 @@ const PACK_SETTLE_MAX_PASSES = 18;
  * 依赖子节点根元素 `li.card` 上的 `data-masonry-key` 以测量高度。
  */
 export function MasonryShortestColumns({
-  enabled,
   columnCount,
   className,
   ariaLabel,
   children,
 }: {
-  enabled: boolean;
-  columnCount: 2 | 3 | 4;
+  /** `1` 为单列列表；`2`–`6` 为瀑布流最短列接龙 */
+  columnCount: 1 | 2 | 3 | 4 | 5 | 6;
   className?: string;
-  /** 启用瀑布流时包在容器上；关闭时为 ul 的 aria-label */
+  /** 启用瀑布流时包在容器上；单列时为 ul 的 aria-label */
   ariaLabel?: string;
   children: ReactNode;
 }) {
+  const enabled = columnCount > 1;
+  const packColumns = (enabled ? columnCount : 2) as 2 | 3 | 4 | 5 | 6;
   const childList = useMemo(
     () => Children.toArray(children) as ReactElement[],
     [children]
@@ -155,7 +123,7 @@ export function MasonryShortestColumns({
   const keysSig = orderedKeys.join("\u0001");
 
   const [buckets, setBuckets] = useState<number[][]>(() =>
-    roundRobinBuckets(childList.length, columnCount)
+    roundRobinBuckets(childList.length, packColumns)
   );
   const bucketsRef = useRef(buckets);
   bucketsRef.current = buckets;
@@ -170,8 +138,8 @@ export function MasonryShortestColumns({
 
   useLayoutEffect(() => {
     if (!enabled) return;
-    setBuckets(roundRobinBuckets(childList.length, columnCount));
-  }, [enabled, keysSig, childList.length, columnCount]);
+    setBuckets(roundRobinBuckets(childList.length, packColumns));
+  }, [enabled, keysSig, childList.length, packColumns]);
 
   useLayoutEffect(() => {
     if (!enabled || childList.length === 0) return;
@@ -207,7 +175,7 @@ export function MasonryShortestColumns({
       const next = packShortestColumn(
         orderedKeys,
         heights,
-        columnCount,
+        packColumns,
         DEFAULT_CARD_H
       );
 
@@ -256,7 +224,7 @@ export function MasonryShortestColumns({
       loadCleanRef.current?.();
       loadCleanRef.current = null;
     };
-  }, [enabled, keysSig, columnCount, childList.length, orderedKeys]);
+  }, [enabled, keysSig, packColumns, childList.length, orderedKeys]);
 
   if (!enabled) {
     return (
@@ -275,7 +243,7 @@ export function MasonryShortestColumns({
       ref={packRef}
       className="masonry-shortest-pack"
       data-masonry-pack="on"
-      data-masonry-cols={String(columnCount)}
+      data-masonry-cols={String(packColumns)}
       aria-label={ariaLabel}
       role={ariaLabel ? "region" : undefined}
     >

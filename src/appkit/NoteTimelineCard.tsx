@@ -90,6 +90,8 @@ export type NoteTimelineCardProps = {
   deleteCard: (colId: string, cardId: string) => void;
   setCardText: (colId: string, cardId: string, text: string) => void;
   setCardTags: (colId: string, cardId: string, tags: string[]) => void;
+  /** 时间线列数（用于大屏触控平板 1 列时附件与正文左右分栏） */
+  timelineColumnCount: number;
 };
 
 export function NoteTimelineCard(p: NoteTimelineCardProps) {
@@ -125,6 +127,7 @@ export function NoteTimelineCard(p: NoteTimelineCardProps) {
     deleteCard,
     setCardText,
     setCardTags,
+    timelineColumnCount,
   } = p;
 
   const { lang } = useAppUiLang();
@@ -249,6 +252,7 @@ export function NoteTimelineCard(p: NoteTimelineCardProps) {
     >
       <CardRowInner
         hasGallery={hasGallery}
+        timelineColumnCount={timelineColumnCount}
         className={
           "card__inner" + (hasGallery ? " card__inner--split" : "")
         }

@@ -4,23 +4,19 @@ import { formatReminderDateLabel } from "../cardTimeLabel";
 import { useAppChrome } from "../i18n/useAppChrome";
 import type { NoteCard } from "../types";
 import type { ReminderListEntry } from "./collectionModel";
-import {
-  MasonryShortestColumns,
-  useMasonryColumnCount,
-} from "./MasonryShortestColumns";
+import { MasonryShortestColumns } from "./MasonryShortestColumns";
 
 export function AllRemindersView({
   entries,
   renderCard,
-  masonryLayout = false,
+  columnCount = 1,
 }: {
   entries: ReminderListEntry[];
   renderCard: (colId: string, card: NoteCard) => ReactNode;
-  masonryLayout?: boolean;
+  columnCount?: 1 | 2 | 3 | 4 | 5 | 6;
 }) {
   const c = useAppChrome();
   const { lang } = useAppUiLang();
-  const masonryColumnCount = useMasonryColumnCount();
 
   if (entries.length === 0) {
     return (
@@ -47,10 +43,7 @@ export function AllRemindersView({
         <h2 className="timeline__pin-heading">
           {formatReminderDateLabel(date, lang)}
         </h2>
-        <MasonryShortestColumns
-          enabled={masonryLayout}
-          columnCount={masonryColumnCount}
-        >
+        <MasonryShortestColumns columnCount={columnCount}>
           {group.map((ent) => renderCard(ent.col.id, ent.card))}
         </MasonryShortestColumns>
       </section>

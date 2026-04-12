@@ -62,10 +62,13 @@ export type AppChrome = {
   unfavoriteShort: string;
   favoriteShort: string;
   openSearchAria: string;
-  layoutListAria: string;
-  layoutMasonryAria: string;
-  layoutListTitle: string;
-  layoutMasonryTitle: string;
+  /** 顶栏列数步进器 */
+  masonryColumnsGroupAria: string;
+  masonryCol1Title: string;
+  /** 固定 N 列，{n} 为数字 */
+  masonryColFixedTitle: string;
+  masonryColumnDecAria: string;
+  masonryColumnIncAria: string;
   emptyTrashAria: string;
   emptyTrashTitle: string;
   newNoteAria: string;
@@ -203,10 +206,11 @@ const zh: AppChrome = {
   unfavoriteShort: "取消收藏",
   favoriteShort: "收藏",
   openSearchAria: "打开搜索",
-  layoutListAria: "切换为列表布局",
-  layoutMasonryAria: "切换为瀑布流布局",
-  layoutListTitle: "列表布局",
-  layoutMasonryTitle: "瀑布流",
+  masonryColumnsGroupAria: "时间线列数",
+  masonryCol1Title: "单列列表",
+  masonryColFixedTitle: "固定 {n} 列",
+  masonryColumnDecAria: "减少列数",
+  masonryColumnIncAria: "增加列数",
   emptyTrashAria: "清空垃圾桶",
   emptyTrashTitle: "清空垃圾桶",
   newNoteAria: "新建小笔记",
@@ -349,10 +353,11 @@ const en: AppChrome = {
   unfavoriteShort: "Unstar",
   favoriteShort: "Star",
   openSearchAria: "Open search",
-  layoutListAria: "Switch to list layout",
-  layoutMasonryAria: "Switch to masonry layout",
-  layoutListTitle: "List",
-  layoutMasonryTitle: "Masonry",
+  masonryColumnsGroupAria: "Timeline columns",
+  masonryCol1Title: "Single column list",
+  masonryColFixedTitle: "Fixed {n} columns",
+  masonryColumnDecAria: "Fewer columns",
+  masonryColumnIncAria: "More columns",
   emptyTrashAria: "Empty trash",
   emptyTrashTitle: "Empty trash",
   newNoteAria: "New note",

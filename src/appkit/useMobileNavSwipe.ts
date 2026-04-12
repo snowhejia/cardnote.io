@@ -1,9 +1,9 @@
 import { useCallback, useRef, type Dispatch, type SetStateAction } from "react";
 import type { TouchEvent } from "react";
 import {
+  matchesMobileChromeMedia,
   MOBILE_NAV_SWIPE_CLOSE_MIN_DX,
   MOBILE_NAV_SWIPE_FROM_LEFT_PX,
-  MOBILE_NAV_SWIPE_LAYOUT_MAX_PX,
   MOBILE_NAV_SWIPE_OPEN_MIN_DX,
 } from "./appConstants";
 import {
@@ -39,10 +39,7 @@ export function useMobileNavSwipe(p: {
 
   const onMobileMainTouchStart = useCallback(
     (e: TouchEvent) => {
-      if (
-        typeof window === "undefined" ||
-        window.innerWidth > MOBILE_NAV_SWIPE_LAYOUT_MAX_PX
-      ) {
+      if (typeof window === "undefined" || !matchesMobileChromeMedia()) {
         return;
       }
       if (blockMainEdgeSwipe) return;
@@ -67,10 +64,7 @@ export function useMobileNavSwipe(p: {
       const start = mobileMainSwipeRef.current;
       mobileMainSwipeRef.current = null;
       if (!start?.tracking) return;
-      if (
-        typeof window !== "undefined" &&
-        window.innerWidth > MOBILE_NAV_SWIPE_LAYOUT_MAX_PX
-      ) {
+      if (typeof window !== "undefined" && !matchesMobileChromeMedia()) {
         return;
       }
       const t = e.changedTouches[0];
@@ -90,10 +84,7 @@ export function useMobileNavSwipe(p: {
 
   const onMobileSidebarTouchStart = useCallback(
     (e: TouchEvent) => {
-      if (
-        typeof window === "undefined" ||
-        window.innerWidth > MOBILE_NAV_SWIPE_LAYOUT_MAX_PX
-      ) {
+      if (typeof window === "undefined" || !matchesMobileChromeMedia()) {
         return;
       }
       if (!mobileNavOpen || showRemoteLoading) return;
@@ -110,10 +101,7 @@ export function useMobileNavSwipe(p: {
       const start = mobileSidebarSwipeRef.current;
       mobileSidebarSwipeRef.current = null;
       if (!start) return;
-      if (
-        typeof window !== "undefined" &&
-        window.innerWidth > MOBILE_NAV_SWIPE_LAYOUT_MAX_PX
-      ) {
+      if (typeof window !== "undefined" && !matchesMobileChromeMedia()) {
         return;
       }
       if (!mobileNavOpen) return;
