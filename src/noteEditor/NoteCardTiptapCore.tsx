@@ -19,7 +19,7 @@ export type NoteCardTiptapProps = {
   highlightBubble?: boolean;
 };
 
-/** 由 NoteCardTiptap.tsx 懒加载，勿直接引用（首包不含 Tiptap） */
+/** TipTap 实现层；界面请用 NoteCardTiptap。 */
 export function NoteCardTiptapCore({
   id,
   value,

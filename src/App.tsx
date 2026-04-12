@@ -191,26 +191,6 @@ export default function App() {
     [dataMode, writeRequiresLogin, currentUser]
   );
 
-  /** 主界面可见后空闲时预拉 Tiptap chunk，减少首屏笔记「先静态后编辑器」的闪烁 */
-  useEffect(() => {
-    if (!authReady || loginWallBlocking) return;
-    const w = window;
-    const run = () => {
-      void import("./noteEditor/NoteCardTiptapCore");
-    };
-    const id =
-      typeof w.requestIdleCallback === "function"
-        ? w.requestIdleCallback(run, { timeout: 2500 })
-        : w.setTimeout(run, 300);
-    return () => {
-      if (typeof w.requestIdleCallback === "function") {
-        w.cancelIdleCallback(id as number);
-      } else {
-        w.clearTimeout(id as number);
-      }
-    };
-  }, [authReady, loginWallBlocking]);
-
   const favoriteStorageKey = useMemo(
     () => favoriteCollectionsStorageKey(currentUser?.id ?? null),
     [currentUser?.id]
@@ -1854,7 +1834,9 @@ export default function App() {
         );
         if (!cardId) return;
         queueMicrotask(() => {
-          document.getElementById(`card-text-${cardId}`)?.focus();
+          const el = document.getElementById(`card-text-${cardId}`);
+          // 避免浏览器为「滚入焦点」再改滚动位置，与上面 scrollTimelineTo* 叠成抖闪
+          el?.focus({ preventScroll: true });
         });
       })();
     },
