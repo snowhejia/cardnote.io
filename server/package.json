@@ -13,7 +13,8 @@
     "db:down": "docker compose down",
     "db:logs": "docker compose logs -f postgres",
     "db:test": "node scripts/pg-connection-test.js",
-    "db:migrate": "node scripts/pg-migrate-incremental.js"
+    "db:migrate": "node scripts/pg-migrate-incremental.js",
+    "backfill:video-thumbs": "node scripts/backfill-video-thumbnails.mjs"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

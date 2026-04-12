@@ -2,7 +2,7 @@ import { randomBytes } from "crypto";
 import { spawn } from "child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "fs/promises";
 import { tmpdir } from "os";
-import { basename, join } from "path";
+import { basename, dirname, join } from "path";
 import ffmpegStatic from "ffmpeg-static";
 
 /** @param {string | undefined | null} userId */
@@ -545,6 +545,49 @@ export async function finalizeVideoThumbnailAfterCosUpload(objectKey, userId) {
   if (!thumb) return {};
   const thumbFilename = `${tokenPart}-thumb.${thumb.ext}`;
   const thumbKey = `${cosSub}/${thumbFilename}`;
+  await putCosObject(thumbKey, thumb.buffer, thumb.mimeType);
+  return { thumbnailUrl: buildObjectPublicUrl(thumbKey) };
+}
+
+/**
+ * 为已存在于 COS 的视频对象补缩略图（历史数据批处理）。
+ * 不依赖 userId：按对象键目录写入 `{token}-thumb.{ext}`，与上传时 finalize 一致。
+ * @param {string} objectKey 如 media/u-xx/1739-….mp4
+ * @returns {Promise<{ thumbnailUrl?: string; skipped?: string }>}
+ */
+export async function generateVideoThumbnailForExistingCosKey(objectKey) {
+  if (!isCosConfigured()) {
+    return { skipped: "no_cos" };
+  }
+  const k = String(objectKey || "").replace(/^\/+/, "");
+  if (!k) return { skipped: "empty_key" };
+  const prefix = cosMediaPrefix();
+  if (!k.startsWith(prefix + "/")) {
+    return { skipped: "not_media_prefix" };
+  }
+  const file = basename(k);
+  const dot = file.lastIndexOf(".");
+  if (dot < 1) return { skipped: "bad_name" };
+  const tokenPart = file.slice(0, dot);
+  const ext = file.slice(dot + 1).toLowerCase();
+  if (!/^\d+-[a-f0-9]{24}$/.test(tokenPart)) {
+    return { skipped: "bad_token" };
+  }
+  const mimetype =
+    EXT_TO_MIME[ext] || `application/${ext === "bin" ? "octet-stream" : ext}`;
+  if (kindFromMime(mimetype) !== "video") {
+    return { skipped: "not_video" };
+  }
+  const cosSub = dirname(k).replace(/\\/g, "/");
+  let buffer;
+  try {
+    buffer = await getCosObjectBuffer(k);
+  } catch {
+    return { skipped: "get_object" };
+  }
+  const thumb = await tryExtractVideoThumbnail(buffer, mimetype);
+  if (!thumb) return { skipped: "ffmpeg" };
+  const thumbKey = `${cosSub}/${tokenPart}-thumb.${thumb.ext}`;
   await putCosObject(thumbKey, thumb.buffer, thumb.mimeType);
   return { thumbnailUrl: buildObjectPublicUrl(thumbKey) };
 }
