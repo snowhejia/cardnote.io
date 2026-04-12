@@ -9,11 +9,13 @@ import { snapshotMediaQuota } from "./mediaQuota.js";
 import {
   buildObjectPublicUrl,
   cosAvatarPrefix,
+  getCosObjectBuffer,
   isCosConfigured,
   putCosObject,
 } from "./storage.js";
 import { writeFile, mkdir } from "fs/promises";
-import { join } from "path";
+import { basename, join } from "path";
+import { tryGenerateAvatarThumb } from "./mediaUpload.js";
 
 const IMAGE_MIME = new Set([
   "image/jpeg",
@@ -85,11 +87,47 @@ export function assertValidAvatarCosKey(userId, key) {
   throw new Error("无效的头像路径");
 }
 
+function mimetypeFromAvatarStorageKey(key) {
+  const ext = basename(String(key || ""))
+    .split(".")
+    .pop()
+    ?.toLowerCase();
+  const map = {
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    png: "image/png",
+    gif: "image/gif",
+    webp: "image/webp",
+    avif: "image/avif",
+  };
+  return map[ext || ""] || "image/jpeg";
+}
+
+/**
+ * COS 直传完成后：写原图 URL，并生成 avatars/{userId}-thumb.webp 供侧栏加载
+ * @returns {{ avatarUrl: string; avatarThumbUrl: string }}
+ */
 export async function confirmAvatarCosUpload(_filePath, userId, key) {
   assertValidAvatarCosKey(userId, key);
-  const url = withAvatarCacheBust(buildObjectPublicUrl(key));
-  await setUserAvatarUrl(_filePath, userId, url);
-  return url;
+  const k = String(key || "").replace(/^\//, "");
+  const fullUrl = withAvatarCacheBust(buildObjectPublicUrl(k));
+  let thumbUrl = "";
+  if (isCosConfigured()) {
+    try {
+      const buf = await getCosObjectBuffer(k);
+      const mime = mimetypeFromAvatarStorageKey(k);
+      const thumb = await tryGenerateAvatarThumb(buf, mime);
+      if (thumb) {
+        const thumbKey = `${cosAvatarPrefix()}/${userId}-thumb.webp`;
+        await putCosObject(thumbKey, thumb.buffer, thumb.mimeType);
+        thumbUrl = withAvatarCacheBust(buildObjectPublicUrl(thumbKey));
+      }
+    } catch {
+      /* 无压缩图时仍保留原图 */
+    }
+  }
+  await setUserAvatarUrls(_filePath, userId, fullUrl, thumbUrl);
+  return { avatarUrl: fullUrl, avatarThumbUrl: thumbUrl };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -106,6 +144,10 @@ export function toPublicUser(u) {
   const avatarRaw =
     (u.avatar_url != null && String(u.avatar_url).trim()) ||
     (u.avatarUrl != null && String(u.avatarUrl).trim()) ||
+    "";
+  const thumbRaw =
+    (u.avatar_thumb_url != null && String(u.avatar_thumb_url).trim()) ||
+    (u.avatarThumbUrl != null && String(u.avatarThumbUrl).trim()) ||
     "";
   const emailRaw =
     u.email != null && String(u.email).trim()
@@ -130,13 +172,14 @@ export function toPublicUser(u) {
       ...(quota.quotaUnlimited ? { quotaUnlimited: true } : {}),
     },
     ...(emailRaw ? { email: emailRaw } : {}),
+    ...(thumbRaw ? { avatarThumbUrl: thumbRaw } : {}),
   };
 }
 
 /** 读取全部用户（含 passwordHash，供登录校验与管理列表） */
 export async function readUsersList(_filePath) {
   const res = await query(
-    `SELECT id, username, password_hash, display_name, role, avatar_url, email,
+    `SELECT id, username, password_hash, display_name, role, avatar_url, avatar_thumb_url, email,
             media_usage_month, media_uploaded_bytes_month
      FROM users ORDER BY created_at`
   );
@@ -148,6 +191,7 @@ export async function readUsersList(_filePath) {
     displayName: r.display_name,
     role: r.role,
     avatarUrl: r.avatar_url,
+    avatar_thumb_url: r.avatar_thumb_url ?? "",
     email: r.email || "",
     media_usage_month: r.media_usage_month,
     media_uploaded_bytes_month: r.media_uploaded_bytes_month,
@@ -161,7 +205,7 @@ export async function readUserById(_filePath, userId) {
   const id = String(userId || "").trim();
   if (!id) return null;
   const res = await query(
-    `SELECT id, username, display_name, role, avatar_url, email,
+    `SELECT id, username, display_name, role, avatar_url, avatar_thumb_url, email,
             media_usage_month, media_uploaded_bytes_month
      FROM users WHERE id = $1`,
     [id]
@@ -174,6 +218,7 @@ export async function readUserById(_filePath, userId) {
     displayName: r.display_name,
     role: r.role,
     avatarUrl: r.avatar_url,
+    avatar_thumb_url: r.avatar_thumb_url ?? "",
     email: r.email?.trim() || undefined,
     media_usage_month: r.media_usage_month,
     media_uploaded_bytes_month: r.media_uploaded_bytes_month,
@@ -192,8 +237,8 @@ export async function ensureBootstrapAdmin(_filePath, adminPassword) {
   const hash = await bcrypt.hash(adminPassword, 10);
   const id = `u-${Date.now()}`;
   await query(
-    `INSERT INTO users (id, username, password_hash, display_name, role, avatar_url)
-     VALUES ($1, $2, $3, $4, 'admin', '')
+    `INSERT INTO users (id, username, password_hash, display_name, role, avatar_url, avatar_thumb_url)
+     VALUES ($1, $2, $3, $4, 'admin', '', '')
      ON CONFLICT (username) DO NOTHING`,
     [id, BOOTSTRAP_ADMIN_USERNAME, hash, "管理员"]
   );
@@ -203,7 +248,7 @@ export async function verifyLogin(_filePath, usernameOrEmail, password) {
   const key = String(usernameOrEmail || "").trim();
   if (!key) return null;
   const res = await query(
-    `SELECT id, username, password_hash, display_name, role, avatar_url, email,
+    `SELECT id, username, password_hash, display_name, role, avatar_url, avatar_thumb_url, email,
             media_usage_month, media_uploaded_bytes_month
      FROM users
      WHERE username = $1 OR (email IS NOT NULL AND LOWER(email) = LOWER($2))`,
@@ -220,6 +265,7 @@ export async function verifyLogin(_filePath, usernameOrEmail, password) {
     displayName: u.display_name,
     role: u.role,
     avatarUrl: u.avatar_url,
+    avatar_thumb_url: u.avatar_thumb_url ?? "",
     email: u.email || "",
     media_usage_month: u.media_usage_month,
     media_uploaded_bytes_month: u.media_uploaded_bytes_month,
@@ -269,8 +315,8 @@ export async function createUserRecord(_filePath, body) {
   const hash = await bcrypt.hash(password, 10);
 
   await query(
-    `INSERT INTO users (id, username, password_hash, display_name, role, avatar_url, email)
-     VALUES ($1, $2, $3, $4, $5, '', $6)`,
+    `INSERT INTO users (id, username, password_hash, display_name, role, avatar_url, avatar_thumb_url, email)
+     VALUES ($1, $2, $3, $4, $5, '', '', $6)`,
     [id, username, hash, displayName, role, emailNorm]
   );
 
@@ -280,6 +326,7 @@ export async function createUserRecord(_filePath, body) {
     display_name: displayName,
     role,
     avatar_url: "",
+    avatar_thumb_url: "",
     email: emailNorm,
     media_usage_month: "",
     media_uploaded_bytes_month: 0,
@@ -309,8 +356,8 @@ export async function createUserWithEmail({ email, password, displayName }) {
   const hash = await bcrypt.hash(password, 10);
 
   await query(
-    `INSERT INTO users (id, username, password_hash, display_name, role, avatar_url, email)
-     VALUES ($1, $2, $3, $4, 'user', '', $5)`,
+    `INSERT INTO users (id, username, password_hash, display_name, role, avatar_url, avatar_thumb_url, email)
+     VALUES ($1, $2, $3, $4, 'user', '', '', $5)`,
     [id, username, hash, disp, emailNorm]
   );
 
@@ -320,6 +367,7 @@ export async function createUserWithEmail({ email, password, displayName }) {
     display_name: disp,
     role: "user",
     avatar_url: "",
+    avatar_thumb_url: "",
     email: emailNorm,
     media_usage_month: "",
     media_uploaded_bytes_month: 0,
@@ -349,7 +397,7 @@ async function generateUniqueUsernameFromEmail(emailNorm) {
 export async function updateUserRecord(_filePath, id, body) {
   // 先取当前记录
   const cur = await query(
-    `SELECT id, username, display_name, role, avatar_url, email,
+    `SELECT id, username, display_name, role, avatar_url, avatar_thumb_url, email,
             media_usage_month, media_uploaded_bytes_month
      FROM users WHERE id = $1`,
     [id]
@@ -417,7 +465,7 @@ export async function updateUserRecord(_filePath, id, body) {
 
   // 返回最新记录
   const updated = await query(
-    `SELECT id, username, display_name, role, avatar_url, email,
+    `SELECT id, username, display_name, role, avatar_url, avatar_thumb_url, email,
             media_usage_month, media_uploaded_bytes_month
      FROM users WHERE id = $1`,
     [id]
@@ -435,32 +483,54 @@ export async function deleteUserRecord(_filePath, id) {
   await query("DELETE FROM users WHERE id = $1", [id]);
 }
 
-export async function setUserAvatarUrl(_filePath, userId, avatarUrl) {
+export async function setUserAvatarUrls(_filePath, userId, avatarUrl, avatarThumbUrl) {
+  const thumb = avatarThumbUrl != null ? String(avatarThumbUrl) : "";
   const res = await query(
-    "UPDATE users SET avatar_url = $1 WHERE id = $2 RETURNING id",
-    [avatarUrl, userId]
+    "UPDATE users SET avatar_url = $1, avatar_thumb_url = $2 WHERE id = $3 RETURNING id",
+    [avatarUrl, thumb, userId]
   );
   if (res.rowCount === 0) throw new Error("用户不存在");
+}
+
+/** @deprecated 使用 setUserAvatarUrls */
+export async function setUserAvatarUrl(_filePath, userId, avatarUrl) {
+  await setUserAvatarUrls(_filePath, userId, avatarUrl, "");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 头像文件保存（COS 或本地磁盘）
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * @returns {{ avatarUrl: string; avatarThumbUrl: string }}
+ */
 export async function saveAvatarFile(userId, buffer, mimetype, opts) {
   const mime = String(mimetype || "").split(";")[0].trim().toLowerCase();
   if (!IMAGE_MIME.has(mime)) throw new Error("仅支持 JPEG / PNG / GIF / WebP / AVIF 图片");
   if (buffer.length > AVATAR_MAX_BYTES) throw new Error("头像不超过 2MB");
 
   const ext = MIME_EXT[mime] || "jpg";
+  let thumbUrl = "";
+  const thumb = await tryGenerateAvatarThumb(buffer, mime);
   if (isCosConfigured()) {
     const key = `${cosAvatarPrefix()}/${userId}.${ext}`;
     await putCosObject(key, buffer, mime);
-    return withAvatarCacheBust(buildObjectPublicUrl(key));
+    const fullUrl = withAvatarCacheBust(buildObjectPublicUrl(key));
+    if (thumb) {
+      const tkey = `${cosAvatarPrefix()}/${userId}-thumb.webp`;
+      await putCosObject(tkey, thumb.buffer, thumb.mimeType);
+      thumbUrl = withAvatarCacheBust(buildObjectPublicUrl(tkey));
+    }
+    return { avatarUrl: fullUrl, avatarThumbUrl: thumbUrl };
   }
   const dir = join(opts.publicDir, "uploads", "avatars");
   await mkdir(dir, { recursive: true });
   const filename = `${userId}.${ext}`;
   await writeFile(join(dir, filename), buffer);
-  return withAvatarCacheBust(`/uploads/avatars/${filename}`);
+  const fullUrl = withAvatarCacheBust(`/uploads/avatars/${filename}`);
+  if (thumb) {
+    await writeFile(join(dir, `${userId}-thumb.webp`), thumb.buffer);
+    thumbUrl = withAvatarCacheBust(`/uploads/avatars/${userId}-thumb.webp`);
+  }
+  return { avatarUrl: fullUrl, avatarThumbUrl: thumbUrl };
 }

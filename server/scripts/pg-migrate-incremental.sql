@@ -76,3 +76,6 @@ ALTER TABLE users DROP CONSTRAINT IF EXISTS users_media_plan_check;
 ALTER TABLE users DROP COLUMN IF EXISTS media_plan;
 ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
 ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('admin', 'user', 'subscriber'));
+
+-- 侧栏等用小体积头像 WebP；原图仍在 avatar_url
+ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_thumb_url TEXT NOT NULL DEFAULT '';

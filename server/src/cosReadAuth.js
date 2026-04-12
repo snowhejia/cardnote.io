@@ -20,6 +20,7 @@ export function canSessionReadCosObjectKey(key, session) {
 
   const avatarPrefixes = [...new Set([cosAvatarPrefix(), "mikujar/avatars"])];
   for (const ap of avatarPrefixes) {
+    if (k === `${ap}/${uid}-thumb.webp`) return true;
     const avatarRe = new RegExp(
       "^" + escapeRe(ap) + "/([a-zA-Z0-9._-]+)\\.[a-zA-Z0-9]+$"
     );

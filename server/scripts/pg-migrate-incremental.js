@@ -132,6 +132,10 @@ ALTER TABLE users DROP COLUMN IF EXISTS media_plan;
 ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
 ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('admin', 'user', 'subscriber'))`,
   },
+  {
+    label: "users.avatar_thumb_url（侧栏用压缩头像）",
+    sql: `ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_thumb_url TEXT NOT NULL DEFAULT ''`,
+  },
 ];
 
 async function main() {

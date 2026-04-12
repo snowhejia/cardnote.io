@@ -38,7 +38,7 @@ import {
   readUsersList,
   readUserById,
   saveAvatarFile,
-  setUserAvatarUrl,
+  setUserAvatarUrls,
   toPublicUser,
   updateUserRecord,
   usersFilePath,
@@ -643,8 +643,11 @@ app.post("/api/users/me/avatar/confirm", attachJwtSession, requireLoggedInUser, 
   try {
     const key = typeof req.body?.key === "string" ? req.body.key.trim() : "";
     if (!key) return res.status(400).json({ error: "缺少 key" });
-    const url = await confirmAvatarCosUpload(null, req.userId, key);
-    res.json({ avatarUrl: url });
+    const out = await confirmAvatarCosUpload(null, req.userId, key);
+    res.json({
+      avatarUrl: out.avatarUrl,
+      avatarThumbUrl: out.avatarThumbUrl,
+    });
   } catch (e) {
     res.status(400).json({ error: e.message || "确认失败" });
   }
@@ -687,9 +690,14 @@ app.post("/api/users/me/avatar", attachJwtSession, requireLoggedInUser, (req, re
     if (extraFile) return res.status(400).json({ error: "仅支持单次上传一个文件" });
     if (!pendingFile) return res.status(400).json({ error: "请选择文件" });
     try {
-      const url = await saveAvatarFile(req.userId, pendingFile.buffer, pendingFile.mimetype, { publicDir });
-      await setUserAvatarUrl(null, req.userId, url);
-      res.json({ avatarUrl: url });
+      const { avatarUrl, avatarThumbUrl } = await saveAvatarFile(
+        req.userId,
+        pendingFile.buffer,
+        pendingFile.mimetype,
+        { publicDir }
+      );
+      await setUserAvatarUrls(null, req.userId, avatarUrl, avatarThumbUrl);
+      res.json({ avatarUrl, avatarThumbUrl });
     } catch (e) {
       console.error(e);
       res.status(400).json({ error: e.message || "上传失败" });

@@ -413,6 +413,36 @@ export async function tryGenerateImagePreviewThumb(buffer, mimetype) {
   }
 }
 
+/** 侧栏头像等小圆角展示用，较附件预览更小 */
+const AVATAR_THUMB_MAX_EDGE = 320;
+
+/**
+ * 用户头像 WebP 压缩图；SVG 不支持则返回 null。
+ * @param {Buffer} buffer
+ * @param {string} mimetype
+ * @returns {Promise<{ buffer: Buffer; mimeType: string; ext: string } | null>}
+ */
+export async function tryGenerateAvatarThumb(buffer, mimetype) {
+  const m = normalizeMime(mimetype);
+  if (m === "image/svg+xml") return null;
+  if (!m.startsWith("image/")) return null;
+  if (!buffer || buffer.length < 16) return null;
+  try {
+    const out = await sharp(buffer, { animated: false, limitInputPixels: 33_177_600 })
+      .rotate()
+      .resize(AVATAR_THUMB_MAX_EDGE, AVATAR_THUMB_MAX_EDGE, {
+        fit: "inside",
+        withoutEnlargement: true,
+      })
+      .webp({ quality: 80, effort: 4 })
+      .toBuffer();
+    if (!out.length) return null;
+    return { buffer: out, mimeType: "image/webp", ext: "webp" };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * @param {{ buffer: Buffer; mimetype: string; originalname?: string }} file
  * @param {{ publicUploadsDir: string; userId?: string | null }} opts

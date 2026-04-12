@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS users (
   display_name  TEXT NOT NULL DEFAULT '',
   role          TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('admin', 'user', 'subscriber')),
   avatar_url    TEXT NOT NULL DEFAULT '',
+  avatar_thumb_url TEXT NOT NULL DEFAULT '',
   email         TEXT,
   media_usage_month           TEXT NOT NULL DEFAULT '',
   media_uploaded_bytes_month  BIGINT NOT NULL DEFAULT 0,

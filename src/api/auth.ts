@@ -19,6 +19,8 @@ export type AuthUser = {
   /** 站长 / 普通住民 / 订阅用户（附件额度随身份） */
   role: "admin" | "user" | "subscriber";
   avatarUrl: string;
+  /** 侧栏等用小图；缺省用 avatarUrl */
+  avatarThumbUrl?: string;
   /** 邮箱注册或后台填写后可能有 */
   email?: string;
   mediaQuota: MediaQuotaInfo;

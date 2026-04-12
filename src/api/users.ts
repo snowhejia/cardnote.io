@@ -17,6 +17,7 @@ export type PublicUser = {
   displayName: string;
   role: "admin" | "user" | "subscriber";
   avatarUrl: string;
+  avatarThumbUrl?: string;
   /** 未绑定则为空 */
   email?: string;
   mediaQuota: MediaQuotaInfo;
@@ -134,7 +135,10 @@ export async function deleteUserApi(id: string): Promise<void> {
   if (!r.ok) throw new Error(j.error ?? "删除失败");
 }
 
-export async function uploadMyAvatar(file: File): Promise<string> {
+export async function uploadMyAvatar(file: File): Promise<{
+  avatarUrl: string;
+  avatarThumbUrl?: string;
+}> {
   const base = apiBase();
   const pres = await fetch(
     `${base}/api/users/me/avatar/presign`,
@@ -185,12 +189,18 @@ export async function uploadMyAvatar(file: File): Promise<string> {
     );
     const cj = (await c.json().catch(() => ({}))) as {
       avatarUrl?: string;
+      avatarThumbUrl?: string;
       error?: string;
     };
     if (!c.ok || typeof cj.avatarUrl !== "string") {
       throw new Error(cj.error ?? "头像没对上号…再传一次？");
     }
-    return cj.avatarUrl;
+    return {
+      avatarUrl: cj.avatarUrl,
+      ...(typeof cj.avatarThumbUrl === "string" && cj.avatarThumbUrl.trim()
+        ? { avatarThumbUrl: cj.avatarThumbUrl.trim() }
+        : {}),
+    };
   }
 
   const fd = new FormData();
@@ -201,10 +211,16 @@ export async function uploadMyAvatar(file: File): Promise<string> {
   );
   const j = (await r.json().catch(() => ({}))) as {
     avatarUrl?: string;
+    avatarThumbUrl?: string;
     error?: string;
   };
   if (!r.ok || typeof j.avatarUrl !== "string") {
     throw new Error(j.error ?? "头像没贴上去…再试一次？");
   }
-  return j.avatarUrl;
+  return {
+    avatarUrl: j.avatarUrl,
+    ...(typeof j.avatarThumbUrl === "string" && j.avatarThumbUrl.trim()
+      ? { avatarThumbUrl: j.avatarThumbUrl.trim() }
+      : {}),
+  };
 }

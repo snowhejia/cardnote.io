@@ -81,8 +81,8 @@ export function SidebarWorkspaceIdentity({
 }) {
   const c = useAppChrome();
   const avatarDisplaySrc = useMediaDisplaySrc(
-    writeRequiresLogin && currentUser?.avatarUrl
-      ? currentUser.avatarUrl
+    writeRequiresLogin && (currentUser?.avatarThumbUrl || currentUser?.avatarUrl)
+      ? (currentUser.avatarThumbUrl ?? currentUser.avatarUrl)
       : undefined
   );
 
@@ -109,7 +109,7 @@ export function SidebarWorkspaceIdentity({
               aria-label={c.accountMenu}
               title={c.accountMenu}
             >
-              {currentUser.avatarUrl ? (
+              {currentUser.avatarThumbUrl || currentUser.avatarUrl ? (
                 <img
                   src={avatarDisplaySrc}
                   alt=""
