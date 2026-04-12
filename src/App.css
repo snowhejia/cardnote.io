@@ -440,6 +440,49 @@
   color: rgba(55, 53, 47, 0.55);
 }
 
+.sidebar__section-row--collapsible {
+  align-items: center;
+}
+
+/* 折叠分区标题 chevron 列统一：收藏在 .sidebar__favorites 内，子选择器 > 无法命中，故用 .sidebar 后代选择器 */
+.sidebar .sidebar__section-row.sidebar__section-row--collapsible {
+  padding-left: 8px;
+}
+
+.app--mobile-nav-open .sidebar .sidebar__section-row.sidebar__section-row--collapsible {
+  padding-left: 8px;
+}
+
+.sidebar__section-hit {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+}
+
+.sidebar__section-hit:hover .sidebar__section {
+  color: rgba(55, 53, 47, 0.65);
+}
+
+.sidebar__section-hit:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.4);
+  outline-offset: 1px;
+}
+
+.sidebar__section-hit .sidebar__chevron {
+  flex-shrink: 0;
+}
+
 /* 侧栏月历：按日聚合笔记块 */
 .sidebar__calendar {
   padding: 4px 8px 12px;
@@ -455,6 +498,12 @@
   .sidebar__calendar {
     padding-bottom: 4px;
     margin-bottom: 0;
+  }
+
+  /* 月历折叠且无「全部提醒」时：分区线改在区块底部 */
+  .sidebar__calendar-section.sidebar__calendar-section--below-rule-desktop {
+    border-bottom: 1px solid rgba(55, 53, 47, 0.08);
+    margin-bottom: 4px;
   }
 
   /* 无「全部提醒」时：月历底部保留与有提醒时相同的分区线 */
@@ -4558,7 +4607,7 @@ div.card__text--readonly:not(.card__text--preview) {
 
   /* 与新建加号同高，示意「可拖动排序」；不可点，避免误触 */
   .app--mobile-nav-open .sidebar__header,
-  .app--mobile-nav-open .sidebar__calendar {
+  .app--mobile-nav-open .sidebar__calendar-section {
     display: none !important;
   }
 

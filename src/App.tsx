@@ -48,6 +48,12 @@ import {
   saveNewNotePlacement,
   type NewNotePlacement,
 } from "./newNotePlacementStorage";
+import {
+  readSidebarSectionsCollapsed,
+  sidebarSectionsCollapseStorageKey,
+  writeSidebarSectionsCollapsed,
+  type SidebarSectionCollapseState,
+} from "./sidebarSectionCollapseStorage";
 const UserProfileModal = lazy(() =>
   import("./UserProfileModal").then((m) => ({ default: m.UserProfileModal }))
 );
@@ -219,6 +225,53 @@ export default function App() {
   const collapsedFoldersKey = useMemo(
     () => collapsedFoldersStorageKey(dataMode, currentUser?.id ?? null),
     [dataMode, currentUser?.id]
+  );
+
+  const sidebarSectionsKey = useMemo(
+    () =>
+      sidebarSectionsCollapseStorageKey(dataMode, currentUser?.id ?? null),
+    [dataMode, currentUser?.id]
+  );
+
+  const [sidebarSectionCollapsed, setSidebarSectionCollapsed] =
+    useState<SidebarSectionCollapseState>(() =>
+      readSidebarSectionsCollapsed(
+        sidebarSectionsCollapseStorageKey(
+          dataMode,
+          currentUser?.id ?? null
+        )
+      )
+    );
+
+  useEffect(() => {
+    setSidebarSectionCollapsed(
+      readSidebarSectionsCollapsed(sidebarSectionsKey)
+    );
+  }, [sidebarSectionsKey]);
+
+  useEffect(() => {
+    writeSidebarSectionsCollapsed(sidebarSectionsKey, sidebarSectionCollapsed);
+  }, [sidebarSectionsKey, sidebarSectionCollapsed]);
+
+  const toggleSidebarSection = useCallback(
+    (part: keyof SidebarSectionCollapseState) => {
+      setSidebarSectionCollapsed((prev) => ({
+        ...prev,
+        [part]: !prev[part],
+      }));
+    },
+    []
+  );
+
+  const sidebarSectionToggleAria = useCallback(
+    (section: keyof SidebarSectionCollapseState, label: string) => {
+      const collapsed = sidebarSectionCollapsed[section];
+      if (appUiLang === "zh") {
+        return collapsed ? `展开「${label}」` : `折叠「${label}」`;
+      }
+      return collapsed ? `Expand ${label}` : `Collapse ${label}`;
+    },
+    [appUiLang, sidebarSectionCollapsed]
   );
 
   const [collections, setCollections] = useState<Collection[]>(
@@ -2367,22 +2420,54 @@ export default function App() {
 
         <div
           className={
-            "sidebar__calendar" +
-            (allReminderEntries.length === 0
-              ? " sidebar__calendar--below-rule-desktop"
+            "sidebar__calendar-section" +
+            (allReminderEntries.length === 0 &&
+            sidebarSectionCollapsed.calendar
+              ? " sidebar__calendar-section--below-rule-desktop"
               : "")
           }
-          aria-label={c.browseByDate}
         >
-          <CalendarBrowsePanel
-            calendarViewMonth={calendarViewMonth}
-            setCalendarViewMonth={setCalendarViewMonth}
-            calendarCells={calendarCells}
-            calendarDay={calendarDay}
-            datesWithNotesSet={datesWithNotesOnCalendarSet}
-            datesWithRemindersSet={datesWithRemindersOnCalendarSet}
-            onDayClick={onPickCalendarDay}
-          />
+          <div className="sidebar__section-row sidebar__section-row--collapsible sidebar__calendar-head">
+            <button
+              type="button"
+              className="sidebar__section-hit"
+              onClick={() => toggleSidebarSection("calendar")}
+              aria-expanded={!sidebarSectionCollapsed.calendar}
+              aria-label={sidebarSectionToggleAria("calendar", c.browseByDate)}
+            >
+              <span
+                className={
+                  "sidebar__chevron" +
+                  (!sidebarSectionCollapsed.calendar ? " is-expanded" : "")
+                }
+                aria-hidden
+              >
+                <span className="sidebar__chevron-icon">›</span>
+              </span>
+              <span className="sidebar__section">{c.browseByDate}</span>
+            </button>
+          </div>
+          {!sidebarSectionCollapsed.calendar ? (
+            <div
+              className={
+                "sidebar__calendar" +
+                (allReminderEntries.length === 0
+                  ? " sidebar__calendar--below-rule-desktop"
+                  : "")
+              }
+              aria-label={c.browseByDate}
+            >
+              <CalendarBrowsePanel
+                calendarViewMonth={calendarViewMonth}
+                setCalendarViewMonth={setCalendarViewMonth}
+                calendarCells={calendarCells}
+                calendarDay={calendarDay}
+                datesWithNotesSet={datesWithNotesOnCalendarSet}
+                datesWithRemindersSet={datesWithRemindersOnCalendarSet}
+                onDayClick={onPickCalendarDay}
+              />
+            </div>
+          ) : null}
         </div>
 
         {allReminderEntries.length > 0 ? (
@@ -2417,81 +2502,123 @@ export default function App() {
 
         <div className="sidebar__collections">
           <div className="sidebar__favorites">
-            <div className="sidebar__section-row">
-              <p className="sidebar__section">{c.sidebarFavorites}</p>
-            </div>
-            {favoriteSidebarEntries.length === 0 ? (
-              <p className="sidebar__favorites-empty">{c.favoritesEmpty}</p>
-            ) : (
-              <ul
-                className="sidebar__favorites-list"
-                aria-label={c.favoriteCols}
+            <div className="sidebar__section-row sidebar__section-row--collapsible">
+              <button
+                type="button"
+                className="sidebar__section-hit"
+                onClick={() => toggleSidebarSection("favorites")}
+                aria-expanded={!sidebarSectionCollapsed.favorites}
+                aria-label={sidebarSectionToggleAria(
+                  "favorites",
+                  c.sidebarFavorites
+                )}
               >
-                {favoriteSidebarEntries.map(({ col, path }) => (
-                  <li key={col.id} className="sidebar__favorites-item">
-                    <div
-                      className={
-                        "sidebar__favorites-row" +
-                        (col.id === active?.id &&
-                        !calendarDay &&
-                        !trashViewActive &&
-                        !remindersViewActive
-                          ? " is-active"
-                          : "")
-                      }
-                    >
-                      <button
-                        type="button"
-                        className="sidebar__favorites-hit"
-                        onClick={() => {
-                          setTrashViewActive(false);
-                          setRemindersViewActive(false);
-                          setSearchQuery("");
-                          setSearchBarOpen(false);
-                          setCalendarDay(null);
-                          expandAncestorsOf(col.id);
-                          setActiveId(col.id);
-                          setMobileNavOpen(false);
-                        }}
+                <span
+                  className={
+                    "sidebar__chevron" +
+                    (!sidebarSectionCollapsed.favorites ? " is-expanded" : "")
+                  }
+                  aria-hidden
+                >
+                  <span className="sidebar__chevron-icon">›</span>
+                </span>
+                <span className="sidebar__section">{c.sidebarFavorites}</span>
+              </button>
+            </div>
+            {!sidebarSectionCollapsed.favorites ? (
+              favoriteSidebarEntries.length === 0 ? (
+                <p className="sidebar__favorites-empty">{c.favoritesEmpty}</p>
+              ) : (
+                <ul
+                  className="sidebar__favorites-list"
+                  aria-label={c.favoriteCols}
+                >
+                  {favoriteSidebarEntries.map(({ col, path }) => (
+                    <li key={col.id} className="sidebar__favorites-item">
+                      <div
+                        className={
+                          "sidebar__favorites-row" +
+                          (col.id === active?.id &&
+                          !calendarDay &&
+                          !trashViewActive &&
+                          !remindersViewActive
+                            ? " is-active"
+                            : "")
+                        }
                       >
-                        <span
-                          className="sidebar__dot"
-                          style={{ backgroundColor: col.dotColor }}
-                          aria-hidden
-                        />
-                        <span className="sidebar__name" title={path}>
-                          {col.name}
-                        </span>
-                        <span className="sidebar__count">
-                          {countSidebarCollectionCardBadge(col)}
-                        </span>
-                      </button>
-                      <button
-                        type="button"
-                        draggable={false}
-                        className="sidebar__favorites-remove"
-                        aria-label={c.unfavoriteAria}
-                        title={c.unfavoriteTitle}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleFavoriteCollection(col.id);
-                        }}
-                      >
-                        <span
-                          className="sidebar__favorites-remove__icon"
-                          aria-hidden
+                        <button
+                          type="button"
+                          className="sidebar__favorites-hit"
+                          onClick={() => {
+                            setTrashViewActive(false);
+                            setRemindersViewActive(false);
+                            setSearchQuery("");
+                            setSearchBarOpen(false);
+                            setCalendarDay(null);
+                            expandAncestorsOf(col.id);
+                            setActiveId(col.id);
+                            setMobileNavOpen(false);
+                          }}
                         >
-                          ×
-                        </span>
-                      </button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
+                          <span
+                            className="sidebar__dot"
+                            style={{ backgroundColor: col.dotColor }}
+                            aria-hidden
+                          />
+                          <span className="sidebar__name" title={path}>
+                            {col.name}
+                          </span>
+                          <span className="sidebar__count">
+                            {countSidebarCollectionCardBadge(col)}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          draggable={false}
+                          className="sidebar__favorites-remove"
+                          aria-label={c.unfavoriteAria}
+                          title={c.unfavoriteTitle}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleFavoriteCollection(col.id);
+                          }}
+                        >
+                          <span
+                            className="sidebar__favorites-remove__icon"
+                            aria-hidden
+                          >
+                            ×
+                          </span>
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )
+            ) : null}
           </div>
-          <div className="sidebar__section-row">
-            <p className="sidebar__section">{c.sidebarCollections}</p>
+          <div className="sidebar__section-row sidebar__section-row--collapsible">
+            <button
+              type="button"
+              className="sidebar__section-hit"
+              onClick={() => toggleSidebarSection("collections")}
+              aria-expanded={!sidebarSectionCollapsed.collections}
+              aria-label={sidebarSectionToggleAria(
+                "collections",
+                c.sidebarCollections
+              )}
+            >
+              <span
+                className={
+                  "sidebar__chevron" +
+                  (!sidebarSectionCollapsed.collections ? " is-expanded" : "")
+                }
+                aria-hidden
+              >
+                <span className="sidebar__chevron-icon">›</span>
+              </span>
+              <span className="sidebar__section">{c.sidebarCollections}</span>
+            </button>
             {canEdit && !mobileNavOpen ? (
               <button
                 type="button"
@@ -2503,6 +2630,7 @@ export default function App() {
               </button>
             ) : null}
           </div>
+          {!sidebarSectionCollapsed.collections ? (
           <nav className="sidebar__nav" aria-label={c.sidebarNav}>
             <CollectionSidebarTree
               collections={collections}
@@ -2541,34 +2669,54 @@ export default function App() {
               addSubCollection={addSubCollection}
             />
           </nav>
+          ) : null}
         </div>
 
         <div className="sidebar__tags" aria-label={c.allTags}>
-          <div className="sidebar__section-row sidebar__tags-head">
-            <p className="sidebar__section">{c.sidebarTags}</p>
+          <div className="sidebar__section-row sidebar__tags-head sidebar__section-row--collapsible">
+            <button
+              type="button"
+              className="sidebar__section-hit"
+              onClick={() => toggleSidebarSection("tags")}
+              aria-expanded={!sidebarSectionCollapsed.tags}
+              aria-label={sidebarSectionToggleAria("tags", c.sidebarTags)}
+            >
+              <span
+                className={
+                  "sidebar__chevron" +
+                  (!sidebarSectionCollapsed.tags ? " is-expanded" : "")
+                }
+                aria-hidden
+              >
+                <span className="sidebar__chevron-icon">›</span>
+              </span>
+              <span className="sidebar__section">{c.sidebarTags}</span>
+            </button>
           </div>
-          {sidebarTags.length > 0 ? (
-            <div className="sidebar__tags-cloud">
-              {sidebarTags.map((tag) => (
-                <button
-                  key={tag}
-                  type="button"
-                  className="sidebar__tags-chip"
-                  onClick={() => {
-                    setTrashViewActive(false);
-                    setRemindersViewActive(false);
-                    setSearchQuery(tag);
-                    setCalendarDay(null);
-                    setMobileNavOpen(false);
-                  }}
-                >
-                  {tag}
-                </button>
-              ))}
-            </div>
-          ) : (
-            <p className="sidebar__tags-empty">{c.tagsEmpty}</p>
-          )}
+          {!sidebarSectionCollapsed.tags ? (
+            sidebarTags.length > 0 ? (
+              <div className="sidebar__tags-cloud">
+                {sidebarTags.map((tag) => (
+                  <button
+                    key={tag}
+                    type="button"
+                    className="sidebar__tags-chip"
+                    onClick={() => {
+                      setTrashViewActive(false);
+                      setRemindersViewActive(false);
+                      setSearchQuery(tag);
+                      setCalendarDay(null);
+                      setMobileNavOpen(false);
+                    }}
+                  >
+                    {tag}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="sidebar__tags-empty">{c.tagsEmpty}</p>
+            )
+          ) : null}
           <div className="sidebar__trash" aria-label={c.trashAria}>
             <button
               type="button"
