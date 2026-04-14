@@ -306,6 +306,8 @@ export function UserProfileModal({
   if (!open) return null;
 
   const avatarSrc = previewUrl ? previewUrl : serverAvatarSrc;
+  const avatarLoadingRemote =
+    !previewUrl && !!currentUser.avatarUrl && !serverAvatarSrc;
 
   const panel = (
     <div
@@ -409,10 +411,15 @@ export function UserProfileModal({
         <div className="user-profile-modal__avatar-row">
           <div
             className="user-profile-modal__avatar-preview"
-            aria-hidden={!avatarSrc}
+            aria-hidden={!avatarSrc && !avatarLoadingRemote}
           >
             {avatarSrc ? (
               <img src={avatarSrc} alt="" />
+            ) : avatarLoadingRemote ? (
+              <span
+                className="user-profile-modal__avatar-ph user-profile-modal__avatar-ph--pending"
+                aria-hidden
+              />
             ) : (
               <span className="user-profile-modal__avatar-ph">
                 {c.profileNoAvatar}

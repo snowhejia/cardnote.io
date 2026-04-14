@@ -56,9 +56,13 @@ export function useMediaDisplaySrc(url: string | undefined): string {
   return src;
 }
 
-/** 卡片轮播内缩略图占位（微光骨架，避免大灰块+转圈像裂图） */
+/** 卡片轮播内缩略图加载（供 Gallery 内联视频等复用） */
 export function MediaThumbLoadingOverlay() {
-  return <div className="card__media-loading card__media-loading--shimmer" aria-hidden />;
+  return (
+    <div className="card__media-loading" aria-hidden>
+      <span className="card__media-loading__spinner" />
+    </div>
+  );
 }
 
 export function MediaThumbImage({

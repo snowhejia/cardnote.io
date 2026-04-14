@@ -110,11 +110,15 @@ export function SidebarWorkspaceIdentity({
               title={c.accountMenu}
             >
               {currentUser.avatarThumbUrl || currentUser.avatarUrl ? (
-                <img
-                  src={avatarDisplaySrc}
-                  alt=""
-                  className="sidebar__avatar-img"
-                />
+                avatarDisplaySrc ? (
+                  <img
+                    src={avatarDisplaySrc}
+                    alt=""
+                    className="sidebar__avatar-img"
+                  />
+                ) : (
+                  <span className="sidebar__avatar-pending" aria-hidden />
+                )
               ) : (
                 <SidebarWorkspaceAppMark />
               )}

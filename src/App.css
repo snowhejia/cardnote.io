@@ -3729,32 +3729,6 @@ textarea.main__hint-editor:focus {
   background: inherit;
 }
 
-.card__media-loading--shimmer {
-  overflow: hidden;
-}
-
-.card__media-loading--shimmer::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 42%;
-  left: -42%;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(255, 255, 255, 0.38),
-    transparent
-  );
-  animation: card-media-shimmer 1.35s ease-in-out infinite;
-}
-
-@keyframes card-media-shimmer {
-  to {
-    left: 100%;
-  }
-}
-
 /* 内联播放器：加载中挡住下方透明 video，避免误点空白控件 */
 .card__gallery-thumb-hit--inline-av .card__media-loading {
   pointer-events: auto;
@@ -6230,6 +6204,15 @@ div.card__text--readonly:not(.card__text--preview) {
   pointer-events: none;
 }
 
+/* COS 换签前勿用空 src，否则裂图；无转圈，仅中性底 */
+.sidebar__avatar-pending {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: rgba(55, 53, 47, 0.08);
+  border-radius: inherit;
+}
+
 .sidebar__flash {
   margin: 6px 8px 0;
   padding: 0;
@@ -6608,6 +6591,11 @@ div.card__text--readonly:not(.card__text--preview) {
   height: 100%;
   font-size: 0.75rem;
   color: rgba(55, 53, 47, 0.35);
+}
+
+.user-profile-modal__avatar-ph--pending {
+  display: block;
+  background: transparent;
 }
 
 .user-profile-modal__avatar-actions {
