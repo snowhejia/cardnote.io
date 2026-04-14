@@ -116,6 +116,7 @@ import {
   collectCardsOnDate,
   cloneInitialCollections,
   collectReminderCardsOnDate,
+  collectCardsInSubtreeWithPathLabels,
   collectSubtreeCollectionIds,
   collectionPathLabel,
   countSidebarCollectionCardBadge,
@@ -1693,13 +1694,40 @@ export default function App() {
   const restoreTrashedEntry = useCallback(
     async (entry: TrashedNoteEntry) => {
       if (!canEdit) return;
-      if (!findCollectionById(collections, entry.colId)) {
-        setSidebarFlash(c.errTrashRestoreOrigin);
-        return;
-      }
+      const targetColId = findCollectionById(collections, entry.colId)
+        ? entry.colId
+        : LOOSE_NOTES_COLLECTION_ID;
       let cardToAppend: NoteCard = entry.card;
       if (dataMode !== "local") {
-        const created = await createCardApi(entry.colId, entry.card, {
+        let needCreateLooseOnServer = false;
+        flushSync(() => {
+          setCollections((prev) => {
+            const missingLoose =
+              targetColId === LOOSE_NOTES_COLLECTION_ID &&
+              !findCollectionById(prev, LOOSE_NOTES_COLLECTION_ID);
+            needCreateLooseOnServer = Boolean(missingLoose);
+            let next = prev;
+            if (missingLoose) {
+              next = [
+                ...prev,
+                createLooseNotesCollection(c.looseNotesCollectionName),
+              ];
+            }
+            return next;
+          });
+        });
+        if (needCreateLooseOnServer) {
+          const colOk = await createCollectionApi({
+            id: LOOSE_NOTES_COLLECTION_ID,
+            name: c.looseNotesCollectionName,
+            dotColor: LOOSE_NOTES_DOT_COLOR,
+          });
+          if (!colOk) {
+            window.alert(c.errTrashRestore);
+            return;
+          }
+        }
+        const created = await createCardApi(targetColId, entry.card, {
           insertAtStart: newNotePlacement === "top",
         });
         if (!created) {
@@ -1719,8 +1747,15 @@ export default function App() {
         }
         return next;
       });
-      setCollections((prev) =>
-        mapCollectionById(prev, entry.colId, (col) => ({
+      setCollections((prev) => {
+        let next = prev;
+        if (
+          targetColId === LOOSE_NOTES_COLLECTION_ID &&
+          !findCollectionById(prev, LOOSE_NOTES_COLLECTION_ID)
+        ) {
+          next = [...prev, createLooseNotesCollection(c.looseNotesCollectionName)];
+        }
+        return mapCollectionById(next, targetColId, (col) => ({
           ...col,
           cards:
             newNotePlacement === "top"
@@ -1729,11 +1764,11 @@ export default function App() {
                   ...col.cards,
                 ]
               : [...col.cards, structuredClone(cardToAppend) as NoteCard],
-        }))
-      );
+        }));
+      });
       setTrashViewActive(false);
       setRemindersViewActive(false);
-      setActiveId(entry.colId);
+      setActiveId(targetColId);
       setCalendarDay(null);
       setMobileNavOpen(false);
     },
@@ -1743,7 +1778,7 @@ export default function App() {
       trashStorageKey,
       dataMode,
       newNotePlacement,
-      c.errTrashRestoreOrigin,
+      c.looseNotesCollectionName,
       c.errTrashRestore,
       c.errTrashRestoreTag,
     ]
@@ -2723,25 +2758,63 @@ export default function App() {
     async (id: string) => {
       if (!canEdit) return;
       if (id === LOOSE_NOTES_COLLECTION_ID) return;
+
+      const subtreeRoot = findCollectionById(collections, id);
+      if (!subtreeRoot) return;
+
+      const toTrash = collectCardsInSubtreeWithPathLabels(collections, id);
+      const subtreeIds = collectSubtreeCollectionIds(subtreeRoot);
+
+      const batchTs = Date.now();
+      const newTrashEntries: TrashedNoteEntry[] = toTrash.map((item, idx) => ({
+        trashId: `t-${batchTs}-${idx}-${Math.random().toString(36).slice(2, 9)}`,
+        colId: LOOSE_NOTES_COLLECTION_ID,
+        colPathLabel: item.colPathLabel,
+        card: structuredClone(item.card) as NoteCard,
+        deletedAt: new Date().toISOString(),
+      }));
+
       if (dataMode === "remote") {
+        for (const entry of newTrashEntries) {
+          const ok = await postMeTrashEntry(entry);
+          if (!ok) {
+            window.alert(c.errTrashMove);
+            return;
+          }
+        }
         const ok = await deleteCollectionApi(id);
         if (!ok) {
           window.alert(c.errDeleteCol);
           return;
         }
       }
+
+      if (newTrashEntries.length > 0) {
+        setTrashEntries((te) => {
+          const next = [...newTrashEntries, ...te];
+          if (dataMode === "local") {
+            saveTrashedNoteEntries(trashStorageKey, next);
+          }
+          return next;
+        });
+      }
+
       setDraggingCollectionId((d) => (d === id ? null : d));
       setDropIndicator((di) => (di?.targetId === id ? null : di));
       setEditingCollectionId((e) => (e === id ? null : e));
 
-      let subtreeIds: string[] = [];
       setCollections((prev) => {
         const node = findCollectionById(prev, id);
         if (!node) return prev;
-        subtreeIds = collectSubtreeCollectionIds(node);
         const { tree, removed } = removeCollectionFromTree(prev, id);
-        return removed ? tree : prev;
+        if (!removed) return prev;
+        let next = tree;
+        for (const item of toTrash) {
+          next = stripRelatedRefsToTarget(next, item.colId, item.card.id);
+        }
+        return next;
       });
+
       if (subtreeIds.length > 0) {
         setCollapsedFolderIds((prev) => {
           const next = new Set(prev);
@@ -2767,7 +2840,15 @@ export default function App() {
         });
       }
     },
-    [canEdit, dataMode, favoriteStorageKey, c.errDeleteCol]
+    [
+      canEdit,
+      collections,
+      dataMode,
+      favoriteStorageKey,
+      trashStorageKey,
+      c.errDeleteCol,
+      c.errTrashMove,
+    ]
   );
 
   const openRemoveCollectionDialog = useCallback(

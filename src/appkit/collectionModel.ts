@@ -398,6 +398,27 @@ export function collectionPathLabel(cols: Collection[], colId: string): string {
   return walk(cols, []) ?? "";
 }
 
+/**
+ * 删除合集前：子树内每张卡片及当时侧栏路径（用于回收站展示；恢复时 colId 会落到未归类）。
+ */
+export function collectCardsInSubtreeWithPathLabels(
+  cols: Collection[],
+  subtreeRootId: string
+): { colId: string; colPathLabel: string; card: NoteCard }[] {
+  const node = findCollectionById(cols, subtreeRootId);
+  if (!node) return [];
+  const out: { colId: string; colPathLabel: string; card: NoteCard }[] = [];
+  function walk(c: Collection) {
+    const label = collectionPathLabel(cols, c.id);
+    for (const card of c.cards) {
+      out.push({ colId: c.id, colPathLabel: label, card });
+    }
+    for (const ch of c.children ?? []) walk(ch);
+  }
+  walk(node);
+  return out;
+}
+
 export function previewCardTextOneLine(text: string, maxLen = 72): string {
   const line = htmlToPlainText(text).replace(/\s+/g, " ").trim();
   if (line.length <= maxLen) return line || "（无正文）";
