@@ -143,6 +143,14 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS deletion_pending BOOLEAN NOT NULL DEF
 ALTER TABLE users ADD COLUMN IF NOT EXISTS deletion_requested_at TIMESTAMPTZ NULL;
 CREATE INDEX IF NOT EXISTS idx_users_deletion_pending ON users (deletion_requested_at) WHERE deletion_pending = true`,
   },
+  {
+    label: "cards.reminder_completed_at（待办完成时间）",
+    sql: `ALTER TABLE cards ADD COLUMN IF NOT EXISTS reminder_completed_at TEXT`,
+  },
+  {
+    label: "cards.reminder_completed_note（完成时提醒备注快照）",
+    sql: `ALTER TABLE cards ADD COLUMN IF NOT EXISTS reminder_completed_note TEXT`,
+  },
 ];
 
 async function main() {

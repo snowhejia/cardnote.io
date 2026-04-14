@@ -88,12 +88,24 @@ export type ExtraModalChrome = {
   reminderAriaPrefix: string;
   remPickerTitle: string;
   remPickerHint: string;
+  /** 我的待办「新建」时提醒弹窗说明 */
+  remPickerNewTaskHint: string;
   remPickerDateLabel: string;
+  remPickerTimeLabel: string;
+  remPickerNoteLabel: string;
+  remPickerNotePlaceholder: string;
   remPickerCancel: string;
   remPickerClear: string;
   remPickerSave: string;
   allRemEmpty: string;
   allRemFooter: (n: number) => string;
+  /** 待办列表中空正文的占位 */
+  taskListUntitled: string;
+  /** 待办行勾选：清除提醒 */
+  taskListCompleteAria: string;
+  completionTimelineTitle: string;
+  completionTimelineEmpty: string;
+  completionTimelineAria: string;
 };
 
 const zh: ExtraModalChrome = {
@@ -185,14 +197,24 @@ const zh: ExtraModalChrome = {
   remPickerTitle: "设置提醒",
   remPickerHint:
     "在侧栏日历中选中该日期时，这条笔记会出现在当日列表最上方的「提醒」区域。",
+  remPickerNewTaskHint:
+    "选好提醒日与时间后保存，会新建一条空笔记并带上这里的提醒备注（可在笔记里再写正文）。",
   remPickerDateLabel: "提醒日期",
+  remPickerTimeLabel: "提醒时间（可选）",
+  remPickerNoteLabel: "备注",
+  remPickerNotePlaceholder: "添加备注…",
   remPickerCancel: "取消",
   remPickerClear: "清除提醒",
   remPickerSave: "保存",
   allRemEmpty:
-    "暂无带提醒的笔记～在卡片「⋯」里可设置提醒日；侧栏月历上有提醒的日期会显示小角标。",
+    "还没有待办～点顶栏或底部「新建待办」添加；有提醒的笔记会出现在此，勾选左侧圆圈可完成并取消提醒。",
   allRemFooter: (n) =>
-    `共 ${n} 条提醒，按提醒日排序；与合集内卡片相同，可在此直接编辑或点「查看详情」。`,
+    `共 ${n} 条，按提醒日分组；勾选圆圈可完成并取消提醒，点文字区域可编辑笔记。`,
+  taskListUntitled: "（无内容）",
+  taskListCompleteAria: "完成并清除提醒",
+  completionTimelineTitle: "完成记录",
+  completionTimelineEmpty: "在左侧勾选待办后，完成时间会出现在这里。",
+  completionTimelineAria: "待办完成时间轴",
 };
 
 const en: ExtraModalChrome = {
@@ -289,14 +311,24 @@ const en: ExtraModalChrome = {
   remPickerTitle: "Reminder",
   remPickerHint:
     "When you pick this day in the sidebar calendar, this note appears in the Reminders section at the top of that day.",
+  remPickerNewTaskHint:
+    "Save to create an empty note with the reminder date, time, and note below — then add the body in the editor.",
   remPickerDateLabel: "Reminder date",
+  remPickerTimeLabel: "Time (optional)",
+  remPickerNoteLabel: "Note",
+  remPickerNotePlaceholder: "Add a note…",
   remPickerCancel: "Cancel",
   remPickerClear: "Clear reminder",
   remPickerSave: "Save",
   allRemEmpty:
-    "No reminders yet — set a date from “⋯” on a card; days with reminders show a badge on the calendar.",
+    "No tasks yet — add with “New task” in the header or at the bottom. Notes with reminders appear here; check the circle to complete and clear the reminder.",
   allRemFooter: (n) =>
-    `${n} reminder(s), sorted by date — same cards as in collections; edit here or open details.`,
+    `${n} task(s), grouped by date — check the circle to complete and clear the reminder; tap the text to edit.`,
+  taskListUntitled: "(Empty)",
+  taskListCompleteAria: "Complete and clear reminder",
+  completionTimelineTitle: "Completed",
+  completionTimelineEmpty: "Check off a task on the left — completion times show up here.",
+  completionTimelineAria: "Completion timeline",
 };
 
 export function getExtraModalChrome(lang: LoginUiLang): ExtraModalChrome {

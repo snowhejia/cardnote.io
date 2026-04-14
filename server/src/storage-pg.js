@@ -19,8 +19,14 @@ function rowToCard(row) {
     text: row.text,
     minutesOfDay: row.minutes_of_day,
     addedOn: row.added_on ?? undefined,
-    ...(row.reminder_on
-      ? { reminderOn: row.reminder_on }
+    ...(row.reminder_on ? { reminderOn: row.reminder_on } : {}),
+    ...(row.reminder_time ? { reminderTime: row.reminder_time } : {}),
+    ...(row.reminder_note ? { reminderNote: row.reminder_note } : {}),
+    ...(row.reminder_completed_at
+      ? { reminderCompletedAt: row.reminder_completed_at }
+      : {}),
+    ...(row.reminder_completed_note
+      ? { reminderCompletedNote: row.reminder_completed_note }
       : {}),
     pinned: row.pinned,
     tags: row.tags ?? [],
@@ -128,6 +134,10 @@ function flattenTree(userId, tree) {
           minutes_of_day: card.minutesOfDay ?? 0,
           added_on: card.addedOn ?? null,
           reminder_on: card.reminderOn ?? null,
+          reminder_time: card.reminderTime ?? null,
+          reminder_note: card.reminderNote ?? null,
+          reminder_completed_at: card.reminderCompletedAt ?? null,
+          reminder_completed_note: card.reminderCompletedNote ?? null,
           pinned: card.pinned ?? false,
           tags: card.tags ?? [],
           related_refs: card.relatedRefs ?? [],
@@ -186,6 +196,7 @@ export async function getCollectionsTree(userId) {
   // 一次取出所有相关卡片
   const cardRes = await query(
     `SELECT id, collection_id, text, minutes_of_day, added_on, reminder_on,
+            reminder_time, reminder_note, reminder_completed_at, reminder_completed_note,
             pinned, tags, related_refs, media, sort_order
      FROM cards
      WHERE collection_id = ANY($1)
@@ -247,9 +258,9 @@ export async function replaceCollectionsTree(userId, collectionsArray) {
       const vals = cards
         .map(
           (_, i) =>
-            `($${i * 11 + 1}, $${i * 11 + 2}, $${i * 11 + 3}, $${i * 11 + 4}, $${i * 11 + 5}, ` +
-            `$${i * 11 + 6}, $${i * 11 + 7}, $${i * 11 + 8}, $${i * 11 + 9}, $${i * 11 + 10}, ` +
-            `$${i * 11 + 11})`
+            `($${i * 15 + 1}, $${i * 15 + 2}, $${i * 15 + 3}, $${i * 15 + 4}, $${i * 15 + 5}, ` +
+            `$${i * 15 + 6}, $${i * 15 + 7}, $${i * 15 + 8}, $${i * 15 + 9}, $${i * 15 + 10}, ` +
+            `$${i * 15 + 11}, $${i * 15 + 12}, $${i * 15 + 13}, $${i * 15 + 14}, $${i * 15 + 15})`
         )
         .join(",");
       const flat = cards.flatMap((c) => [
@@ -259,6 +270,10 @@ export async function replaceCollectionsTree(userId, collectionsArray) {
         c.minutes_of_day,
         c.added_on,
         c.reminder_on ?? null,
+        c.reminder_time ?? null,
+        c.reminder_note ?? null,
+        c.reminder_completed_at ?? null,
+        c.reminder_completed_note ?? null,
         c.pinned,
         c.tags,
         JSON.stringify(c.related_refs),
@@ -268,6 +283,7 @@ export async function replaceCollectionsTree(userId, collectionsArray) {
       await client.query(
         `INSERT INTO cards
            (id, collection_id, text, minutes_of_day, added_on, reminder_on,
+            reminder_time, reminder_note, reminder_completed_at, reminder_completed_note,
             pinned, tags, related_refs, media, sort_order)
          VALUES ${vals}`,
         flat
@@ -421,6 +437,10 @@ export async function createCard(userId, collectionId, card) {
     minutesOfDay = 0,
     addedOn = null,
     reminderOn = null,
+    reminderTime = null,
+    reminderNote = null,
+    reminderCompletedAt = null,
+    reminderCompletedNote = null,
     pinned = false,
     tags = [],
     relatedRefs = [],
@@ -448,8 +468,9 @@ export async function createCard(userId, collectionId, card) {
 
   await query(
     `INSERT INTO cards
-       (id, collection_id, text, minutes_of_day, added_on, reminder_on, pinned, tags, related_refs, media, sort_order)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+       (id, collection_id, text, minutes_of_day, added_on, reminder_on,
+        reminder_time, reminder_note, reminder_completed_at, reminder_completed_note, pinned, tags, related_refs, media, sort_order)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
     [
       id,
       collectionId,
@@ -457,6 +478,10 @@ export async function createCard(userId, collectionId, card) {
       minutesOfDay,
       addedOn,
       reminderOn,
+      reminderTime,
+      reminderNote,
+      reminderCompletedAt,
+      reminderCompletedNote,
       pinned,
       tags,
       JSON.stringify(relatedRefs),
@@ -471,6 +496,10 @@ export async function createCard(userId, collectionId, card) {
     minutesOfDay,
     addedOn,
     ...(reminderOn ? { reminderOn } : {}),
+    ...(reminderTime ? { reminderTime } : {}),
+    ...(reminderNote ? { reminderNote } : {}),
+    ...(reminderCompletedAt ? { reminderCompletedAt } : {}),
+    ...(reminderCompletedNote ? { reminderCompletedNote } : {}),
     pinned,
     tags,
     relatedRefs,
@@ -521,6 +550,22 @@ export async function updateCard(userId, cardId, patch) {
   if ("reminderOn" in patch) {
     fields.push(`reminder_on = $${i++}`);
     params.push(patch.reminderOn ?? null);
+  }
+  if ("reminderTime" in patch) {
+    fields.push(`reminder_time = $${i++}`);
+    params.push(patch.reminderTime ?? null);
+  }
+  if ("reminderNote" in patch) {
+    fields.push(`reminder_note = $${i++}`);
+    params.push(patch.reminderNote ?? null);
+  }
+  if ("reminderCompletedAt" in patch) {
+    fields.push(`reminder_completed_at = $${i++}`);
+    params.push(patch.reminderCompletedAt ?? null);
+  }
+  if ("reminderCompletedNote" in patch) {
+    fields.push(`reminder_completed_note = $${i++}`);
+    params.push(patch.reminderCompletedNote ?? null);
   }
 
   let newColId = null;

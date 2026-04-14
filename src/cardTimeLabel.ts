@@ -51,6 +51,45 @@ export function formatReminderDateLabel(
   return y === yNow ? `${mo}月${d}日` : `${y}年${mo}月${d}日`;
 }
 
+const WEEKDAYS_ZH = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+
+/**
+ * 我的待办「日程表」分组标题：周几 + 日期（与 {@link formatReminderDateLabel} 同年份省略规则）。
+ */
+export function formatReminderScheduleDayTitle(
+  iso: string,
+  lang: LoginUiLang = "zh"
+): string {
+  const raw = iso?.trim() ?? "";
+  const parts = raw.split("-");
+  if (parts.length !== 3) return raw || "—";
+  const y = Number(parts[0]);
+  const mo = Number(parts[1]);
+  const d = Number(parts[2]);
+  if (!y || !mo || !d) return raw;
+  const dt = dateFromIsoParts(y, mo, d);
+  const yNow = new Date().getFullYear();
+  if (lang === "en") {
+    return dt.toLocaleDateString("en-US", {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      ...(y !== yNow ? { year: "numeric" as const } : {}),
+    });
+  }
+  const wk = WEEKDAYS_ZH[dt.getDay()] ?? "";
+  const datePart =
+    y === yNow ? `${mo}月${d}日` : `${y}年${mo}月${d}日`;
+  return `${wk} · ${datePart}`;
+}
+
+/** 日程表左侧时间列：有 reminderTime 时用之，否则用笔记时刻 HH:mm */
+export function formatReminderScheduleTime(card: NoteCard): string {
+  const t = card.reminderTime?.trim();
+  if (t) return t;
+  return formatCardClock(card.minutesOfDay);
+}
+
 /** 卡片左上角：按 addedOn 显示「今天 / 昨天 / M月D日」+ 时刻 */
 export function formatCardTimeLabel(
   card: NoteCard,
@@ -114,6 +153,7 @@ export function formatCardReminderBesideTime(
     return lang === "en" ? ` · Reminder ${raw}` : ` · 提醒 ${raw}`;
   }
   const yNow = new Date().getFullYear();
+  const timeSuffix = card.reminderTime ? ` ${card.reminderTime}` : "";
   if (lang === "en") {
     const dt = dateFromIsoParts(y, mo, d);
     const dateLabel =
@@ -124,8 +164,8 @@ export function formatCardReminderBesideTime(
             month: "short",
             day: "numeric",
           });
-    return ` · Reminder ${dateLabel}`;
+    return ` · Reminder ${dateLabel}${timeSuffix}`;
   }
   const dateLabel = y === yNow ? `${mo}月${d}日` : `${y}年${mo}月${d}日`;
-  return ` · 提醒${dateLabel}`;
+  return ` · 提醒${dateLabel}${timeSuffix}`;
 }

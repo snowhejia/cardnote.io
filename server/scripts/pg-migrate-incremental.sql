@@ -79,3 +79,13 @@ ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('admin', 'user
 
 -- 侧栏等用小体积头像 WebP；原图仍在 avatar_url
 ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_thumb_url TEXT NOT NULL DEFAULT '';
+
+-- 提醒时间（HH:mm）与提醒备注
+ALTER TABLE cards ADD COLUMN IF NOT EXISTS reminder_time TEXT;
+ALTER TABLE cards ADD COLUMN IF NOT EXISTS reminder_note TEXT;
+
+-- 待办勾选完成时间（ISO 8601 文本）
+ALTER TABLE cards ADD COLUMN IF NOT EXISTS reminder_completed_at TEXT;
+
+-- 完成时快照的提醒备注
+ALTER TABLE cards ADD COLUMN IF NOT EXISTS reminder_completed_note TEXT;

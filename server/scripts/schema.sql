@@ -49,6 +49,10 @@ CREATE TABLE IF NOT EXISTS cards (
   minutes_of_day  INTEGER NOT NULL DEFAULT 0,
   added_on        TEXT,                          -- YYYY-MM-DD 字符串，保留原格式
   reminder_on     TEXT,                          -- 提醒日期 YYYY-MM-DD；可与 added_on 不同
+  reminder_time   TEXT,                          -- 提醒时间 HH:mm（可选）
+  reminder_note   TEXT,                          -- 提醒备注（可选）
+  reminder_completed_at TEXT,                    -- 待办勾选完成时间 ISO 8601
+  reminder_completed_note TEXT,                  -- 完成时快照的提醒备注
   pinned          BOOLEAN NOT NULL DEFAULT false,
   tags            TEXT[] NOT NULL DEFAULT '{}',
   related_refs    JSONB NOT NULL DEFAULT '[]',   -- [{colId, cardId}]

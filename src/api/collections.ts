@@ -177,6 +177,14 @@ export type CardRemotePatch = Partial<
 > & {
   /** 传 null 表示清除提醒 */
   reminderOn?: string | null;
+  /** 传 null 表示清除 */
+  reminderTime?: string | null;
+  /** 传 null 表示清除 */
+  reminderNote?: string | null;
+  /** 待办勾选完成时间（ISO）；传 null 清除 */
+  reminderCompletedAt?: string | null;
+  /** 完成时快照的提醒备注；传 null 清除 */
+  reminderCompletedNote?: string | null;
   collectionId?: string;
   sortOrder?: number;
 };

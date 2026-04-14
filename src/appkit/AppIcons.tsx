@@ -48,7 +48,7 @@ export function CollectionDragGripIcon({ className }: { className?: string }) {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2"
+      strokeWidth="1.5"
       strokeLinecap="round"
       aria-hidden
     >
@@ -77,7 +77,7 @@ export function CollectionStarIcon({
         d="M12 2.25 15.09 8.51 22 9.52 17 14.39 18.18 21.25 12 18.02 5.82 21.25 7 14.39 2 9.52 8.91 8.51 12 2.25z"
         fill={filled ? "currentColor" : "none"}
         stroke={filled ? "none" : "currentColor"}
-        strokeWidth={filled ? 0 : 1.4}
+        strokeWidth={filled ? 0 : 1.25}
         strokeLinejoin="round"
         strokeLinecap="round"
       />
@@ -107,7 +107,7 @@ export function AdminHeaderIcon({ mode }: { mode: "login" | "logout" }) {
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"
-        strokeWidth="1.75"
+        strokeWidth="1.5"
         strokeLinecap="round"
         strokeLinejoin="round"
         aria-hidden
@@ -123,7 +123,7 @@ export function AdminHeaderIcon({ mode }: { mode: "login" | "logout" }) {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.75"
+      strokeWidth="1.5"
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden
@@ -149,7 +149,7 @@ export function IconTimelineMasonry1Col({
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2"
+      strokeWidth="1.5"
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden
@@ -175,7 +175,7 @@ export function IconTimelineMasonry2Col({
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2"
+      strokeWidth="1.5"
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden

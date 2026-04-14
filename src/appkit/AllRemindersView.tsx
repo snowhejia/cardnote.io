@@ -1,22 +1,28 @@
 import type { ReactNode } from "react";
 import { useAppUiLang } from "../appUiLang";
-import { formatReminderDateLabel } from "../cardTimeLabel";
+import {
+  formatReminderScheduleDayTitle,
+  formatReminderScheduleTime,
+} from "../cardTimeLabel";
 import { useAppChrome } from "../i18n/useAppChrome";
+import { reminderTaskPrimaryLine } from "../reminderTaskLine";
 import type { NoteCard } from "../types";
 import type { ReminderListEntry } from "./collectionModel";
-import { MasonryShortestColumns } from "./MasonryShortestColumns";
 
 export function AllRemindersView({
   entries,
-  renderCard,
-  columnCount = 1,
+  onOpenCard,
+  onCompleteTask,
+  canEdit,
 }: {
   entries: ReminderListEntry[];
-  renderCard: (colId: string, card: NoteCard) => ReactNode;
-  columnCount?: 1 | 2 | 3 | 4 | 5 | 6;
+  onOpenCard: (colId: string, card: NoteCard) => void;
+  onCompleteTask?: (colId: string, cardId: string) => void;
+  canEdit: boolean;
 }) {
   const c = useAppChrome();
   const { lang } = useAppUiLang();
+  const showCheck = canEdit && typeof onCompleteTask === "function";
 
   if (entries.length === 0) {
     return (
@@ -37,24 +43,59 @@ export function AllRemindersView({
     sections.push(
       <section
         key={date}
-        className="timeline__pin-section timeline__reminder-section"
-        aria-label={`${c.reminderAriaPrefix} ${formatReminderDateLabel(date, lang)}`}
+        className="all-reminders-page__task-section"
+        aria-label={`${c.reminderAriaPrefix} ${formatReminderScheduleDayTitle(date, lang)}`}
       >
-        <h2 className="timeline__pin-heading">
-          {formatReminderDateLabel(date, lang)}
+        <h2 className="timeline__pin-heading all-reminders-page__task-heading">
+          {formatReminderScheduleDayTitle(date, lang)}
         </h2>
-        <MasonryShortestColumns columnCount={columnCount}>
-          {group.map((ent) => renderCard(ent.col.id, ent.card))}
-        </MasonryShortestColumns>
+        <ul className="task-list" role="list">
+          {group.map((ent) => (
+            <li key={`${ent.col.id}-${ent.card.id}`} className="task-list__item">
+              <div className="task-list__card">
+                {showCheck ? (
+                  <input
+                    type="checkbox"
+                    className="task-list__check"
+                    aria-label={c.taskListCompleteAria}
+                    title={c.taskListCompleteAria}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        onCompleteTask!(ent.col.id, ent.card.id);
+                      }
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                ) : null}
+                <button
+                  type="button"
+                  className="task-list__row"
+                  onClick={() => onOpenCard(ent.col.id, ent.card)}
+                >
+                  <span className="task-list__title">
+                    {reminderTaskPrimaryLine(ent.card, c.taskListUntitled)}
+                  </span>
+                  <span className="task-list__meta">
+                    <span className="task-list__time">
+                      {formatReminderScheduleTime(ent.card)}
+                    </span>
+                    <span className="task-list__meta-sep" aria-hidden>
+                      {" · "}
+                    </span>
+                    <span className="task-list__col-name">{ent.col.name}</span>
+                  </span>
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
       </section>
     );
   }
 
   return (
     <div className="all-reminders-page">
-      <p className="all-reminders-page__intro">
-        {c.allRemFooter(entries.length)}
-      </p>
+      <p className="all-reminders-page__intro">{c.allRemFooter(entries.length)}</p>
       {sections}
     </div>
   );

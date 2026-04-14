@@ -8,7 +8,10 @@ import {
 import type { DragEvent } from "react";
 import { useAppChrome } from "../i18n/useAppChrome";
 import type { Collection } from "../types";
-import { countSidebarCollectionCardBadge } from "./collectionModel";
+import {
+  countSidebarCollectionCardBadge,
+  LOOSE_NOTES_COLLECTION_ID,
+} from "./collectionModel";
 import { CollectionDragGripIcon } from "./AppIcons";
 import type { CollectionDropPosition } from "./collectionDrag";
 
@@ -18,6 +21,8 @@ export type CollectionSidebarTreeProps = {
   activeId: string | undefined;
   calendarDay: string | null;
   trashViewActive: boolean;
+  allNotesViewActive: boolean;
+  connectionsViewActive: boolean;
   remindersViewActive: boolean;
   collapsedFolderIds: Set<string>;
   dropIndicator: {
@@ -51,6 +56,8 @@ export type CollectionSidebarTreeProps = {
   toggleFolderCollapsed: (folderId: string) => void;
   expandAncestorsOf: (targetId: string) => void;
   setTrashViewActive: Dispatch<SetStateAction<boolean>>;
+  setAllNotesViewActive: Dispatch<SetStateAction<boolean>>;
+  setConnectionsViewActive: Dispatch<SetStateAction<boolean>>;
   setRemindersViewActive: Dispatch<SetStateAction<boolean>>;
   setCalendarDay: Dispatch<SetStateAction<string | null>>;
   setActiveId: Dispatch<SetStateAction<string>>;
@@ -69,6 +76,8 @@ function CollectionTreeRows(p: CollectionSidebarTreeProps): ReactNode {
     activeId,
     calendarDay,
     trashViewActive,
+    allNotesViewActive,
+    connectionsViewActive,
     remindersViewActive,
     collapsedFolderIds,
     dropIndicator,
@@ -91,6 +100,8 @@ function CollectionTreeRows(p: CollectionSidebarTreeProps): ReactNode {
     toggleFolderCollapsed,
     expandAncestorsOf,
     setTrashViewActive,
+    setAllNotesViewActive,
+    setConnectionsViewActive,
     setRemindersViewActive,
     setCalendarDay,
     setActiveId,
@@ -101,8 +112,11 @@ function CollectionTreeRows(p: CollectionSidebarTreeProps): ReactNode {
     addSubCollection,
   } = p;
 
-  return items.map((c) => {
-    const childList = c.children ?? [];
+  const visible = items.filter((c) => c.id !== LOOSE_NOTES_COLLECTION_ID);
+  return visible.map((c) => {
+    const childList = (c.children ?? []).filter(
+      (ch) => ch.id !== LOOSE_NOTES_COLLECTION_ID
+    );
     const hasChildren = childList.length > 0;
     const collapsed = collapsedFolderIds.has(c.id);
 
@@ -123,6 +137,8 @@ function CollectionTreeRows(p: CollectionSidebarTreeProps): ReactNode {
             (c.id === activeId &&
             !calendarDay &&
             !trashViewActive &&
+            !allNotesViewActive &&
+            !connectionsViewActive &&
             !remindersViewActive
               ? " is-active"
               : "") +
@@ -198,6 +214,8 @@ function CollectionTreeRows(p: CollectionSidebarTreeProps): ReactNode {
             onClick={() => {
               if (editingCollectionId === c.id) return;
               setTrashViewActive(false);
+              setAllNotesViewActive(false);
+              setConnectionsViewActive(false);
               setRemindersViewActive(false);
               setCalendarDay(null);
               expandAncestorsOf(c.id);
@@ -209,6 +227,8 @@ function CollectionTreeRows(p: CollectionSidebarTreeProps): ReactNode {
               if (e.key === "Enter" || e.key === " ") {
                 e.preventDefault();
                 setTrashViewActive(false);
+                setAllNotesViewActive(false);
+                setConnectionsViewActive(false);
                 setRemindersViewActive(false);
                 setCalendarDay(null);
                 expandAncestorsOf(c.id);

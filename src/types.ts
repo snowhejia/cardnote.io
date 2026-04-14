@@ -29,6 +29,14 @@ export type NoteCard = {
   addedOn?: string;
   /** 提醒日 YYYY-MM-DD；在日历中选该日时，该卡片出现在当日列表顶部「提醒」区 */
   reminderOn?: string;
+  /** 提醒时间 HH:mm（可选） */
+  reminderTime?: string;
+  /** 提醒备注（可选，自由文本） */
+  reminderNote?: string;
+  /** 在「我的待办」勾选完成时记录（ISO 8601）；与 reminderOn 互斥展示 */
+  reminderCompletedAt?: string;
+  /** 勾选完成时快照的提醒备注（用于「完成记录」；此时 active 的 reminderNote 已清除） */
+  reminderCompletedNote?: string;
   /** 置顶后固定显示在当前合集列表最上方 */
   pinned?: boolean;
   /** 展示在正文下方的标签（非正文；多个用中文/英文逗号录入） */

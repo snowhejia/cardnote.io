@@ -19,6 +19,7 @@ import {
   dataTransferHasFiles,
   filesFromDataTransfer,
 } from "../filesFromDataTransfer";
+import type { ReminderPickerTarget } from "../ReminderPickerModal";
 import type { Collection, NoteCard, NoteMediaItem } from "../types";
 import {
   NOTE_CARD_DRAG_MIME,
@@ -84,7 +85,7 @@ export type NoteTimelineCardProps = {
     item: NoteMediaItem
   ) => void;
   setReminderPicker: Dispatch<
-    SetStateAction<{ colId: string; cardId: string } | null>
+    SetStateAction<ReminderPickerTarget | null>
   >;
   togglePin: (colId: string, cardId: string) => void;
   deleteCard: (colId: string, cardId: string) => void;
@@ -328,6 +329,12 @@ export function NoteTimelineCard(p: NoteTimelineCardProps) {
                   {reminderBesideTime}
                 </span>
               ) : null}
+              {card.reminderNote ? (
+                <span className="card__time-reminder">
+                  {" · "}
+                  {card.reminderNote}
+                </span>
+              ) : null}
             </span>
             <div className="card__toolbar-actions">
               <button
@@ -430,6 +437,7 @@ export function NoteTimelineCard(p: NoteTimelineCardProps) {
                         role="menuitem"
                         onClick={() => {
                           setReminderPicker({
+                            kind: "card",
                             colId,
                             cardId: card.id,
                           });

@@ -40,6 +40,16 @@ export type AppChrome = {
   closeMenu: string;
   openMenu: string;
   browseByDate: string;
+  allNotesEntry: string;
+  titleAllNotes: string;
+  /** 内部「未归类」合集展示名（侧栏不显示该合集） */
+  looseNotesCollectionName: string;
+  connectionsEntry: string;
+  titleConnections: string;
+  connectionsEmpty: string;
+  connectionsIntro: string;
+  connectionsOpenTarget: string;
+  connectionsBoardHint: string;
   remindersEntry: string;
   favoriteCols: string;
   unfavoriteAria: string;
@@ -76,6 +86,10 @@ export type AppChrome = {
   emptyTrashAria: string;
   emptyTrashTitle: string;
   newNoteAria: string;
+  /** 我的待办：新建任务（带提醒的空卡片） */
+  newReminderTaskAria: string;
+  newReminderTaskPlus: string;
+  fabTitleNewReminderTask: string;
   collectionHintAria: string;
   resultsTitle: string;
   matchCollectionsAria: string;
@@ -187,8 +201,17 @@ const zh: AppChrome = {
   adminTitle: "小伙伴管理台",
   closeMenu: "关闭菜单",
   openMenu: "打开菜单",
-  browseByDate: "按日期浏览",
-  remindersEntry: "全部提醒入口",
+  browseByDate: "日历",
+  allNotesEntry: "全部笔记",
+  titleAllNotes: "全部笔记",
+  looseNotesCollectionName: "未归类笔记",
+  connectionsEntry: "笔记连接",
+  titleConnections: "笔记连接",
+  connectionsEmpty: "还没有笔记之间的连接～在卡片「⋯」里点「相关笔记」可建立连接。",
+  connectionsIntro: "以下是从笔记 A 指向笔记 B 的关联（单向）。",
+  connectionsOpenTarget: "打开目标笔记",
+  connectionsBoardHint: "空白处拖曳平移画布，滚轮缩放。",
+  remindersEntry: "我的待办入口",
   favoriteCols: "收藏的合集",
   unfavoriteAria: "取消收藏",
   unfavoriteTitle: "取消收藏",
@@ -203,7 +226,7 @@ const zh: AppChrome = {
   searchCollapse: "收起搜索",
   titleSearch: "搜索",
   titleTrash: "垃圾桶",
-  titleReminders: "全部提醒",
+  titleReminders: "我的待办",
   titleNoCollection: "未选择合集",
   unfavoriteThis: "取消收藏此合集",
   favoriteThis: "收藏此合集",
@@ -220,6 +243,9 @@ const zh: AppChrome = {
   emptyTrashAria: "清空垃圾桶",
   emptyTrashTitle: "清空垃圾桶",
   newNoteAria: "新建小笔记",
+  newReminderTaskAria: "新建待办任务",
+  newReminderTaskPlus: "＋ 新建待办",
+  fabTitleNewReminderTask: "新建一条带今日提醒的笔记",
   collectionHintAria: "合集说明",
   resultsTitle: "搜索结果",
   matchCollectionsAria: "名称匹配的合集",
@@ -231,7 +257,7 @@ const zh: AppChrome = {
   dayEmptyReminder:
     "这一天还没有笔记或提醒～ 带「日历日期」的笔记会按合集出现在下面；在卡片「⋯」里可设置提醒，提醒日会在月历格右上角显示角标。",
   dayEmptyPlain: "这一天没有可以展示的笔记～",
-  dayRemindersAria: "当日提醒",
+  dayRemindersAria: "当日我的待办",
   dayPinnedAria: "当日置顶",
   emptyNewUser:
     "这里还光溜溜的！点顶栏「+」或底下罐子/「新建小笔记」，新卡会进当前合集并打上今天的日历～",
@@ -244,21 +270,21 @@ const zh: AppChrome = {
   mobileDockAria: "底部快捷操作",
   dockCalendarOpen: "打开日历",
   dockCalendarClose: "关闭日历",
-  remindersToggle: "全部提醒",
-  remindersTitle: "全部提醒",
-  dockRemindersOn: "关闭全部提醒",
-  dockRemindersOff: "全部提醒",
+  remindersToggle: "我的待办",
+  remindersTitle: "我的待办",
+  dockRemindersOn: "关闭我的待办",
+  dockRemindersOff: "我的待办",
   fabBack: "回到合集",
   fabLogin: "先登录再写笔记",
   fabNewNote: "新建小笔记",
   fabTitleCalendar: "退出按日浏览，回到当前合集",
-  fabTitleReminders: "关闭全部提醒，回到当前合集",
+  fabTitleReminders: "关闭我的待办，回到当前合集",
   fabTitleLogin: "先登录再开罐写笔记～",
   fabTitleNewNote: "新建小笔记",
   searchDockAria: "搜索",
   searchDockTitle: "搜索",
   calendarCloseAria: "关闭日历",
-  calendarBrowseAria: "按日期浏览",
+  calendarBrowseAria: "日历",
   profileRemoteOnly: "先切到云端同步，再来开个人中心喔～",
   menuProfile: "个人中心",
   menuNoteSettings: "笔记设置",
@@ -278,7 +304,7 @@ const zh: AppChrome = {
   timelineBrand: "mikujar 时间线",
   headingCollections: "合集",
   headingNotes: "笔记",
-  headingReminders: "提醒",
+  headingReminders: "我的待办",
   headingPinned: "置顶",
   openBtn: "打开",
   openCollectionBtn: "打开合集",
@@ -337,6 +363,16 @@ const en: AppChrome = {
   closeMenu: "Close menu",
   openMenu: "Open menu",
   browseByDate: "Browse by date",
+  allNotesEntry: "All notes",
+  titleAllNotes: "All Notes",
+  looseNotesCollectionName: "Inbox",
+  connectionsEntry: "Connections",
+  titleConnections: "Note connections",
+  connectionsEmpty:
+    "No links yet — use “⋯” on a card and Related notes to connect.",
+  connectionsIntro: "Links from note A to note B (one direction).",
+  connectionsOpenTarget: "Open target",
+  connectionsBoardHint: "Drag empty space to pan. Scroll wheel to zoom.",
   remindersEntry: "All reminders",
   favoriteCols: "Starred collections",
   unfavoriteAria: "Remove from starred",
@@ -369,6 +405,9 @@ const en: AppChrome = {
   emptyTrashAria: "Empty trash",
   emptyTrashTitle: "Empty trash",
   newNoteAria: "New note",
+  newReminderTaskAria: "New task",
+  newReminderTaskPlus: "＋ New task",
+  fabTitleNewReminderTask: "New note with today’s reminder",
   collectionHintAria: "Collection hint",
   resultsTitle: "Results",
   matchCollectionsAria: "Matching collections",

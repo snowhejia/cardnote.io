@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 import type { ChangeEvent, MouseEvent as ReactMouseEvent } from "react";
+import type { ReminderPickerTarget } from "./ReminderPickerModal";
 import { createPortal, flushSync } from "react-dom";
 import { isTauri } from "@tauri-apps/api/core";
 import {
@@ -93,6 +94,8 @@ import {
   addBidirectionalRelated,
   AdminHeaderIcon,
   AllRemindersView,
+  NoteConnectionsView,
+  collectConnectionEdges,
   ancestorIdsFor,
   activeCollectionStorageKey,
   buildCalendarCells,
@@ -112,9 +115,11 @@ import {
   collectSubtreeCollectionIds,
   collectionPathLabel,
   countSidebarCollectionCardBadge,
+  createLooseNotesCollection,
   datesWithNoteAddedOn,
   datesWithReminderOn,
   favoriteCollectionsStorageKey,
+  findCardInTree,
   findCollectionById,
   readCollapsedFolderIdsFromStorage,
   readPersistedActiveCollectionId,
@@ -125,6 +130,8 @@ import {
   loadFavoriteCollectionIds,
   loadTrashedNoteEntries,
   localDateString,
+  LOOSE_NOTES_COLLECTION_ID,
+  LOOSE_NOTES_DOT_COLOR,
   mapCollectionById,
   MOBILE_CHROME_MEDIA,
   matchesMobileChromeMedia,
@@ -275,11 +282,10 @@ export default function App() {
     return new Date(d.getFullYear(), d.getMonth(), 1);
   });
   const [cardMenuId, setCardMenuId] = useState<string | null>(null);
-  /** 从卡片「⋯」打开提醒日期选择 */
-  const [reminderPicker, setReminderPicker] = useState<{
-    colId: string;
-    cardId: string;
-  } | null>(null);
+  /** 从卡片「⋯」或「新建待办」打开提醒弹窗 */
+  const [reminderPicker, setReminderPicker] = useState<ReminderPickerTarget | null>(
+    null
+  );
   /**
    * 时间线列数（默认 2 列；localStorage 持久化）。
    */
@@ -321,6 +327,8 @@ export default function App() {
   >(() => new Set());
   const [trashEntries, setTrashEntries] = useState<TrashedNoteEntry[]>([]);
   const [trashViewActive, setTrashViewActive] = useState(false);
+  const [allNotesViewActive, setAllNotesViewActive] = useState(false);
+  const [connectionsViewActive, setConnectionsViewActive] = useState(false);
   const [remindersViewActive, setRemindersViewActive] = useState(false);
   const [draggingCollectionId, setDraggingCollectionId] = useState<
     string | null
@@ -889,13 +897,53 @@ export default function App() {
   useEffect(() => {
     if (calendarDay) {
       setTrashViewActive(false);
+      setAllNotesViewActive(false);
+      setConnectionsViewActive(false);
       setRemindersViewActive(false);
     }
   }, [calendarDay]);
 
   useEffect(() => {
-    if (trashViewActive) setRemindersViewActive(false);
+    if (trashViewActive) {
+      setAllNotesViewActive(false);
+      setConnectionsViewActive(false);
+      setRemindersViewActive(false);
+    }
   }, [trashViewActive]);
+
+  useEffect(() => {
+    if (remindersViewActive) {
+      setAllNotesViewActive(false);
+      setConnectionsViewActive(false);
+    }
+  }, [remindersViewActive]);
+
+  useEffect(() => {
+    if (allNotesViewActive) {
+      setRemindersViewActive(false);
+      setConnectionsViewActive(false);
+    }
+  }, [allNotesViewActive]);
+
+  useEffect(() => {
+    if (connectionsViewActive) {
+      setAllNotesViewActive(false);
+      setRemindersViewActive(false);
+    }
+  }, [connectionsViewActive]);
+
+  const allNotesViewActiveRef = useRef(false);
+  useEffect(() => {
+    allNotesViewActiveRef.current = allNotesViewActive;
+  }, [allNotesViewActive]);
+  const connectionsViewActiveRef = useRef(false);
+  useEffect(() => {
+    connectionsViewActiveRef.current = connectionsViewActive;
+  }, [connectionsViewActive]);
+  useEffect(() => {
+    if (allNotesViewActiveRef.current) setAllNotesViewActive(false);
+    if (connectionsViewActiveRef.current) setConnectionsViewActive(false);
+  }, [activeId]);
 
   useEffect(() => {
     if (!remoteLoaded || !authReady) return;
@@ -1024,6 +1072,25 @@ export default function App() {
     () => collectAllReminderEntries(collections),
     [collections]
   );
+
+  const connectionEdges = useMemo(
+    () => collectConnectionEdges(collections),
+    [collections]
+  );
+
+  const allNotesSorted = useMemo(() => {
+    const entries: { col: Collection; card: NoteCard }[] = [];
+    walkCollections(collections, (col) => {
+      for (const card of col.cards) entries.push({ col, card });
+    });
+    entries.sort((a, b) => {
+      const dateA = a.card.addedOn ?? "";
+      const dateB = b.card.addedOn ?? "";
+      if (dateB !== dateA) return dateB.localeCompare(dateA);
+      return (b.card.minutesOfDay ?? 0) - (a.card.minutesOfDay ?? 0);
+    });
+    return entries;
+  }, [collections]);
 
   const sidebarTags = useMemo(
     () => collectAllTagsFromCollections(collections),
@@ -1221,23 +1288,84 @@ export default function App() {
   );
 
   const commitCardReminder = useCallback(
-    (colId: string, cardId: string, isoDate: string | null) => {
+    (
+      colId: string,
+      cardId: string,
+      isoDate: string | null,
+      time?: string,
+      note?: string
+    ) => {
       setCollections((prev) =>
         mapCollectionById(prev, colId, (c) => ({
           ...c,
           cards: c.cards.map((cd) => {
             if (cd.id !== cardId) return cd;
             if (isoDate == null || isoDate === "") {
-              const { reminderOn: _r, ...rest } = cd;
+              const { reminderOn: _r, reminderTime: _t, reminderNote: _n, ...rest } = cd;
               return rest;
             }
-            return { ...cd, reminderOn: isoDate };
+            const {
+              reminderCompletedAt: _done,
+              reminderCompletedNote: _cnote,
+              ...base
+            } = cd;
+            return {
+              ...base,
+              reminderOn: isoDate,
+              ...(time ? { reminderTime: time } : { reminderTime: undefined }),
+              ...(note ? { reminderNote: note } : { reminderNote: undefined }),
+            };
           }),
         }))
       );
       if (dataMode !== "local") {
         void updateCardApi(cardId, {
           reminderOn: isoDate && isoDate.length > 0 ? isoDate : null,
+          reminderTime: isoDate ? (time || null) : null,
+          reminderNote: isoDate ? (note || null) : null,
+          reminderCompletedAt:
+            isoDate && isoDate.length > 0 ? null : undefined,
+          reminderCompletedNote:
+            isoDate && isoDate.length > 0 ? null : undefined,
+        });
+      }
+    },
+    [dataMode]
+  );
+
+  /** 待办列表勾选：记录完成时间、快照提醒备注，并清除当前提醒 */
+  const completeReminderTask = useCallback(
+    (colId: string, cardId: string) => {
+      const doneAt = new Date().toISOString();
+      let remoteCompletedNote: string | null = null;
+      setCollections((prev) =>
+        mapCollectionById(prev, colId, (c) => ({
+          ...c,
+          cards: c.cards.map((cd) => {
+            if (cd.id !== cardId) return cd;
+            const snap = cd.reminderNote?.trim();
+            if (snap) remoteCompletedNote = snap;
+            const {
+              reminderOn: _ro,
+              reminderTime: _rt,
+              reminderNote: _rn,
+              ...rest
+            } = cd;
+            return {
+              ...rest,
+              reminderCompletedAt: doneAt,
+              ...(snap ? { reminderCompletedNote: snap } : {}),
+            };
+          }),
+        }))
+      );
+      if (dataMode !== "local") {
+        void updateCardApi(cardId, {
+          reminderOn: null,
+          reminderTime: null,
+          reminderNote: null,
+          reminderCompletedAt: doneAt,
+          reminderCompletedNote: remoteCompletedNote,
         });
       }
     },
@@ -1422,17 +1550,30 @@ export default function App() {
       tgtColId: string,
       tgtCardId: string
     ) => {
-      setCollections((prev) =>
-        removeBidirectionalRelated(
+      setCollections((prev) => {
+        const next = removeBidirectionalRelated(
           prev,
           srcColId,
           srcCardId,
           tgtColId,
           tgtCardId
-        )
-      );
+        );
+        if (dataMode !== "local") {
+          const a = findCardInTree(next, srcColId, srcCardId);
+          const b = findCardInTree(next, tgtColId, tgtCardId);
+          queueMicrotask(() => {
+            void updateCardApi(srcCardId, {
+              relatedRefs: a?.card.relatedRefs ?? [],
+            });
+            void updateCardApi(tgtCardId, {
+              relatedRefs: b?.card.relatedRefs ?? [],
+            });
+          });
+        }
+        return next;
+      });
     },
-    []
+    [dataMode]
   );
 
   const addRelatedPair = useCallback(
@@ -1442,17 +1583,30 @@ export default function App() {
       tgtColId: string,
       tgtCardId: string
     ) => {
-      setCollections((prev) =>
-        addBidirectionalRelated(
+      setCollections((prev) => {
+        const next = addBidirectionalRelated(
           prev,
           srcColId,
           srcCardId,
           tgtColId,
           tgtCardId
-        )
-      );
+        );
+        if (dataMode !== "local") {
+          const a = findCardInTree(next, srcColId, srcCardId);
+          const b = findCardInTree(next, tgtColId, tgtCardId);
+          queueMicrotask(() => {
+            void updateCardApi(srcCardId, {
+              relatedRefs: a?.card.relatedRefs ?? [],
+            });
+            void updateCardApi(tgtCardId, {
+              relatedRefs: b?.card.relatedRefs ?? [],
+            });
+          });
+        }
+        return next;
+      });
     },
-    []
+    [dataMode]
   );
 
   const setCardTags = useCallback(
@@ -1697,14 +1851,24 @@ export default function App() {
       htmlBody: string,
       timeOverride?: { minutesOfDay: number; addedOn: string },
       targetColIdOverride?: string,
-      afterLocalInsert?: () => void
+      opts?: {
+        afterLocalInsert?: () => void;
+        reminderOn?: string;
+        reminderTime?: string;
+        reminderNote?: string;
+      }
     ): Promise<string | null> => {
       if (!canEdit) return null;
       if (trashViewActive) return null;
-      if (remindersViewActive) return null;
+      if (connectionsViewActive) return null;
+      if (remindersViewActive && !opts?.reminderOn) return null;
       if (calendarDay !== null) return null;
       if (searchQuery.trim().length > 0) return null;
-      const targetColId = targetColIdOverride?.trim() || active?.id;
+      const targetColId =
+        targetColIdOverride?.trim() ||
+        (allNotesViewActive || remindersViewActive
+          ? LOOSE_NOTES_COLLECTION_ID
+          : active?.id ?? "");
       if (!targetColId) return null;
       const now = new Date();
       const minutesOfDay =
@@ -1713,26 +1877,73 @@ export default function App() {
       const uid = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
       const cardId = `n-${uid}`;
       const day = timeOverride?.addedOn ?? localDateString(now);
+      const rOn = opts?.reminderOn?.trim();
+      const rTime = opts?.reminderTime?.trim();
+      const rNote = opts?.reminderNote?.trim();
       const newCard: NoteCard = {
         id: cardId,
         text: htmlBody,
         minutesOfDay,
         addedOn: day,
+        ...(rOn
+          ? {
+              reminderOn: rOn,
+              ...(rTime ? { reminderTime: rTime } : {}),
+              ...(rNote ? { reminderNote: rNote } : {}),
+            }
+          : {}),
       };
 
+      let needCreateLooseOnServer = false;
       flushSync(() => {
-        setCollections((prev) =>
-          mapCollectionById(prev, targetColId, (col) => ({
+        setCollections((prev) => {
+          const missingLoose =
+            targetColId === LOOSE_NOTES_COLLECTION_ID &&
+            !findCollectionById(prev, LOOSE_NOTES_COLLECTION_ID);
+          needCreateLooseOnServer = Boolean(missingLoose);
+          let next = prev;
+          if (missingLoose) {
+            next = [...prev, createLooseNotesCollection(c.looseNotesCollectionName)];
+          }
+          return mapCollectionById(next, targetColId, (col) => ({
             ...col,
             cards:
               newNotePlacement === "top"
                 ? [newCard, ...col.cards]
                 : [...col.cards, newCard],
-          }))
-        );
+          }));
+        });
       });
-      afterLocalInsert?.();
+      opts?.afterLocalInsert?.();
       if (dataMode !== "local") {
+        if (needCreateLooseOnServer) {
+          const colOk = await createCollectionApi({
+            id: LOOSE_NOTES_COLLECTION_ID,
+            name: c.looseNotesCollectionName,
+            dotColor: LOOSE_NOTES_DOT_COLOR,
+          });
+          if (!colOk) {
+            window.alert(c.errCreateCol);
+            flushSync(() => {
+              setCollections((prev) => {
+                let next = mapCollectionById(prev, targetColId, (col) => ({
+                  ...col,
+                  cards: col.cards.filter((x) => x.id !== cardId),
+                }));
+                const loose = findCollectionById(next, LOOSE_NOTES_COLLECTION_ID);
+                if (loose && loose.cards.length === 0) {
+                  const { tree, removed } = removeCollectionFromTree(
+                    next,
+                    LOOSE_NOTES_COLLECTION_ID
+                  );
+                  return removed ? tree : next;
+                }
+                return next;
+              });
+            });
+            return null;
+          }
+        }
         const created = await createCardApi(targetColId, newCard, {
           insertAtStart: newNotePlacement === "top",
         });
@@ -1741,7 +1952,7 @@ export default function App() {
             setCollections((prev) =>
               mapCollectionById(prev, targetColId, (col) => ({
                 ...col,
-                cards: col.cards.filter((c) => c.id !== cardId),
+                cards: col.cards.filter((x) => x.id !== cardId),
               }))
             );
           });
@@ -1753,12 +1964,16 @@ export default function App() {
     [
       canEdit,
       trashViewActive,
+      connectionsViewActive,
       remindersViewActive,
       calendarDay,
       active?.id,
       searchQuery,
       dataMode,
       newNotePlacement,
+      allNotesViewActive,
+      c.looseNotesCollectionName,
+      c.errCreateCol,
     ]
   );
 
@@ -1835,12 +2050,9 @@ export default function App() {
                 }
               }
             : undefined;
-        const cardId = await appendNoteCardWithHtml(
-          "",
-          undefined,
-          undefined,
-          afterLocal
-        );
+        const cardId = await appendNoteCardWithHtml("", undefined, undefined, {
+          afterLocalInsert: afterLocal,
+        });
         if (!cardId) return;
         queueMicrotask(() => {
           const el = document.getElementById(`card-text-${cardId}`);
@@ -1855,6 +2067,64 @@ export default function App() {
       scrollTimelineToBottom,
       scrollTimelineToTop,
     ]
+  );
+
+  /** 我的待办：先打开与卡片相同的「提醒」弹窗，保存后再建空笔记 */
+  const openNewTaskReminderPicker = useCallback(() => {
+    if (!canEdit) return;
+    setReminderPicker({ kind: "new-task" });
+  }, [canEdit]);
+
+  const finishNewTaskFromReminder = useCallback(
+    async (iso: string, time: string, note: string) => {
+      if (!canEdit) return;
+      const t = time.trim();
+      const noteT = note.trim();
+      let mod: number;
+      if (t) {
+        const parts = t.split(":");
+        const h = Number(parts[0]);
+        const m = Number(parts[1]);
+        mod =
+          Number.isFinite(h) && Number.isFinite(m)
+            ? h * 60 + m
+            : new Date().getHours() * 60 + new Date().getMinutes();
+      } else {
+        mod = new Date().getHours() * 60 + new Date().getMinutes();
+      }
+      const cardId = await appendNoteCardWithHtml(
+        "",
+        { minutesOfDay: mod, addedOn: iso },
+        undefined,
+        {
+          afterLocalInsert: () => {
+            scrollTimelineToBottom("auto");
+            requestAnimationFrame(() => {
+              scrollTimelineToBottom("auto");
+            });
+          },
+          reminderOn: iso,
+          reminderTime: t || undefined,
+          reminderNote: noteT || undefined,
+        }
+      );
+      if (!cardId) return;
+      queueMicrotask(() => {
+        setDetailCard({
+          colId: LOOSE_NOTES_COLLECTION_ID,
+          card: {
+            id: cardId,
+            text: "",
+            minutesOfDay: mod,
+            addedOn: iso,
+            reminderOn: iso,
+            ...(t ? { reminderTime: t } : {}),
+            ...(noteT ? { reminderNote: noteT } : {}),
+          },
+        });
+      });
+    },
+    [canEdit, appendNoteCardWithHtml, scrollTimelineToBottom]
   );
 
   const commitCollectionRename = useCallback(async () => {
@@ -1974,6 +2244,7 @@ export default function App() {
 
   const toggleFavoriteCollection = useCallback(
     (id: string) => {
+      if (id === LOOSE_NOTES_COLLECTION_ID) return;
       setFavoriteCollectionIds((prev) => {
         const next = new Set(prev);
         if (next.has(id)) next.delete(id);
@@ -1992,6 +2263,7 @@ export default function App() {
   const performRemoveCollection = useCallback(
     async (id: string) => {
       if (!canEdit) return;
+      if (id === LOOSE_NOTES_COLLECTION_ID) return;
       if (dataMode === "remote") {
         const ok = await deleteCollectionApi(id);
         if (!ok) {
@@ -2330,7 +2602,8 @@ export default function App() {
         "app" +
         (showMobileSidebarBrowseChrome ? " app--mobile-nav-open" : "") +
         (tabletSplitNav ? " app--tablet-split-nav" : "") +
-        (timelineColumnCount > 1 ? " app--masonry" : "")
+        (timelineColumnCount > 1 ? " app--masonry" : "") +
+        (connectionsViewActive ? " app--connections-board" : "")
       }
     >
       {showRemoteLoading ? (
@@ -2447,7 +2720,7 @@ export default function App() {
                     viewBox="0 0 24 24"
                     fill="none"
                     stroke="currentColor"
-                    strokeWidth="2"
+                    strokeWidth="1.5"
                     strokeLinecap="round"
                     strokeLinejoin="round"
                     aria-hidden
@@ -2532,6 +2805,84 @@ export default function App() {
           ) : null}
         </div>
 
+        <div className="sidebar__all-notes">
+          <button
+            type="button"
+            className={
+              "sidebar__all-notes-hit" +
+              (allNotesViewActive && !searchActive ? " is-active" : "")
+            }
+            onClick={() => {
+              setTrashViewActive(false);
+              setCalendarDay(null);
+              setSearchQuery("");
+              setSearchBarOpen(false);
+              setAllNotesViewActive(true);
+              setMobileNavOpen(false);
+            }}
+          >
+            <span className="sidebar__all-notes-label">{c.allNotesEntry}</span>
+            <span className="sidebar__all-notes-count">
+              {allNotesSorted.length}
+            </span>
+          </button>
+        </div>
+
+        {allReminderEntries.length > 0 ? (
+          <div
+            className="sidebar__all-reminders"
+            aria-label={c.remindersEntry}
+          >
+            <button
+              type="button"
+              className={
+                "sidebar__all-reminders-hit" +
+                (remindersViewActive && !searchActive ? " is-active" : "")
+              }
+              onClick={() => {
+                setTrashViewActive(false);
+                setCalendarDay(null);
+                setSearchQuery("");
+                setSearchBarOpen(false);
+                setAllNotesViewActive(false);
+                setConnectionsViewActive(false);
+                setRemindersViewActive(true);
+                setMobileNavOpen(false);
+              }}
+            >
+              <span className="sidebar__all-reminders-label">
+                {c.remindersTitle}
+              </span>
+              <span className="sidebar__all-reminders-count">
+                {allReminderEntries.length}
+              </span>
+            </button>
+          </div>
+        ) : null}
+
+        <div className="sidebar__all-notes sidebar__connections">
+          <button
+            type="button"
+            className={
+              "sidebar__all-notes-hit" +
+              (connectionsViewActive && !searchActive ? " is-active" : "")
+            }
+            onClick={() => {
+              setTrashViewActive(false);
+              setCalendarDay(null);
+              setSearchQuery("");
+              setSearchBarOpen(false);
+              setConnectionsViewActive(true);
+              setMobileNavOpen(false);
+            }}
+          >
+            <span className="sidebar__all-notes-label">{c.connectionsEntry}</span>
+            <span className="sidebar__all-notes-count">
+              {connectionEdges.length}
+            </span>
+          </button>
+        </div>
+
         <div
           className={
             "sidebar__calendar-section" +
@@ -2584,36 +2935,6 @@ export default function App() {
           ) : null}
         </div>
 
-        {allReminderEntries.length > 0 ? (
-          <div
-            className="sidebar__all-reminders"
-            aria-label={c.remindersEntry}
-          >
-            <button
-              type="button"
-              className={
-                "sidebar__all-reminders-hit" +
-                (remindersViewActive && !searchActive ? " is-active" : "")
-              }
-              onClick={() => {
-                setTrashViewActive(false);
-                setCalendarDay(null);
-                setSearchQuery("");
-                setSearchBarOpen(false);
-                setRemindersViewActive(true);
-                setMobileNavOpen(false);
-              }}
-            >
-              <span className="sidebar__all-reminders-label">
-                {c.remindersTitle}
-              </span>
-              <span className="sidebar__all-reminders-count">
-                {allReminderEntries.length}
-              </span>
-            </button>
-          </div>
-        ) : null}
-
         <div className="sidebar__collections">
           <div className="sidebar__favorites">
             <div className="sidebar__section-row sidebar__section-row--collapsible">
@@ -2655,6 +2976,8 @@ export default function App() {
                           (col.id === active?.id &&
                           !calendarDay &&
                           !trashViewActive &&
+                          !allNotesViewActive &&
+                          !connectionsViewActive &&
                           !remindersViewActive
                             ? " is-active"
                             : "")
@@ -2665,6 +2988,8 @@ export default function App() {
                           className="sidebar__favorites-hit"
                           onClick={() => {
                             setTrashViewActive(false);
+                            setAllNotesViewActive(false);
+                            setConnectionsViewActive(false);
                             setRemindersViewActive(false);
                             setSearchQuery("");
                             setSearchBarOpen(false);
@@ -2751,6 +3076,8 @@ export default function App() {
               activeId={active?.id}
               calendarDay={calendarDay}
               trashViewActive={trashViewActive}
+              allNotesViewActive={allNotesViewActive}
+              connectionsViewActive={connectionsViewActive}
               remindersViewActive={remindersViewActive}
               collapsedFolderIds={collapsedFolderIds}
               dropIndicator={dropIndicator}
@@ -2773,6 +3100,8 @@ export default function App() {
               toggleFolderCollapsed={toggleFolderCollapsed}
               expandAncestorsOf={expandAncestorsOf}
               setTrashViewActive={setTrashViewActive}
+              setAllNotesViewActive={setAllNotesViewActive}
+              setConnectionsViewActive={setConnectionsViewActive}
               setRemindersViewActive={setRemindersViewActive}
               setCalendarDay={setCalendarDay}
               setActiveId={setActiveId}
@@ -2854,7 +3183,7 @@ export default function App() {
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
-                strokeWidth="2"
+                strokeWidth="1.5"
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 aria-hidden
@@ -2876,7 +3205,11 @@ export default function App() {
       </aside>
 
       <main
-        className="main"
+        className={
+          "main" +
+          (connectionsViewActive ? " main--connections-board" : "") +
+          (remindersViewActive ? " main--reminders" : "")
+        }
         onClick={onMobileMainSurfaceTapToTop}
         onTouchStart={onMobileMainTouchStart}
         onTouchEnd={onMobileMainTouchEnd}
@@ -2899,6 +3232,8 @@ export default function App() {
                 setSearchQuery("");
                 setCalendarDay(null);
                 setTrashViewActive(false);
+                setAllNotesViewActive(false);
+                setConnectionsViewActive(false);
                 setRemindersViewActive(false);
                 setMobileNavOpen(true);
               }}
@@ -2981,16 +3316,22 @@ export default function App() {
                   ? c.titleSearch
                   : trashViewActive
                     ? c.titleTrash
-                    : remindersViewActive
-                      ? c.titleReminders
-                      : calendarDay
-                        ? formatCalendarDayTitle(calendarDay, appUiLang)
-                        : active?.name ?? c.titleNoCollection}
+                    : allNotesViewActive
+                      ? c.titleAllNotes
+                      : connectionsViewActive
+                        ? c.titleConnections
+                        : remindersViewActive
+                          ? c.titleReminders
+                          : calendarDay
+                            ? formatCalendarDayTitle(calendarDay, appUiLang)
+                            : active?.name ?? c.titleNoCollection}
               </h1>
               {active &&
               !calendarDay &&
               !searchActive &&
               !trashViewActive &&
+              !allNotesViewActive &&
+              !connectionsViewActive &&
               !remindersViewActive ? (
                 <button
                   type="button"
@@ -3035,7 +3376,7 @@ export default function App() {
                     viewBox="0 0 24 24"
                     fill="none"
                     stroke="currentColor"
-                    strokeWidth="2"
+                    strokeWidth="1.5"
                     strokeLinecap="round"
                     strokeLinejoin="round"
                     aria-hidden
@@ -3045,99 +3386,101 @@ export default function App() {
                   </svg>
                 </button>
               ) : null}
-              {columnStepList.length === 2 ? (
-                <button
-                  type="button"
-                  className="main__header-icon-btn main__header-column-binary-masonry"
-                  aria-label={
-                    timelineColumnCount === 1
-                      ? c.masonryColumnBinaryTapFor2
-                      : c.masonryColumnBinaryTapFor1
-                  }
-                  title={
-                    timelineColumnCount === 1
-                      ? c.masonryColumnBinaryTapFor2
-                      : c.masonryColumnBinaryTapFor1
-                  }
-                  aria-pressed={timelineColumnCount === 2}
-                  onClick={toggleBinaryTimelineColumns}
-                >
-                  {timelineColumnCount === 1 ? (
-                    <IconTimelineMasonry1Col className="main__header-icon-btn__svg" />
-                  ) : (
-                    <IconTimelineMasonry2Col className="main__header-icon-btn__svg" />
-                  )}
-                </button>
-              ) : (
-                <div
-                  className="main__header-column-stepper"
-                  role="group"
-                  aria-label={c.masonryColumnsGroupAria}
-                >
+              {!remindersViewActive ? (
+                columnStepList.length === 2 ? (
                   <button
                     type="button"
-                    className="main__header-column-stepper__btn"
-                    aria-label={c.masonryColumnIncAria}
-                    title={c.masonryColumnIncAria}
-                    disabled={
-                      columnStepIndex >= columnStepList.length - 1
+                    className="main__header-icon-btn main__header-column-binary-masonry"
+                    aria-label={
+                      timelineColumnCount === 1
+                        ? c.masonryColumnBinaryTapFor2
+                        : c.masonryColumnBinaryTapFor1
                     }
-                    onClick={stepColumnPrefUp}
-                  >
-                    <svg
-                      className="main__header-column-stepper__chev"
-                      width="16"
-                      height="16"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      aria-hidden
-                    >
-                      <path d="m18 15-6-6-6 6" />
-                    </svg>
-                  </button>
-                  <span
-                    className="main__header-column-stepper__value"
                     title={
                       timelineColumnCount === 1
-                        ? c.masonryCol1Title
-                        : c.masonryColFixedTitle.replace(
-                            "{n}",
-                            String(timelineColumnCount)
-                          )
+                        ? c.masonryColumnBinaryTapFor2
+                        : c.masonryColumnBinaryTapFor1
                     }
-                    aria-live="polite"
+                    aria-pressed={timelineColumnCount === 2}
+                    onClick={toggleBinaryTimelineColumns}
                   >
-                    {String(timelineColumnCount)}
-                  </span>
-                  <button
-                    type="button"
-                    className="main__header-column-stepper__btn"
-                    aria-label={c.masonryColumnDecAria}
-                    title={c.masonryColumnDecAria}
-                    disabled={columnStepIndex <= 0}
-                    onClick={stepColumnPrefDown}
-                  >
-                    <svg
-                      className="main__header-column-stepper__chev"
-                      width="16"
-                      height="16"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      aria-hidden
-                    >
-                      <path d="m6 9 6 6 6-6" />
-                    </svg>
+                    {timelineColumnCount === 1 ? (
+                      <IconTimelineMasonry1Col className="main__header-icon-btn__svg" />
+                    ) : (
+                      <IconTimelineMasonry2Col className="main__header-icon-btn__svg" />
+                    )}
                   </button>
-                </div>
-              )}
+                ) : (
+                  <div
+                    className="main__header-column-stepper"
+                    role="group"
+                    aria-label={c.masonryColumnsGroupAria}
+                  >
+                    <button
+                      type="button"
+                      className="main__header-column-stepper__btn"
+                      aria-label={c.masonryColumnIncAria}
+                      title={c.masonryColumnIncAria}
+                      disabled={
+                        columnStepIndex >= columnStepList.length - 1
+                      }
+                      onClick={stepColumnPrefUp}
+                    >
+                      <svg
+                        className="main__header-column-stepper__chev"
+                        width="16"
+                        height="16"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden
+                      >
+                        <path d="m18 15-6-6-6 6" />
+                      </svg>
+                    </button>
+                    <span
+                      className="main__header-column-stepper__value"
+                      title={
+                        timelineColumnCount === 1
+                          ? c.masonryCol1Title
+                          : c.masonryColFixedTitle.replace(
+                              "{n}",
+                              String(timelineColumnCount)
+                            )
+                      }
+                      aria-live="polite"
+                    >
+                      {String(timelineColumnCount)}
+                    </span>
+                    <button
+                      type="button"
+                      className="main__header-column-stepper__btn"
+                      aria-label={c.masonryColumnDecAria}
+                      title={c.masonryColumnDecAria}
+                      disabled={columnStepIndex <= 0}
+                      onClick={stepColumnPrefDown}
+                    >
+                      <svg
+                        className="main__header-column-stepper__chev"
+                        width="16"
+                        height="16"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden
+                      >
+                        <path d="m6 9 6 6 6-6" />
+                      </svg>
+                    </button>
+                  </div>
+                )
+              ) : null}
               {canEdit &&
               trashViewActive &&
               !searchActive &&
@@ -3155,16 +3498,22 @@ export default function App() {
                 </button>
               ) : null}
               {canEdit &&
-              active &&
+              (active || allNotesViewActive || remindersViewActive) &&
               !calendarDay &&
               !searchActive &&
               !trashViewActive &&
-              !remindersViewActive ? (
+              !connectionsViewActive ? (
                 <button
                   type="button"
                   className="main__header-icon-btn"
-                  aria-label={c.newNoteAria}
-                  onClick={() => addSmallNote()}
+                  aria-label={
+                    remindersViewActive
+                      ? c.newReminderTaskAria
+                      : c.newNoteAria
+                  }
+                  onClick={() =>
+                    remindersViewActive ? openNewTaskReminderPicker() : addSmallNote()
+                  }
                 >
                   <svg
                     className="main__header-icon-btn__svg"
@@ -3173,7 +3522,7 @@ export default function App() {
                     viewBox="0 0 24 24"
                     fill="none"
                     stroke="currentColor"
-                    strokeWidth="2"
+                    strokeWidth="1.5"
                     strokeLinecap="round"
                     strokeLinejoin="round"
                     aria-hidden
@@ -3269,8 +3618,8 @@ export default function App() {
               : trashViewActive
                 ? c.titleTrash
                 : remindersViewActive
-                  ? c.titleReminders
-                  : c.timelineBrand
+                    ? c.titleReminders
+                    : c.timelineBrand
           }
         >
           {ptrEnabled ? (
@@ -3411,12 +3760,38 @@ export default function App() {
                 ))}
               </MasonryShortestColumns>
             )
+          ) : allNotesViewActive ? (
+            allNotesSorted.length === 0 ? (
+              <div className="timeline__empty">{c.emptyGlobal}</div>
+            ) : (
+              <MasonryShortestColumns columnCount={timelineColumnCount}>
+                {allNotesSorted.map(({ col, card }) =>
+                  renderNoteTimelineCard(card, col.id)
+                )}
+              </MasonryShortestColumns>
+            )
+          ) : connectionsViewActive ? (
+            <NoteConnectionsView
+              collections={collections}
+              onOpenTarget={(colId, cardId) => {
+                const hit = findCardInTree(collections, colId, cardId);
+                if (hit) {
+                  setDetailCard({ card: hit.card, colId });
+                }
+              }}
+            />
           ) : remindersViewActive ? (
             <AllRemindersView
               entries={allReminderEntries}
-              columnCount={timelineColumnCount}
-              renderCard={(colId, card) =>
-                renderNoteTimelineCard(card, colId)
+              canEdit={canEdit}
+              onOpenCard={(colId, card) => {
+                const hit = findCardInTree(collections, colId, card.id);
+                if (hit) {
+                  setDetailCard({ card: hit.card, colId });
+                }
+              }}
+              onCompleteTask={
+                canEdit ? completeReminderTask : undefined
               }
             />
           ) : calendarDay ? (
@@ -3540,19 +3915,25 @@ export default function App() {
             </>
           )}
           {canEdit &&
-          active &&
+          (active || allNotesViewActive || remindersViewActive) &&
           !calendarDay &&
           !searchActive &&
           !trashViewActive &&
-          !remindersViewActive ? (
+          !connectionsViewActive ? (
             <div className="timeline__add-bottom">
               <button
                 type="button"
                 className="timeline__add-bottom-btn"
-                aria-label={c.newNoteAria}
-                onClick={() => addSmallNote()}
+                aria-label={
+                  remindersViewActive
+                    ? c.newReminderTaskAria
+                    : c.newNoteAria
+                }
+                onClick={() =>
+                  remindersViewActive ? openNewTaskReminderPicker() : addSmallNote()
+                }
               >
-                {c.newNotePlus}
+                {remindersViewActive ? c.newReminderTaskPlus : c.newNotePlus}
               </button>
             </div>
           ) : null}
@@ -3563,6 +3944,7 @@ export default function App() {
       !calendarDay &&
       !searchActive &&
       !trashViewActive &&
+      !connectionsViewActive &&
       (!mobileNavOpen || tabletSplitNav) &&
       !mobileCalendarOpen &&
       !remindersViewActive ? (
@@ -3609,7 +3991,7 @@ export default function App() {
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
-            strokeWidth="2"
+            strokeWidth="1.5"
             strokeLinecap="round"
             strokeLinejoin="round"
             aria-hidden
@@ -3643,7 +4025,7 @@ export default function App() {
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
-            strokeWidth="2"
+            strokeWidth="1.5"
             strokeLinecap="round"
             strokeLinejoin="round"
             aria-hidden
@@ -3656,23 +4038,25 @@ export default function App() {
           type="button"
           className="mobile-dock__btn mobile-dock__btn--fab"
           aria-label={
-            calendarDay !== null || remindersViewActive
+            calendarDay !== null
               ? c.fabBack
-              : writeRequiresLogin && !getAdminToken() && !isTauri()
-                ? c.fabLogin
-                : c.fabNewNote
+              : remindersViewActive
+                ? c.newReminderTaskAria
+                : writeRequiresLogin && !getAdminToken() && !isTauri()
+                  ? c.fabLogin
+                  : c.fabNewNote
           }
           title={
             calendarDay !== null
               ? c.fabTitleCalendar
               : remindersViewActive
-                ? c.fabTitleReminders
+                ? c.fabTitleNewReminderTask
                 : writeRequiresLogin && !getAdminToken() && !isTauri()
                   ? c.fabTitleLogin
                   : c.fabTitleNewNote
           }
           disabled={
-            calendarDay !== null || remindersViewActive
+            calendarDay !== null
               ? false
               : writeRequiresLogin &&
                   !getAdminToken() &&
@@ -3680,15 +4064,17 @@ export default function App() {
                 ? false
                 : trashViewActive ||
                   searchQuery.trim().length > 0 ||
-                  !active ||
-                  !canEdit
+                  (!active && !allNotesViewActive && !remindersViewActive) ||
+                  !canEdit ||
+                  connectionsViewActive
           }
           onClick={() => {
             if (remindersViewActive) {
-              setRemindersViewActive(false);
-              requestAnimationFrame(() => {
-                timelineRef.current?.scrollTo({ top: 0, behavior: "smooth" });
-              });
+              if (writeRequiresLogin && !getAdminToken() && !isTauri()) {
+                openLogin();
+                return;
+              }
+              openNewTaskReminderPicker();
               return;
             }
             if (calendarDay !== null) {
@@ -3705,7 +4091,7 @@ export default function App() {
             if (
               narrowUi &&
               canEdit &&
-              active &&
+              (active || allNotesViewActive) &&
               !trashViewActive &&
               !remindersViewActive &&
               searchQuery.trim().length === 0
@@ -3758,7 +4144,7 @@ export default function App() {
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
-            strokeWidth="2"
+            strokeWidth="1.5"
             strokeLinecap="round"
             strokeLinejoin="round"
             aria-hidden
@@ -3981,6 +4367,7 @@ export default function App() {
             canEdit
               ? () =>
                   setReminderPicker({
+                    kind: "card",
                     colId: detailCardLive.colId,
                     cardId: detailCardLive.card.id,
                   })
@@ -4035,20 +4422,30 @@ export default function App() {
         <Suspense fallback={null}>
           <ReminderPickerModal
             open
+            mode={reminderPicker.kind === "new-task" ? "new-task" : "card"}
             collections={collections}
-            colId={reminderPicker.colId}
-            cardId={reminderPicker.cardId}
+            colId={
+              reminderPicker.kind === "card" ? reminderPicker.colId : ""
+            }
+            cardId={
+              reminderPicker.kind === "card" ? reminderPicker.cardId : ""
+            }
             onClose={() => setReminderPicker(null)}
-            onSave={(iso) => {
-              if (!reminderPicker) return;
+            onSave={(iso, time, note) => {
+              if (reminderPicker.kind === "new-task") {
+                void finishNewTaskFromReminder(iso, time, note);
+                return;
+              }
               commitCardReminder(
                 reminderPicker.colId,
                 reminderPicker.cardId,
-                iso
+                iso,
+                time,
+                note
               );
             }}
             onClear={() => {
-              if (!reminderPicker) return;
+              if (reminderPicker.kind !== "card") return;
               commitCardReminder(
                 reminderPicker.colId,
                 reminderPicker.cardId,

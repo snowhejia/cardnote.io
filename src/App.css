@@ -263,19 +263,220 @@
   padding: 4px 4px 8px;
 }
 
-/* 主区「全部提醒」页：与合集相同 NoteTimelineCard，按日期分节 */
+/* 我的待办：左侧待办列表 + 右侧完成时间轴 */
+.reminders-layout {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 1.25rem;
+  width: 100%;
+  max-width: 100%;
+}
+
+.reminders-layout__main {
+  flex: 1;
+  min-width: 0;
+}
+
+.reminders-layout__aside {
+  width: 288px;
+  flex-shrink: 0;
+  position: sticky;
+  top: 0.5rem;
+  align-self: flex-start;
+  max-height: calc(100vh - 7rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+@media (max-width: 900px) {
+  .reminders-layout {
+    flex-direction: column;
+  }
+
+  .reminders-layout__aside {
+    width: 100%;
+    max-height: none;
+    position: static;
+    order: 2;
+  }
+
+  .reminders-layout__main {
+    order: 1;
+  }
+}
+
+.reminder-completion {
+  padding: 14px 14px 12px;
+  border: 1px solid rgba(55, 53, 47, 0.07);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.04),
+    0 4px 12px rgba(55, 53, 47, 0.04);
+}
+
+.reminder-completion--empty {
+  padding: 16px 16px 18px;
+}
+
+.reminder-completion__empty {
+  margin: 0;
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  color: rgba(55, 53, 47, 0.5);
+}
+
+.reminder-completion__title {
+  margin: 0 0 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(55, 53, 47, 0.07);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: rgba(55, 53, 47, 0.5);
+}
+
+.reminder-completion--empty .reminder-completion__title {
+  margin-bottom: 10px;
+}
+
+.reminder-completion__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* 左侧节点 + 竖线，右侧独立圆角块 */
+.reminder-completion__item {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 0 10px;
+  align-items: stretch;
+}
+
+.reminder-completion__item + .reminder-completion__item {
+  margin-top: 2px;
+}
+
+.reminder-completion__rail {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  padding-top: 14px;
+  width: 20px;
+}
+
+.reminder-completion__rail::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 24px;
+  bottom: -6px;
+  width: 1px;
+  transform: translateX(-50%);
+  background: rgba(55, 53, 47, 0.1);
+}
+
+.reminder-completion__item:last-child .reminder-completion__rail::after {
+  display: none;
+}
+
+.reminder-completion__dot {
+  position: relative;
+  z-index: 1;
+  flex-shrink: 0;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid var(--app-reminder-pink);
+  box-shadow: 0 0 0 3px var(--app-reminder-pink-soft);
+}
+
+.reminder-completion__row {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  width: 100%;
+  margin: 0 0 10px;
+  padding: 10px 11px 11px;
+  border: 1px solid rgba(55, 53, 47, 0.07);
+  border-radius: 8px;
+  background: rgba(55, 53, 47, 0.02);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: #37352f;
+  transition:
+    background 0.14s ease,
+    border-color 0.14s ease,
+    box-shadow 0.14s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.reminder-completion__item:last-child .reminder-completion__row {
+  margin-bottom: 0;
+}
+
+.reminder-completion__row:hover {
+  background: rgba(55, 53, 47, 0.04);
+  border-color: rgba(55, 53, 47, 0.1);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
+}
+
+.reminder-completion__row:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.38);
+  outline-offset: 1px;
+}
+
+.reminder-completion__time {
+  align-self: flex-start;
+  display: inline-block;
+  max-width: 100%;
+  padding: 3px 7px;
+  border-radius: 5px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  line-height: 1.3;
+  color: var(--app-reminder-pink-text);
+  background: var(--app-reminder-pink-soft);
+}
+
+.reminder-completion__label {
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.45;
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+
+.reminder-completion__col {
+  font-size: 0.7rem;
+  line-height: 1.35;
+  color: rgba(55, 53, 47, 0.44);
+}
+
+/* 主区「我的待办」：白卡片行 + 提醒粉点缀（对齐 UI-AESTHETIC §6） */
 .all-reminders-page {
   width: 100%;
   margin: 0 auto;
-  padding: 0 2px 12px;
+  padding: 0 0 12px;
 }
 
 .all-reminders-page__intro {
-  margin: 0 0 12px;
+  margin: 0 0 0.5rem;
   max-width: 42rem;
-  font-size: 0.8125rem;
+  font-size: 0.85rem;
   line-height: 1.45;
-  color: rgba(55, 53, 47, 0.55);
+  color: var(--vp-c-text-2);
 }
 
 .all-reminders-page__empty {
@@ -284,12 +485,285 @@
   margin-right: auto;
 }
 
-.all-reminders-page .timeline__pin-section.timeline__reminder-section {
+.all-reminders-page__task-section {
   margin-bottom: 1.25rem;
+  max-width: 42rem;
 }
 
-.all-reminders-page .timeline__pin-section.timeline__reminder-section:last-child {
+.all-reminders-page__task-section:last-child {
   margin-bottom: 0;
+}
+
+/* 与 .timeline__pin-heading 同用；仅收紧下边距（旧版 10px 略松） */
+.all-reminders-page__task-heading {
+  margin: 0 0 0.5rem;
+  letter-spacing: -0.02em;
+}
+
+.task-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.task-list__item {
+  margin: 0;
+}
+
+/* 每条：白底细边框 + 轻阴影，与洞察/统计行一致 */
+.task-list__card {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 14px;
+  box-sizing: border-box;
+  border: 1px solid rgba(55, 53, 47, 0.08);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  transition:
+    border-color 0.14s ease,
+    box-shadow 0.14s ease,
+    background 0.14s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.task-list__card:hover {
+  border-color: rgba(55, 53, 47, 0.11);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.task-list__check {
+  flex-shrink: 0;
+  box-sizing: border-box;
+  width: 15px;
+  height: 15px;
+  margin: 4px 0 0;
+  border-radius: 3px;
+  cursor: pointer;
+  accent-color: var(--app-reminder-pink);
+}
+
+.task-list__check:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.4);
+  outline-offset: 2px;
+}
+
+.task-list__row {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: #37352f;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.task-list__row:focus-visible {
+  outline: none;
+}
+
+.task-list__card:has(.task-list__row:focus-visible) {
+  outline: 2px solid rgba(37, 99, 235, 0.38);
+  outline-offset: 1px;
+}
+
+.task-list__title {
+  font-size: 0.9375rem;
+  line-height: 1.5;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+}
+
+.task-list__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: rgba(55, 53, 47, 0.45);
+}
+
+.task-list__time {
+  font-variant-numeric: tabular-nums;
+  color: var(--app-reminder-pink-text-soft);
+}
+
+.task-list__col-name {
+  color: rgba(55, 53, 47, 0.48);
+}
+
+.task-list__meta-sep {
+  user-select: none;
+}
+
+/* —— 笔记连接（无限白板） —— */
+.connections-page {
+  width: 100%;
+  max-width: 40rem;
+  padding: 0 2px 24px;
+}
+
+.connections-page--board {
+  max-width: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  box-sizing: border-box;
+}
+
+/* 笔记连接：主栏铺满侧栏右侧，无顶栏/内边距；白板贴边 */
+.main.main--connections-board {
+  padding: 0;
+}
+
+.main.main--connections-board .main__header {
+  display: none;
+}
+
+.main.main--connections-board .timeline {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding-bottom: 0;
+}
+
+.main.main--connections-board .connections-board__hint {
+  display: none;
+}
+
+.main.main--connections-board .connections-board__viewport {
+  border-radius: 0;
+  border: none;
+}
+
+.app.app--connections-board .mobile-dock {
+  display: none !important;
+}
+
+.connections-page--empty {
+  padding: 0 2px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 12rem;
+}
+
+.connections-page__empty {
+  max-width: 40rem;
+}
+
+.connections-board__hint {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 0 2px 8px;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: rgba(55, 53, 47, 0.45);
+}
+
+.connections-board__viewport {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+  border-radius: 12px;
+  border: 1px solid rgba(55, 53, 47, 0.07);
+  background: #fafbfc;
+  background-image: radial-gradient(
+    rgba(55, 53, 47, 0.08) 1px,
+    transparent 0
+  );
+  background-size: 24px 24px;
+}
+
+.connections-board__viewport:active {
+  cursor: grabbing;
+}
+
+.connections-board__world {
+  position: relative;
+  /* 避免 will-change 长期占位导致整块被栅格成低分辩纹理，放大后发糊 */
+  backface-visibility: hidden;
+  transform-style: preserve-3d;
+}
+
+.connections-board__svg {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+}
+
+/* 白板上的节点：与时间线 .card 同结构，固定宽度避免重叠过大 */
+.connections-board__node-wrap {
+  position: absolute;
+  z-index: 1;
+  width: 260px;
+  max-width: min(280px, 36vw);
+  pointer-events: auto;
+  transition: box-shadow 0.18s ease, z-index 0s;
+}
+
+.connections-board__node-wrap--highlight-neighbor {
+  z-index: 2;
+  border-radius: 14px;
+  box-shadow:
+    0 0 0 2px rgba(250, 204, 21, 0.38),
+    0 0 20px 5px rgba(250, 204, 21, 0.2);
+}
+
+.connections-board__node-wrap--highlight {
+  z-index: 3;
+  border-radius: 14px;
+  box-shadow:
+    0 0 0 3px rgba(250, 204, 21, 0.95),
+    0 0 32px 10px rgba(250, 204, 21, 0.45);
+}
+
+.connections-board__node-card.card {
+  width: 100%;
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: geometricPrecision;
+}
+
+.connections-board__node-card .card__text-editor {
+  max-height: 200px;
+  overflow: auto;
+}
+
+.sidebar__connections {
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(55, 53, 47, 0.08);
+  margin-bottom: 4px;
 }
 
 /* —— 侧边栏（Notion 式：浅底、分区小标题、圆角选中、彩色圆点） —— */
@@ -393,7 +867,7 @@
 }
 
 .sidebar__workspace-name {
-  font-weight: 600;
+  font-weight: 500;
   font-size: 0.875rem;
   letter-spacing: -0.02em;
   color: #37352f;
@@ -411,7 +885,7 @@
   margin: 0;
   padding: 0;
   font-size: 0.6875rem;
-  font-weight: 600;
+  font-weight: 500;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: rgba(55, 53, 47, 0.45);
@@ -496,6 +970,160 @@
   display: none;
 }
 
+/* 侧栏主导航（全部笔记 / 待办 / 连接）；含手机抽屉
+   与 .sidebar__nav 同宽：不再左右内缩，选中条与合集树行同宽、同圆角 */
+.sidebar__all-notes {
+  display: block;
+  padding: 0 0 4px;
+}
+
+.sidebar__all-notes-hit {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 36px;
+  margin: 0;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: rgba(55, 53, 47, 0.78);
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.sidebar__all-notes-hit:hover {
+  background: rgba(55, 53, 47, 0.06);
+  color: rgba(55, 53, 47, 0.95);
+}
+
+/* 选中：与 .sidebar__tree-row.is-active / .sidebar__favorites-row.is-active 一致 */
+.sidebar__all-notes-hit.is-active {
+  background: rgba(55, 53, 47, 0.08);
+  color: #37352f;
+  box-shadow: none;
+}
+
+.sidebar__all-notes-hit.is-active .sidebar__all-notes-label {
+  font-weight: 500;
+}
+
+.sidebar__all-notes-hit:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.4);
+  outline-offset: 1px;
+}
+
+.sidebar__all-notes-label {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+}
+
+.sidebar__all-notes-count {
+  flex-shrink: 0;
+  min-width: 1rem;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1.4;
+  text-align: right;
+  color: rgba(55, 53, 47, 0.42);
+}
+
+.sidebar__all-notes-hit.is-active .sidebar__all-notes-count {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.65rem;
+  font-weight: 500;
+  line-height: 1.35;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(55, 53, 47, 0.08);
+  color: rgba(55, 53, 47, 0.55);
+}
+
+.sidebar__all-reminders-hit {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 36px;
+  margin: 0;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: rgba(55, 53, 47, 0.78);
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.sidebar__all-reminders-hit:hover {
+  background: rgba(55, 53, 47, 0.06);
+  color: rgba(55, 53, 47, 0.95);
+}
+
+.sidebar__all-reminders-hit.is-active {
+  background: rgba(55, 53, 47, 0.08);
+  color: #37352f;
+  box-shadow: none;
+}
+
+.sidebar__all-reminders-hit.is-active .sidebar__all-reminders-label {
+  font-weight: 500;
+}
+
+.sidebar__all-reminders-hit:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.4);
+  outline-offset: 1px;
+}
+
+.sidebar__all-reminders-label {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+}
+
+.sidebar__all-reminders-count {
+  flex-shrink: 0;
+  min-width: 1rem;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1.4;
+  text-align: right;
+  color: rgba(55, 53, 47, 0.42);
+}
+
+.sidebar__all-reminders-hit.is-active .sidebar__all-reminders-count {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.65rem;
+  font-weight: 500;
+  line-height: 1.35;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(55, 53, 47, 0.08);
+  color: rgba(55, 53, 47, 0.55);
+}
+
 @media (min-width: 901px) {
   .sidebar__calendar {
     padding-bottom: 4px;
@@ -514,68 +1142,14 @@
     margin-bottom: 4px;
   }
 
-  .sidebar__all-reminders {
-    display: block;
-    padding: 0 8px 10px;
+  .sidebar__calendar-section {
     border-bottom: 1px solid rgba(55, 53, 47, 0.08);
     margin-bottom: 4px;
   }
 
-  .sidebar__all-reminders-hit {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    width: 100%;
-    margin: 0;
-    padding: 8px 10px;
-    border: none;
-    border-radius: 8px;
-    background: var(--app-reminder-pink-soft);
-    color: var(--app-reminder-pink-text-soft);
-    font: inherit;
-    font-size: 0.8125rem;
-    font-weight: 650;
-    cursor: pointer;
-    transition:
-      background 0.12s ease,
-      color 0.12s ease;
-    -webkit-tap-highlight-color: transparent;
-  }
-
-  .sidebar__all-reminders-hit:hover {
-    background: var(--app-reminder-pink-soft-hover);
-    color: var(--app-reminder-pink-deep);
-  }
-
-  .sidebar__all-reminders-hit.is-active {
-    background: var(--app-reminder-pink-active-bg);
-    color: var(--app-reminder-pink-deep);
-    box-shadow: inset 0 0 0 1px var(--app-reminder-pink-active-ring);
-  }
-
-  .sidebar__all-reminders-label {
-    flex: 1;
-    min-width: 0;
-    text-align: left;
-  }
-
-  .sidebar__all-reminders-count {
-    flex-shrink: 0;
-    min-width: 1.25rem;
-    padding: 0 6px;
-    border-radius: 999px;
-    background: rgba(255, 255, 255, 0.72);
-    font-size: 0.6875rem;
-    font-weight: 700;
-    line-height: 1.4;
-    text-align: center;
-    color: var(--app-reminder-pink-text);
-  }
-
-  .sidebar__all-reminders-hit.is-active .sidebar__all-reminders-count {
-    background: rgba(255, 255, 255, 0.92);
-    color: var(--app-reminder-pink-deep);
+  .sidebar__all-reminders {
+    display: block;
+    padding: 0 0 4px;
   }
 }
 
@@ -678,7 +1252,7 @@
   justify-content: center;
   min-width: 0;
   font-size: 0.625rem;
-  font-weight: 600;
+  font-weight: 500;
   text-align: center;
   color: rgba(55, 53, 47, 0.38);
 }
@@ -728,7 +1302,7 @@
 .sidebar__cal-day.is-selected {
   background: color-mix(in srgb, var(--mikujar-logo-jar) 18%, transparent);
   color: var(--mikujar-logo-jar-deep);
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .sidebar__cal-day.has-notes::after {
@@ -1616,7 +2190,7 @@
   display: block;
   line-height: 1;
   font-size: 0.95rem;
-  font-weight: 600;
+  font-weight: 500;
   transform: rotate(0deg);
   transition: transform 0.15s ease;
 }
@@ -1773,6 +2347,11 @@
   background: var(--vp-c-bg-soft);
 }
 
+/* 「我的待办」：无合集说明行，收紧标题与时间线间距，与合集（标题+hint）整体密度接近 */
+.main.main--reminders .main__header {
+  margin-bottom: 0.65rem;
+}
+
 .main__header {
   margin-bottom: 1.75rem;
 }
@@ -1854,7 +2433,7 @@
 .main__heading {
   margin: 0;
   font-size: 1.45rem;
-  font-weight: 600;
+  font-weight: 500;
   letter-spacing: -0.03em;
   color: var(--vp-c-text-1);
   min-width: 0;
@@ -1972,7 +2551,7 @@
   min-width: 1.5rem;
   padding: 0 0.15rem;
   font-size: var(--main-header-control-font);
-  font-weight: 700;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: var(--vp-c-text-1);
   text-align: center;
@@ -2470,14 +3049,31 @@ textarea.main__hint-editor:focus {
   color: rgba(55, 53, 47, 0.55);
 }
 
+.reminder-picker-modal__row {
+  display: flex;
+  gap: 0.75rem;
+  margin-bottom: 0.85rem;
+}
+
+.reminder-picker-modal__row .reminder-picker-modal__label {
+  flex: 1;
+  min-width: 0;
+  margin-bottom: 0;
+}
+
 .reminder-picker-modal__label {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
-  margin-bottom: 1rem;
+  margin-bottom: 0.85rem;
   font-size: 0.8125rem;
   font-weight: 600;
   color: rgba(55, 53, 47, 0.65);
+}
+
+.reminder-picker-modal__label--full {
+  width: 100%;
+  margin-bottom: 1rem;
 }
 
 .reminder-picker-modal__input {
@@ -2487,6 +3083,21 @@ textarea.main__hint-editor:focus {
   border: 1px solid rgba(60, 60, 67, 0.18);
   border-radius: 8px;
   color: #37352f;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.reminder-picker-modal__textarea {
+  font: inherit;
+  font-size: 0.9rem;
+  padding: 0.45rem 0.5rem;
+  border: 1px solid rgba(60, 60, 67, 0.18);
+  border-radius: 8px;
+  color: #37352f;
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  line-height: 1.5;
 }
 
 .reminder-picker-modal__actions {
@@ -2774,7 +3385,11 @@ textarea.main__hint-editor:focus {
   letter-spacing: 0.02em;
   line-height: var(--note-line-height);
   color: var(--vp-c-text-3);
+  flex: 1 1 0;
   min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .app--masonry .card__time {
@@ -2799,6 +3414,7 @@ textarea.main__hint-editor:focus {
   color: var(--app-reminder-pink-text);
   white-space: nowrap;
 }
+
 
 /* 小屏 + 大屏触控平板：与 narrowUi / matchesMobileChromeMedia 一致 */
 @media (max-width: 900px),
@@ -4452,6 +5068,12 @@ div.card__text--readonly:not(.card__text--preview) {
     padding: 3px 7px;
   }
 
+  .sidebar__all-notes-hit.is-active .sidebar__all-notes-count,
+  .sidebar__all-reminders-hit.is-active .sidebar__all-reminders-count {
+    font-size: 0.7rem;
+    padding: 3px 7px;
+  }
+
   .sidebar__favorites-row {
     font-size: 1rem;
     min-height: 38px;
@@ -5097,6 +5719,38 @@ div.card__text--readonly:not(.card__text--preview) {
     padding-bottom: 0.75rem;
     padding-left: max(0.75rem, constant(safe-area-inset-left));
     padding-left: max(0.75rem, env(safe-area-inset-left, 0px));
+  }
+
+  /* 笔记连接全屏白板：仅保留返回打开侧栏，其余顶栏隐藏 */
+  .main.main--connections-board {
+    padding: 0;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding-left: env(safe-area-inset-left, 0px);
+  }
+
+  .main.main--connections-board .main__header {
+    display: block;
+    margin-bottom: 0;
+    padding: max(6px, env(safe-area-inset-top, 0px)) 12px 8px;
+    padding-left: max(12px, env(safe-area-inset-left, 0px));
+    padding-right: max(12px, env(safe-area-inset-right, 0px));
+    border-bottom: 1px solid rgba(55, 53, 47, 0.08);
+    background: var(--vp-c-bg-soft);
+  }
+
+  .main.main--connections-board .main__header-row > *:not(.main__mobile-back) {
+    display: none !important;
+  }
+
+  .main.main--connections-board .main__banners,
+  .main.main--connections-board .main__hint-wrap {
+    display: none !important;
+  }
+
+  .main.main--connections-board .timeline {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
   }
 
   .main__header {

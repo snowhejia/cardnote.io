@@ -14,6 +14,8 @@ export * from "./AppIcons";
 export * from "./SidebarWorkspace";
 export * from "./CalendarBrowse";
 export * from "./AllRemindersView";
+export * from "./ReminderCompletionTimeline";
+export * from "./NoteConnectionsView";
 export * from "./RelatedCardsSidePanel";
 export * from "./useRemoteCollectionsSync";
 export * from "./useCollectionsRemotePush";

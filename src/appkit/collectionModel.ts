@@ -1,6 +1,19 @@
 import { htmlToPlainText } from "../noteEditor/plainHtml";
 import type { Collection, NoteCard } from "../types";
 
+/** 侧栏不展示；「全部笔记」里新建的笔记进此合集，语义上为未归入用户自建合集 */
+export const LOOSE_NOTES_COLLECTION_ID = "__loose_notes";
+export const LOOSE_NOTES_DOT_COLOR = "#a8a29e";
+
+export function createLooseNotesCollection(displayName: string): Collection {
+  return {
+    id: LOOSE_NOTES_COLLECTION_ID,
+    name: displayName,
+    dotColor: LOOSE_NOTES_DOT_COLOR,
+    cards: [],
+  };
+}
+
 export function walkCollections(
   cols: Collection[],
   visit: (c: Collection) => void
@@ -145,6 +158,27 @@ export function collectAllReminderEntries(
     if (c !== 0) return c;
     return (a.card.minutesOfDay ?? 0) - (b.card.minutesOfDay ?? 0);
   });
+  return out;
+}
+
+export type ReminderCompletionEntry = {
+  col: Collection;
+  card: NoteCard;
+  completedAt: string;
+};
+
+/** 曾在待办中勾选完成的卡片，按完成时间新→旧 */
+export function collectReminderCompletionEntries(
+  cols: Collection[]
+): ReminderCompletionEntry[] {
+  const out: ReminderCompletionEntry[] = [];
+  walkCollections(cols, (col) => {
+    for (const card of col.cards) {
+      const at = card.reminderCompletedAt?.trim();
+      if (at) out.push({ col, card, completedAt: at });
+    }
+  });
+  out.sort((a, b) => b.completedAt.localeCompare(a.completedAt));
   return out;
 }
 
