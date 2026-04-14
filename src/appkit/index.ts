@@ -23,6 +23,7 @@ export * from "./useCollectionsRemotePush";
 export * from "./CollectionContextMenu";
 export * from "./CollectionDeleteDialog";
 export * from "./CollectionMergeDialog";
+export * from "./CollectionMoveUnderDialog";
 export * from "./UserAdminPage";
 export * from "./useUserAdmin";
 export * from "./useMobileNavSwipe";

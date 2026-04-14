@@ -12,12 +12,14 @@ export type CollectionContextMenuState = {
 type Props = {
   menu: CollectionContextMenuState | null;
   onMergeInto: (id: string, name: string) => void;
+  onMoveUnder: (id: string, name: string) => void;
   onRemove: (id: string, name: string, hasChildren: boolean) => void;
 };
 
 export function CollectionContextMenu({
   menu,
   onMergeInto,
+  onMoveUnder,
   onRemove,
 }: Props) {
   const c = useAppChrome();
@@ -47,6 +49,17 @@ export function CollectionContextMenu({
         }}
       >
         {c.uiMergeCollectionMenu}
+      </button>
+      <button
+        type="button"
+        className="attachment-ctx-menu__item"
+        role="menuitem"
+        onClick={(e) => {
+          e.stopPropagation();
+          onMoveUnder(menu.id, menu.name);
+        }}
+      >
+        {c.uiMoveCollectionUnderMenu}
       </button>
       <button
         type="button"

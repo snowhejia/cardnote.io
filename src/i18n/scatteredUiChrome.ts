@@ -80,6 +80,13 @@ export type ScatteredUiChrome = {
   errMergeColSave: string;
   uiMergeCollectionProgressTitle: string;
   uiMergeCollectionProgressLine: (current: number, total: number) => string;
+  uiMoveCollectionUnderMenu: string;
+  uiMoveCollectionUnderDialogTitle: string;
+  uiMoveCollectionUnderHint: (sourceName: string) => string;
+  uiMoveCollectionUnderPickLabel: string;
+  uiMoveCollectionUnderConfirm: string;
+  uiMoveCollectionUnderNoTargets: string;
+  errMoveCollectionUnder: string;
   uiDeleteCollectionDialogTitle: string;
   uiDeleteCollectionWithSubtree: (name: string) => string;
   uiDeleteCollectionLeaf: (name: string) => string;
@@ -208,6 +215,14 @@ const zh: ScatteredUiChrome = {
   uiMergeCollectionProgressTitle: "正在合并到云端…",
   uiMergeCollectionProgressLine: (current, total) =>
     `进度 ${current} / ${total}`,
+  uiMoveCollectionUnderMenu: "移动至…",
+  uiMoveCollectionUnderDialogTitle: "移动到子合集",
+  uiMoveCollectionUnderHint: (sourceName) =>
+    `将「${sourceName}」连同其子文件夹作为子文件夹挂到下方所选合集下。`,
+  uiMoveCollectionUnderPickLabel: "父级合集",
+  uiMoveCollectionUnderConfirm: "移动",
+  uiMoveCollectionUnderNoTargets: "没有其他可作为父级的合集。",
+  errMoveCollectionUnder: "现在移不过去喔…换个目标或刷新再试？",
   uiDeleteCollectionDialogTitle: "删除合集",
   uiDeleteCollectionWithSubtree: (name) =>
     `要连「${name}」带子文件夹一锅端吗？里面的笔记也会一起蒸发，救不回喔。`,
@@ -345,6 +360,15 @@ const en: ScatteredUiChrome = {
   uiMergeCollectionProgressTitle: "Merging to cloud…",
   uiMergeCollectionProgressLine: (current, total) =>
     `${current} / ${total}`,
+  uiMoveCollectionUnderMenu: "Move under…",
+  uiMoveCollectionUnderDialogTitle: "Move as sub-collection",
+  uiMoveCollectionUnderHint: (sourceName) =>
+    `Place “${sourceName}” and its subfolders under the collection you pick below.`,
+  uiMoveCollectionUnderPickLabel: "Parent collection",
+  uiMoveCollectionUnderConfirm: "Move",
+  uiMoveCollectionUnderNoTargets: "No other collection can be a parent.",
+  errMoveCollectionUnder:
+    "Couldn’t move right now. Try another target or refresh.",
   uiDeleteCollectionDialogTitle: "Delete collection",
   uiDeleteCollectionWithSubtree: (name) =>
     `Delete “${name}” and all subfolders? Notes inside will be removed and can’t be restored.`,

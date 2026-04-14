@@ -113,6 +113,8 @@ import {
   CollectionDeleteDialog,
   CollectionMergeDialog,
   type CollectionMergeDialogState,
+  CollectionMoveUnderDialog,
+  type CollectionMoveUnderDialogState,
   CollectionSidebarTree,
   CollectionStarIcon,
   collapsedFoldersStorageKey,
@@ -148,6 +150,7 @@ import {
   LOOSE_NOTES_DOT_COLOR,
   mapCollectionById,
   mergeCollectionSubtreeIntoTarget,
+  moveCollectionInTree,
   MOBILE_CHROME_MEDIA,
   matchesMobileChromeMedia,
   TABLET_WIDE_TOUCH_MEDIA,
@@ -160,6 +163,7 @@ import {
   IconTimelineMasonry2Col,
   NoteTimelineCard,
   persistMergeCollectionsRemote,
+  persistCollectionTreeLayoutRemoteWithRetry,
   pruneCollapsedFolderIds,
   resolveActiveCollectionId,
   randomDotColor,
@@ -348,6 +352,8 @@ export default function App() {
   } | null>(null);
   const [mergeCollectionDialog, setMergeCollectionDialog] =
     useState<CollectionMergeDialogState | null>(null);
+  const [moveUnderCollectionDialog, setMoveUnderCollectionDialog] =
+    useState<CollectionMoveUnderDialogState | null>(null);
   const [collectionMergeProgress, setCollectionMergeProgress] = useState<{
     current: number;
     total: number;
@@ -956,6 +962,7 @@ export default function App() {
       reminderPicker !== null ||
       collectionDeleteDialog !== null ||
       mergeCollectionDialog !== null ||
+      moveUnderCollectionDialog !== null ||
       collectionMergeProgress !== null ||
       showRemoteLoading,
     [
@@ -972,6 +979,7 @@ export default function App() {
       reminderPicker,
       collectionDeleteDialog,
       mergeCollectionDialog,
+      moveUnderCollectionDialog,
       collectionMergeProgress,
       showRemoteLoading,
     ]
@@ -2979,6 +2987,61 @@ export default function App() {
     ]
   );
 
+  const openMoveUnderCollectionDialog = useCallback(
+    (id: string, displayName: string) => {
+      if (!canEdit) return;
+      if (id === LOOSE_NOTES_COLLECTION_ID) return;
+      setCollectionCtxMenu(null);
+      setMoveUnderCollectionDialog({ sourceId: id, displayName });
+    },
+    [canEdit]
+  );
+
+  const performMoveCollectionUnder = useCallback(
+    async (sourceId: string, parentId: string) => {
+      if (!canEdit) return;
+      if (sourceId === parentId) return;
+      if (sourceId === LOOSE_NOTES_COLLECTION_ID) return;
+
+      const next = moveCollectionInTree(
+        collections,
+        sourceId,
+        parentId,
+        "inside"
+      );
+      if (next === collections) {
+        window.alert(c.errMoveCollectionUnder);
+        return;
+      }
+
+      if (dataMode === "remote") {
+        const ok = await persistCollectionTreeLayoutRemoteWithRetry(next);
+        if (!ok) {
+          await resyncRemoteCollectionsTree();
+          window.alert(c.errCollectionLayoutSave);
+          return;
+        }
+      }
+
+      setCollections(next);
+      setCollapsedFolderIds((prev) => {
+        const n = new Set(prev);
+        n.delete(parentId);
+        return n;
+      });
+    },
+    [
+      canEdit,
+      collections,
+      dataMode,
+      resyncRemoteCollectionsTree,
+      setCollapsedFolderIds,
+      setCollections,
+      c.errMoveCollectionUnder,
+      c.errCollectionLayoutSave,
+    ]
+  );
+
   const toggleFolderCollapsed = useCallback((folderId: string) => {
     setCollapsedFolderIds((prev) => {
       const next = new Set(prev);
@@ -3122,6 +3185,15 @@ export default function App() {
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [mergeCollectionDialog]);
+
+  useEffect(() => {
+    if (moveUnderCollectionDialog === null) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMoveUnderCollectionDialog(null);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [moveUnderCollectionDialog]);
 
   useEffect(() => {
     if (cardMenuId === null) return;
@@ -4944,6 +5016,9 @@ export default function App() {
         onMergeInto={(id, name) => {
           openMergeCollectionDialog(id, name);
         }}
+        onMoveUnder={(id, name) => {
+          openMoveUnderCollectionDialog(id, name);
+        }}
         onRemove={(id, name, hasChildren) => {
           openRemoveCollectionDialog(id, name, hasChildren);
         }}
@@ -4954,6 +5029,14 @@ export default function App() {
         onClose={() => setMergeCollectionDialog(null)}
         onConfirmMerge={(sourceId, targetId) => {
           void performMergeCollection(sourceId, targetId);
+        }}
+      />
+      <CollectionMoveUnderDialog
+        dialog={moveUnderCollectionDialog}
+        collections={collections}
+        onClose={() => setMoveUnderCollectionDialog(null)}
+        onConfirm={(sourceId, parentId) => {
+          void performMoveCollectionUnder(sourceId, parentId);
         }}
       />
       {collectionMergeProgress
