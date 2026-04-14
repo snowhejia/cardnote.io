@@ -100,6 +100,43 @@ function snapPathCoordsInD(d: string): string {
   );
 }
 
+/** 解析仅含 M/L 的正交路径，去掉重复折点与零长段，避免亚像素/舍入后出现悬空短线头 */
+function compactMlPathD(d: string): string | null {
+  const s = d.trim();
+  if (!s) return null;
+  const pts: [number, number][] = [];
+  const re =
+    /[MmLl]\s*([-+]?(?:\d+\.\d+|\d+|\.\d+)(?:[eE][-+]?\d+)?)\s*([-+]?(?:\d+\.\d+|\d+|\.\d+)(?:[eE][-+]?\d+)?)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(s)) !== null) {
+    const x = parseFloat(m[1]);
+    const y = parseFloat(m[2]);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    const prev = pts[pts.length - 1];
+    if (
+      !prev ||
+      Math.abs(prev[0] - x) > 0.75 ||
+      Math.abs(prev[1] - y) > 0.75
+    ) {
+      pts.push([x, y]);
+    }
+  }
+  if (pts.length < 2) return null;
+  let total = 0;
+  for (let i = 1; i < pts.length; i++) {
+    total += Math.hypot(
+      pts[i][0] - pts[i - 1][0],
+      pts[i][1] - pts[i - 1][1]
+    );
+  }
+  if (total < 2) return null;
+  let out = `M ${snapSvgCoord(pts[0][0])} ${snapSvgCoord(pts[0][1])}`;
+  for (let i = 1; i < pts.length; i++) {
+    out += ` L ${snapSvgCoord(pts[i][0])} ${snapSvgCoord(pts[i][1])}`;
+  }
+  return out;
+}
+
 type BoxHalf = { hw: number; hh: number };
 
 /**
@@ -339,7 +376,12 @@ function orthogonalPathPerpendicularWithClearance(
     spineX,
     spineY
   );
-  const innerBody = inner.replace(/^M\s+[\d.-]+\s+[\d.-]+\s*/, "").trim();
+  const innerBody = inner
+    .replace(
+      /^M\s*([-+]?(?:\d+\.\d+|\d+|\.\d+)(?:[eE][-+]?\d+)?)\s*([-+]?(?:\d+\.\d+|\d+|\.\d+)(?:[eE][-+]?\d+)?)\s*/i,
+      ""
+    )
+    .trim();
 
   const prefix =
     stubA > 0 ? `M ${x1} ${y1} L ${ex1} ${ey1}` : `M ${ex1} ${ey1}`;
@@ -373,7 +415,7 @@ function orthogonalPathForGraphEdge(
     pB.y,
     hb
   );
-  return snapPathCoordsInD(
+  const raw = snapPathCoordsInD(
     orthogonalPathPerpendicularWithClearance(
       pA.x,
       pA.y,
@@ -384,6 +426,7 @@ function orthogonalPathForGraphEdge(
       spine.spineY
     )
   );
+  return compactMlPathD(raw);
 }
 
 type GraphEdge = { from: string; to: string };
@@ -1343,8 +1386,8 @@ export function NoteConnectionsView({
                   fill="none"
                   stroke={BOARD_LINK_GRAY}
                   strokeWidth={BOARD_LINK_WIDTH_PX / zoom}
-                  strokeLinejoin="round"
-                  strokeLinecap="round"
+                  strokeLinejoin="miter"
+                  strokeLinecap="butt"
                   shapeRendering="crispEdges"
                 />
               );
@@ -1370,8 +1413,8 @@ export function NoteConnectionsView({
                         fill="none"
                         stroke={BOARD_LINK_PULSE}
                         strokeWidth={BOARD_LINK_WIDTH_PX / zoom}
-                        strokeLinejoin="round"
-                        strokeLinecap="round"
+                        strokeLinejoin="miter"
+                        strokeLinecap="butt"
                         shapeRendering="crispEdges"
                       />
                     );
