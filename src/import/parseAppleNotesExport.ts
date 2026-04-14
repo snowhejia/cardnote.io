@@ -1,4 +1,4 @@
-import { htmlToPlainText } from "../noteEditor/plainHtml";
+import { htmlToPlainTextForImportCard } from "../noteEditor/plainHtml";
 
 const TEXT_EXT_PRIORITY = [".md", ".markdown", ".txt", ".html", ".htm"] as const;
 
@@ -35,7 +35,7 @@ async function measureTextFileBodyLength(f: File): Promise<number> {
   const raw = await f.text();
   const ext = extOf(f.name);
   if (ext === ".html" || ext === ".htm") {
-    return htmlToPlainText(raw).length;
+    return htmlToPlainTextForImportCard(raw).length;
   }
   if (ext === ".md" || ext === ".markdown") {
     return stripDataUrlImages(raw).text.length;
@@ -434,7 +434,7 @@ async function fileToBodyAndExtras(
 
   if (ext === ".html" || ext === ".htm") {
     return {
-      bodyHtml: plainTextToCardHtml(htmlToPlainText(raw)),
+      bodyHtml: plainTextToCardHtml(htmlToPlainTextForImportCard(raw)),
       inlineFiles: [],
     };
   }
