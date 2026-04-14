@@ -4926,6 +4926,41 @@ div.card__text--readonly:not(.card__text--preview) {
   color: #15803d;
 }
 
+/* 合并合集弹窗：路径名可能较长，略加宽度 */
+.auth-modal.collection-merge-dialog {
+  max-width: 420px;
+}
+
+/* 合并合集弹窗：正文与标题对比足够，标签与下拉纵向对齐 */
+.collection-merge-dialog__body {
+  margin: 0 0 1rem;
+  font-size: 0.875rem;
+  line-height: 1.55;
+  color: rgba(55, 53, 47, 0.88);
+}
+
+.collection-merge-dialog__body--muted {
+  color: rgba(55, 53, 47, 0.72);
+}
+
+.collection-merge-dialog__field {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  margin: 0 0 0.75rem;
+}
+
+.collection-merge-dialog__label {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: #37352f;
+}
+
+.collection-merge-dialog__select.auth-modal__input {
+  margin-bottom: 0;
+}
+
 .auth-modal__actions {
   display: flex;
   justify-content: flex-end;

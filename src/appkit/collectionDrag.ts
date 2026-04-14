@@ -1,6 +1,17 @@
-import { updateCollectionApi } from "../api/collections";
-import type { Collection } from "../types";
-import { findCollectionById, mapCollectionById } from "./collectionModel";
+import {
+  deleteCollectionApi,
+  updateCardApi,
+  updateCollectionApi,
+  type CardRemotePatch,
+} from "../api/collections";
+import type { Collection, NoteCard } from "../types";
+import {
+  collectCardsInSubtreeWithPathLabels,
+  extractCardFromCollections,
+  findCollectionById,
+  mapCollectionById,
+  rewireRelatedRefsAfterCardsMoved,
+} from "./collectionModel";
 
 export const COLLECTION_DRAG_MIME = "application/x-note-collection";
 
@@ -40,6 +51,71 @@ export function collectSubtreeCollectionIds(root: Collection): string[] {
     out.push(...collectSubtreeCollectionIds(ch));
   }
   return out;
+}
+
+/**
+ * 将 source 子树内全部卡片合并进 target（接在目标列表末尾），再移除 source 子树。
+ * 不可合并到自身或自己的子孙合集。
+ */
+export function mergeCollectionSubtreeIntoTarget(
+  cols: Collection[],
+  sourceRootId: string,
+  targetColId: string
+): { nextTree: Collection[]; movedCardIds: string[] } | null {
+  if (sourceRootId === targetColId) return null;
+  const sourceNode = findCollectionById(cols, sourceRootId);
+  const targetNode = findCollectionById(cols, targetColId);
+  if (!sourceNode || !targetNode) return null;
+  if (isTargetUnderDragNode(sourceNode, targetColId)) return null;
+
+  const items = collectCardsInSubtreeWithPathLabels(cols, sourceRootId);
+  const moves = items.map((it) => ({
+    fromColId: it.colId,
+    toColId: targetColId,
+    cardId: it.card.id,
+  }));
+  const extracted: NoteCard[] = [];
+  let next = cols;
+  for (const { colId, card } of items) {
+    const ex = extractCardFromCollections(next, colId, card.id);
+    if (!ex.card) continue;
+    next = ex.next;
+    extracted.push(ex.card);
+  }
+  next = mapCollectionById(next, targetColId, (col) => ({
+    ...col,
+    cards: [...col.cards, ...extracted],
+  }));
+  next = rewireRelatedRefsAfterCardsMoved(next, moves);
+  const { tree, removed } = removeCollectionFromTree(next, sourceRootId);
+  if (!removed) return null;
+  return {
+    nextTree: tree,
+    movedCardIds: extracted.map((c) => c.id),
+  };
+}
+
+/** 云端：合并后写入卡片归属与排序，再删除空出的合集子树 */
+export async function persistMergeCollectionsRemote(
+  nextTree: Collection[],
+  targetColId: string,
+  movedCardIds: Set<string>,
+  sourceRootId: string
+): Promise<boolean> {
+  const targetCol = findCollectionById(nextTree, targetColId);
+  if (!targetCol) return false;
+
+  for (let i = 0; i < targetCol.cards.length; i++) {
+    const card = targetCol.cards[i];
+    const patch: CardRemotePatch = { sortOrder: i };
+    if (movedCardIds.has(card.id)) {
+      patch.collectionId = targetColId;
+    }
+    const ok = await updateCardApi(card.id, patch);
+    if (!ok) return false;
+  }
+
+  return deleteCollectionApi(sourceRootId);
 }
 
 export function findParentAndIndex(

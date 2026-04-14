@@ -107,6 +107,8 @@ import {
   CalendarBrowsePanel,
   CollectionContextMenu,
   CollectionDeleteDialog,
+  CollectionMergeDialog,
+  type CollectionMergeDialogState,
   CollectionSidebarTree,
   CollectionStarIcon,
   collapsedFoldersStorageKey,
@@ -141,6 +143,7 @@ import {
   LOOSE_NOTES_COLLECTION_ID,
   LOOSE_NOTES_DOT_COLOR,
   mapCollectionById,
+  mergeCollectionSubtreeIntoTarget,
   MOBILE_CHROME_MEDIA,
   matchesMobileChromeMedia,
   TABLET_WIDE_TOUCH_MEDIA,
@@ -152,6 +155,7 @@ import {
   IconTimelineMasonry1Col,
   IconTimelineMasonry2Col,
   NoteTimelineCard,
+  persistMergeCollectionsRemote,
   pruneCollapsedFolderIds,
   resolveActiveCollectionId,
   randomDotColor,
@@ -338,6 +342,8 @@ export default function App() {
     displayName: string;
     hasSubtree: boolean;
   } | null>(null);
+  const [mergeCollectionDialog, setMergeCollectionDialog] =
+    useState<CollectionMergeDialogState | null>(null);
   const [editingCollectionId, setEditingCollectionId] = useState<
     string | null
   >(null);
@@ -935,6 +941,7 @@ export default function App() {
       userAppleNotesImportOpen ||
       reminderPicker !== null ||
       collectionDeleteDialog !== null ||
+      mergeCollectionDialog !== null ||
       showRemoteLoading,
     [
       mobileNavOpen,
@@ -949,6 +956,7 @@ export default function App() {
       userAppleNotesImportOpen,
       reminderPicker,
       collectionDeleteDialog,
+      mergeCollectionDialog,
       showRemoteLoading,
     ]
   );
@@ -2864,6 +2872,88 @@ export default function App() {
     [canEdit]
   );
 
+  const openMergeCollectionDialog = useCallback(
+    (id: string, displayName: string) => {
+      if (!canEdit) return;
+      if (id === LOOSE_NOTES_COLLECTION_ID) return;
+      setCollectionCtxMenu(null);
+      setMergeCollectionDialog({ sourceId: id, displayName });
+    },
+    [canEdit]
+  );
+
+  const performMergeCollection = useCallback(
+    async (sourceId: string, targetId: string) => {
+      if (!canEdit) return;
+      if (sourceId === targetId) return;
+      const subtreeRoot = findCollectionById(collections, sourceId);
+      if (!subtreeRoot) return;
+
+      const merged = mergeCollectionSubtreeIntoTarget(
+        collections,
+        sourceId,
+        targetId
+      );
+      if (!merged) {
+        window.alert(c.errMergeCol);
+        return;
+      }
+      const { nextTree, movedCardIds } = merged;
+      const subtreeIds = collectSubtreeCollectionIds(subtreeRoot);
+
+      if (dataMode === "remote") {
+        const ok = await persistMergeCollectionsRemote(
+          nextTree,
+          targetId,
+          new Set(movedCardIds),
+          sourceId
+        );
+        if (!ok) {
+          window.alert(c.errMergeColSave);
+          return;
+        }
+      }
+
+      setCollections(nextTree);
+      if (subtreeIds.includes(activeId)) {
+        setActiveId(targetId);
+      }
+      if (subtreeIds.length > 0) {
+        setCollapsedFolderIds((prev) => {
+          const next = new Set(prev);
+          for (const sid of subtreeIds) next.delete(sid);
+          return next;
+        });
+        setFavoriteCollectionIds((prev) => {
+          const next = new Set(prev);
+          let changed = false;
+          for (const sid of subtreeIds) {
+            if (next.has(sid)) {
+              next.delete(sid);
+              changed = true;
+            }
+          }
+          if (!changed) return prev;
+          if (dataMode === "local") {
+            saveFavoriteCollectionIds(favoriteStorageKey, next);
+          } else if (canEdit) {
+            void putMeFavorites([...next]);
+          }
+          return next;
+        });
+      }
+    },
+    [
+      activeId,
+      canEdit,
+      collections,
+      dataMode,
+      favoriteStorageKey,
+      c.errMergeCol,
+      c.errMergeColSave,
+    ]
+  );
+
   const toggleFolderCollapsed = useCallback((folderId: string) => {
     setCollapsedFolderIds((prev) => {
       const next = new Set(prev);
@@ -2998,6 +3088,15 @@ export default function App() {
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [collectionDeleteDialog]);
+
+  useEffect(() => {
+    if (mergeCollectionDialog === null) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMergeCollectionDialog(null);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [mergeCollectionDialog]);
 
   useEffect(() => {
     if (cardMenuId === null) return;
@@ -4809,8 +4908,19 @@ export default function App() {
       />
       <CollectionContextMenu
         menu={collectionCtxMenu}
+        onMergeInto={(id, name) => {
+          openMergeCollectionDialog(id, name);
+        }}
         onRemove={(id, name, hasChildren) => {
           openRemoveCollectionDialog(id, name, hasChildren);
+        }}
+      />
+      <CollectionMergeDialog
+        dialog={mergeCollectionDialog}
+        collections={collections}
+        onClose={() => setMergeCollectionDialog(null)}
+        onConfirmMerge={(sourceId, targetId) => {
+          void performMergeCollection(sourceId, targetId);
         }}
       />
       <CollectionDeleteDialog

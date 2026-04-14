@@ -11,10 +11,15 @@ export type CollectionContextMenuState = {
 
 type Props = {
   menu: CollectionContextMenuState | null;
+  onMergeInto: (id: string, name: string) => void;
   onRemove: (id: string, name: string, hasChildren: boolean) => void;
 };
 
-export function CollectionContextMenu({ menu, onRemove }: Props) {
+export function CollectionContextMenu({
+  menu,
+  onMergeInto,
+  onRemove,
+}: Props) {
   const c = useAppChrome();
   if (!menu) return null;
   return createPortal(
@@ -25,13 +30,24 @@ export function CollectionContextMenu({ menu, onRemove }: Props) {
         position: "fixed",
         left: Math.min(
           menu.x,
-          typeof window !== "undefined" ? window.innerWidth - 160 : menu.x
+          typeof window !== "undefined" ? window.innerWidth - 180 : menu.x
         ),
         top: menu.y,
         zIndex: 10002,
       }}
       role="menu"
     >
+      <button
+        type="button"
+        className="attachment-ctx-menu__item"
+        role="menuitem"
+        onClick={(e) => {
+          e.stopPropagation();
+          onMergeInto(menu.id, menu.name);
+        }}
+      >
+        {c.uiMergeCollectionMenu}
+      </button>
       <button
         type="button"
         className="attachment-ctx-menu__item attachment-ctx-menu__item--danger"

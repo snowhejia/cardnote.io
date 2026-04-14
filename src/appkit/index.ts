@@ -22,6 +22,7 @@ export * from "./useRemoteCollectionsSync";
 export * from "./useCollectionsRemotePush";
 export * from "./CollectionContextMenu";
 export * from "./CollectionDeleteDialog";
+export * from "./CollectionMergeDialog";
 export * from "./UserAdminPage";
 export * from "./useUserAdmin";
 export * from "./useMobileNavSwipe";

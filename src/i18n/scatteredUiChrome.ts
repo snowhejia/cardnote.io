@@ -69,6 +69,15 @@ export type ScatteredUiChrome = {
   uiDragCollectionAria: string;
   uiDragCollectionTitle: string;
   uiDeleteCollectionMenu: string;
+  uiMergeCollectionMenu: string;
+  uiMergeCollectionDialogTitle: string;
+  /** 合并说明：参数为被合并的合集名称 */
+  uiMergeCollectionHint: (sourceName: string) => string;
+  uiMergeCollectionPickLabel: string;
+  uiMergeCollectionConfirm: string;
+  uiMergeCollectionNoTargets: string;
+  errMergeCol: string;
+  errMergeColSave: string;
   uiDeleteCollectionDialogTitle: string;
   uiDeleteCollectionWithSubtree: (name: string) => string;
   uiDeleteCollectionLeaf: (name: string) => string;
@@ -185,6 +194,15 @@ const zh: ScatteredUiChrome = {
   uiDragCollectionAria: "拖动调整合集顺序",
   uiDragCollectionTitle: "拖动调整顺序",
   uiDeleteCollectionMenu: "删除合集",
+  uiMergeCollectionMenu: "合并至…",
+  uiMergeCollectionDialogTitle: "合并到其他合集",
+  uiMergeCollectionHint: (sourceName) =>
+    `「${sourceName}」及其子文件夹里的笔记将全部移入下方所选合集，并移除空文件夹（不含回收站）。`,
+  uiMergeCollectionPickLabel: "目标合集",
+  uiMergeCollectionConfirm: "合并",
+  uiMergeCollectionNoTargets: "没有其他可合并到的合集。",
+  errMergeCol: "现在合并不了喔…换个目标或刷新再试？",
+  errMergeColSave: "合并没完全同步到云端…可刷新后再试或检查网络。",
   uiDeleteCollectionDialogTitle: "删除合集",
   uiDeleteCollectionWithSubtree: (name) =>
     `要连「${name}」带子文件夹一锅端吗？里面的笔记也会一起蒸发，救不回喔。`,
@@ -309,6 +327,16 @@ const en: ScatteredUiChrome = {
   uiDragCollectionAria: "Drag to reorder collections",
   uiDragCollectionTitle: "Drag to reorder",
   uiDeleteCollectionMenu: "Delete collection",
+  uiMergeCollectionMenu: "Merge into…",
+  uiMergeCollectionDialogTitle: "Merge into another collection",
+  uiMergeCollectionHint: (sourceName) =>
+    `All notes in “${sourceName}” (including subfolders) will move into the collection you pick below. Empty folders will be removed. Trash is unaffected.`,
+  uiMergeCollectionPickLabel: "Target collection",
+  uiMergeCollectionConfirm: "Merge",
+  uiMergeCollectionNoTargets: "No other collection to merge into.",
+  errMergeCol: "Couldn’t merge right now. Try another target or refresh.",
+  errMergeColSave:
+    "Merge didn’t fully sync. Check the network or refresh and try again.",
   uiDeleteCollectionDialogTitle: "Delete collection",
   uiDeleteCollectionWithSubtree: (name) =>
     `Delete “${name}” and all subfolders? Notes inside will be removed and can’t be restored.`,

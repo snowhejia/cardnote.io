@@ -265,6 +265,34 @@ export function findCardInTree(
   return { col, card };
 }
 
+/** 卡片跨合集移动后，修正其它笔记里指向 (fromColId, cardId) 的 relatedRefs */
+export function rewireRelatedRefsAfterCardsMoved(
+  cols: Collection[],
+  moves: { fromColId: string; toColId: string; cardId: string }[]
+): Collection[] {
+  if (moves.length === 0) return cols;
+  const key = (a: string, b: string) => `${a}\0${b}`;
+  const match = new Map<string, string>();
+  for (const m of moves) {
+    match.set(key(m.fromColId, m.cardId), m.toColId);
+  }
+  return mapEveryCard(cols, (_col, card) => {
+    const refs = card.relatedRefs;
+    if (!refs?.length) return card;
+    let changed = false;
+    const nextRefs = refs.map((r) => {
+      const to = match.get(key(r.colId, r.cardId));
+      if (to !== undefined && to !== r.colId) {
+        changed = true;
+        return { ...r, colId: to };
+      }
+      return r;
+    });
+    if (!changed) return card;
+    return { ...card, relatedRefs: nextRefs };
+  });
+}
+
 export function mapEveryCard(
   cols: Collection[],
   mapper: (col: Collection, card: NoteCard) => NoteCard
