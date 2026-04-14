@@ -576,8 +576,42 @@ function isLikelyHeifOrAvifContainer(buffer) {
 }
 
 /**
+ * HEIF/HEIC 常含多路「视频」轨：封面/缩略图 + 全尺寸主图。不指定 map 时 ffmpeg 可能只解到第一路小图。
+ * @param {string} ffmpeg
+ * @param {string} inputPath
+ * @param {string} outputPath
+ * @param {number} streamIndex
+ * @returns {Promise<boolean>}
+ */
+function runFfmpegHeifSingleStream(ffmpeg, inputPath, outputPath, streamIndex) {
+  return new Promise((resolve) => {
+    const child = spawn(
+      ffmpeg,
+      [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-i",
+        inputPath,
+        "-map",
+        `0:v:${streamIndex}`,
+        "-frames:v",
+        "1",
+        "-q:v",
+        "3",
+        outputPath,
+      ],
+      { stdio: "ignore" }
+    );
+    child.on("error", () => resolve(false));
+    child.on("close", (code) => resolve(code === 0));
+  });
+}
+
+/**
  * sharp/libvips 未带 libheif 时（常见 Linux 服务端）HEIC 会解码失败；
- * ffmpeg-static 多数构建带 heif demuxer，解一帧再统一为 JPEG。
+ * ffmpeg-static 多数构建带 heif demuxer，逐轨解一帧后取像素面积最大的一路，再统一为 JPEG。
  * @param {Buffer} buffer
  * @returns {Promise<{ buffer: Buffer; mimeType: string } | null>}
  */
@@ -586,36 +620,48 @@ async function tryHeifLikeToJpegViaFfmpeg(buffer) {
   if (typeof ffmpeg !== "string" || !ffmpeg || !buffer?.length) return null;
   const dir = await mkdtemp(join(tmpdir(), "mj-heif-"));
   const inputPath = join(dir, "in.heic");
-  const outputPath = join(dir, "out.jpg");
   try {
     await writeFile(inputPath, buffer);
-    await new Promise((resolve, reject) => {
-      const child = spawn(
+    let bestRaw = /** @type {Buffer | null} */ (null);
+    let bestArea = 0;
+    let hadFfmpegSuccess = false;
+    const maxStreams = 16;
+    for (let vi = 0; vi < maxStreams; vi++) {
+      const outputPath = join(dir, `out-${vi}.jpg`);
+      const ok = await runFfmpegHeifSingleStream(
         ffmpeg,
-        [
-          "-hide_banner",
-          "-loglevel",
-          "error",
-          "-y",
-          "-i",
-          inputPath,
-          "-frames:v",
-          "1",
-          "-q:v",
-          "3",
-          outputPath,
-        ],
-        { stdio: "ignore" }
+        inputPath,
+        outputPath,
+        vi
       );
-      child.on("error", reject);
-      child.on("close", (code) => {
-        if (code === 0) resolve();
-        else reject(new Error(`ffmpeg exit ${code}`));
-      });
-    });
-    const raw = await readFile(outputPath);
-    if (!raw.length) return null;
-    const jpeg = await sharp(raw)
+      if (!ok) {
+        if (hadFfmpegSuccess) break;
+        continue;
+      }
+      hadFfmpegSuccess = true;
+      let raw;
+      try {
+        raw = await readFile(outputPath);
+      } catch {
+        continue;
+      }
+      if (!raw.length) continue;
+      let meta;
+      try {
+        meta = await sharp(raw).rotate().metadata();
+      } catch {
+        continue;
+      }
+      const w = meta.width ?? 0;
+      const h = meta.height ?? 0;
+      const area = w * h;
+      if (area > bestArea) {
+        bestArea = area;
+        bestRaw = raw;
+      }
+    }
+    if (!bestRaw?.length) return null;
+    const jpeg = await sharp(bestRaw)
       .rotate()
       .jpeg({ quality: 88, mozjpeg: true })
       .toBuffer();
