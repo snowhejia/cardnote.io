@@ -138,6 +138,36 @@ function normalizeImagesPayload(raw) {
   return out;
 }
 
+/**
+ * 延伸线索会作为用户发给下游 AI 的提示语，不是 AI 反问用户；剔除面向读者的套话。
+ */
+function sanitizeExtensionSeedLine(s) {
+  let t = typeof s === "string" ? s.trim() : "";
+  if (!t) return t;
+  const banned = [
+    "你觉得",
+    "你认为",
+    "你怎么看",
+    "你是否觉得",
+    "你是否认为",
+    "对你来说",
+    "对你而言",
+    "请问你",
+    "你还能",
+    "你有没有觉得",
+    "有没有觉得",
+  ];
+  for (const ph of banned) {
+    t = t.split(ph).join("");
+  }
+  t = t
+    .replace(/^[，,、；;：:\s]+/, "")
+    .replace(/[，,]{2,}/g, "，")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+  return t;
+}
+
 function parseQuestionsJson(raw) {
   let s = (raw || "").trim();
   if (s.startsWith("```")) {
@@ -148,8 +178,8 @@ function parseQuestionsJson(raw) {
   if (!Array.isArray(arr)) throw new Error("no questions array");
   const questions = arr
     .filter((x) => typeof x === "string")
-    .map((x) => x.trim())
-    .filter(Boolean)
+    .map((x) => sanitizeExtensionSeedLine(x.trim()))
+    .filter((x) => x.length > 0)
     .slice(0, 5);
   if (questions.length < 5) {
     while (questions.length < 5) questions.push("…");
@@ -227,7 +257,10 @@ function fallbackQuestionsFromLines(raw) {
   const questions = [];
   for (const line of lines) {
     if (questions.length >= 5) break;
-    if (line.length > 8) questions.push(line);
+    if (line.length > 8) {
+      const cleaned = sanitizeExtensionSeedLine(line);
+      if (cleaned.length > 0) questions.push(cleaned);
+    }
   }
   while (questions.length < 5) questions.push("…");
   return { questions: questions.slice(0, 5) };
@@ -274,23 +307,24 @@ export async function runNoteAssist(payload) {
 
   if (task === "suggest_questions") {
     const sys =
-      `${weightHint}${visionHint} 你是写作与学习助手。根据笔记生成 5 条「延伸探索」：用户点选后会把该条交给 AI 做扩写——像在侧边栏里多挖一层，语气要**自然、好读**，接近「好奇地追问这个主题本身」，而不是公文条列。回复必须且仅为一个 JSON 对象，不要 Markdown 代码围栏，不要其它说明文字。键 questions 为长度恰好 5 的字符串数组（字段名仍为 questions 以兼容客户端）。
+      `${weightHint}${visionHint} 你是写作与学习助手。根据笔记生成 5 条「延伸探索」：**每一条都是用户即将粘贴给下游 AI 的写作提示/讨论主题**，用来让 AI 扩写分析——**不是**在问用户本人，所以不要出现任何面向读者的第二人称审问口吻。回复必须且仅为一个 JSON 对象，不要 Markdown 代码围栏，不要其它说明文字。键 questions 为长度恰好 5 的字符串数组（字段名仍为 questions 以兼容客户端）。
 
-**语气**：像朋友或专栏作者在随口往下问，用完整、顺口的中文；**不要** 每条都以「补充：」「对比：」「延伸：」这种同一模板开头；可穿插陈述句、从句、或针对主题本身的追问（追问的是**剧里/书里/事里怎么回事**，不是问读者「你」怎么想）。
+**人称与语气**：用**无主句、分析体、叙事体**，或「从…来看」「就…而言」「这种…如何…」；让读者感觉是在给 AI 布置一道**主题作文**，而不是在采访自己。**严禁**出现：你觉得、你认为、你怎么看、你是否、对你来说、对你而言、请问你、你最喜欢 等任何「你…」开头的追问读者。
 
-**具体性（极重要）**：若笔记出现**具体作品、人物、产品、事件**，优先锚定这些名字或「剧中」「这本书里」来写；少写空泛大类（如通篇只讲「偶像剧」却不提笔记里的那部剧）。至少 3 条要明显扣住笔记里的具体对象。
+**具体性（极重要）**：若笔记出现**具体作品、人物、产品、事件**，优先锚定这些名字或「剧中」「这本书里」来写；少写空泛大类。至少 3 条要明显扣住笔记里的具体对象。
 
-**开放 vs 考据（极重要）**：要**开放性问题**——便于展开观点、主题、象征、人物弧光、创作选择、与同类作品的对比、与观众经验的联结。**不要**出成封闭式「百科题」：追问**谁说的、第几集、原句一字不差、具体哪一场戏**之类只能靠检索回忆的事实；也避免「这句话是谁说的、当时什么情境」这种 trivia 口吻。若提到台词/名场面，应引向**为什么好笑/扎心、象征什么、和人物关系有何呼应**，而不是考观众记性。
+**开放 vs 考据（极重要）**：要**开放议题**——便于展开观点、主题、象征、人物弧光、创作选择、与同类作品对比。**不要**封闭式百科题（谁说的、第几集、原句一字不差）。若提到台词/名场面，引向意义与结构，而非考记性。
 
-禁止：把笔记作者称作「用户」「笔者」；禁止「你觉得」「你认为」「你最喜欢」等针对读者的主观追问；禁止问卷式排比。
+禁止：把笔记作者称作「用户」「笔者」；禁止问卷式排比。
 
 每条约 18～52 字为宜，五句之间句式要有变化。`;
-    const user = `${ctxBlock}\n\n请写 5 条延伸线索（中文），彼此角度不同，读起来要像参考工具里「I wonder…」那种——顺着当前笔记往外想深一层，但要是**开放讨论**，不是考据。
+    const user = `${ctxBlock}\n\n请写 5 条延伸线索（中文），彼此角度不同。每条都必须是**可交给 AI 直接扩写的主题句**，读起来像给模型下的 brief，**不要**像在问屏幕前的人。
 
-反例 A：五条都只谈「偶像剧叙事/服化道」却不提笔记里写的那部作品。
-反例 B：「这句名台词是谁说的、在什么情境？」「第几集出现的？」——封闭式事实题，不要。
+反例 A：通篇只谈「偶像剧」却不提笔记里的那部作品。
+反例 B：封闭式考据（谁说的、第几集）。
+反例 C（严禁）：「你觉得这种表演…？」「作为台偶，你觉得《放羊的星星》…？」——出现「你觉得」即不合格。
 
-正例（聊某部剧时）：「误会—和解反复出现，对观众情绪是在消耗还是在堆叠共鸣？」「赛车、珠宝这些设定，除了浪漫还提供哪些关于身份与野心的隐喻？」「和同年代台偶比，这部戏在节奏上最冒险的选择是什么、得失在哪？」
+正例：「从夸张表演与节奏看，这种喜剧风格如何塑造了该剧的辨识度」「误会—和解的反复使用，对叙事张力是在堆叠还是在消耗」「赛车与珠宝两条线索，除浪漫外还承载了哪些关于身份与野心的隐喻」
 
 严格输出 JSON：{"questions":["…","…","…","…","…"]}`;
     const raw = await generateWithContent(sys, user, images);
