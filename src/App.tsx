@@ -2918,8 +2918,7 @@ export default function App() {
       const subtreeIds = collectSubtreeCollectionIds(subtreeRoot);
 
       if (dataMode === "remote") {
-        const targetColForCount = findCollectionById(nextTree, targetId);
-        const totalSteps = (targetColForCount?.cards.length ?? 0) + 1;
+        const totalSteps = movedCardIds.length + 1;
         setCollectionMergeProgress({ current: 0, total: totalSteps });
         try {
           const ok = await persistMergeCollectionsRemote(

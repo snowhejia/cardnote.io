@@ -2,7 +2,6 @@ import {
   deleteCollectionApi,
   updateCardApi,
   updateCollectionApi,
-  type CardRemotePatch,
 } from "../api/collections";
 import type { Collection, NoteCard } from "../types";
 import {
@@ -95,7 +94,11 @@ export function mergeCollectionSubtreeIntoTarget(
   };
 }
 
-/** 云端：合并后写入卡片归属与排序，再删除空出的合集子树 */
+/**
+ * 云端：仅为「从源子树移入」的卡片 PATCH（collectionId + 在目标列表中的 sortOrder）。
+ * 合并时新卡接在目标原有卡片之后，原有卡片的顺序与 sort_order 在库中不变，无需重复请求。
+ * 最后 DELETE 被合并掉的空合集根。
+ */
 export async function persistMergeCollectionsRemote(
   nextTree: Collection[],
   targetColId: string,
@@ -106,18 +109,19 @@ export async function persistMergeCollectionsRemote(
   const targetCol = findCollectionById(nextTree, targetColId);
   if (!targetCol) return false;
 
-  const n = targetCol.cards.length;
-  const totalSteps = n + 1;
+  const totalSteps = movedCardIds.size + 1;
+  let done = 0;
 
-  for (let i = 0; i < n; i++) {
-    const card = targetCol.cards[i];
-    const patch: CardRemotePatch = { sortOrder: i };
-    if (movedCardIds.has(card.id)) {
-      patch.collectionId = targetColId;
-    }
-    const ok = await updateCardApi(card.id, patch);
+  for (let i = 0; i < targetCol.cards.length; i++) {
+    const card = targetCol.cards[i]!;
+    if (!movedCardIds.has(card.id)) continue;
+    const ok = await updateCardApi(card.id, {
+      sortOrder: i,
+      collectionId: targetColId,
+    });
     if (!ok) return false;
-    onProgress?.(i + 1, totalSteps);
+    done++;
+    onProgress?.(done, totalSteps);
   }
 
   const okDel = await deleteCollectionApi(sourceRootId);

@@ -207,7 +207,7 @@ const zh: ScatteredUiChrome = {
   errMergeColSave: "合并没完全同步到云端…可刷新后再试或检查网络。",
   uiMergeCollectionProgressTitle: "正在合并到云端…",
   uiMergeCollectionProgressLine: (current, total) =>
-    `同步进度 ${current} / ${total}`,
+    `进度 ${current} / ${total}`,
   uiDeleteCollectionDialogTitle: "删除合集",
   uiDeleteCollectionWithSubtree: (name) =>
     `要连「${name}」带子文件夹一锅端吗？里面的笔记也会一起蒸发，救不回喔。`,
