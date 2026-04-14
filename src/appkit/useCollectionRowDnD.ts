@@ -9,7 +9,6 @@ import type { AppDataMode } from "../appDataModeStorage";
 import type { Collection } from "../types";
 import {
   COLLECTION_DRAG_MIME,
-  countCollectionNodes,
   dropPositionFromEvent,
   moveCollectionInTree,
   persistCollectionTreeLayoutRemoteWithRetry,
@@ -43,9 +42,8 @@ export function useCollectionRowDnD(p: {
   draggingCollectionIdRef: MutableRefObject<string | null>;
   /** 拖拽放下时读取当前合集树（避免在 setState updater 里做异步保存） */
   getLatestCollections: () => Collection[];
-  /** 远程写入整树布局时的进度条（与右键「移动至」一致） */
+  /** 远程写入整树布局时的进度条（与右键「移动至」一致；total 由 persist 内首次回调给出） */
   onCollectionLayoutRemoteSync?: {
-    start: (total: number) => void;
     progress: (current: number, total: number) => void;
     end: () => void;
   };
@@ -195,16 +193,15 @@ export function useCollectionRowDnD(p: {
       if (next !== prev) {
         setCollections(next);
         if (dataMode === "remote" && canEdit) {
-          const totalNodes = countCollectionNodes(next);
-          onCollectionLayoutRemoteSync?.start(totalNodes);
           void (async () => {
             try {
               const ok = await persistCollectionTreeLayoutRemoteWithRetry(
                 next,
-                totalNodes > 0
+                onCollectionLayoutRemoteSync
                   ? (current, total) =>
-                      onCollectionLayoutRemoteSync?.progress(current, total)
-                  : undefined
+                      onCollectionLayoutRemoteSync.progress(current, total)
+                  : undefined,
+                prev
               );
               if (!ok) {
                 await resyncCollectionsFromRemote?.();

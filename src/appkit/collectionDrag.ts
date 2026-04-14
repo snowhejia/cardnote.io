@@ -276,6 +276,82 @@ export type PersistCollectionLayoutProgress = {
   onProgress: (current: number, total: number) => void;
 };
 
+/** 单层布局：每个合集在树中的 parentId 与同级 sortOrder（与 DB 一致） */
+export type CollectionLayoutEntry = {
+  parentId: string | null;
+  sortOrder: number;
+};
+
+function buildCollectionLayoutMap(
+  cols: Collection[]
+): Map<string, CollectionLayoutEntry> {
+  const m = new Map<string, CollectionLayoutEntry>();
+  function walk(nodes: Collection[], parentKey: string | null) {
+    nodes.forEach((n, i) => {
+      m.set(n.id, { parentId: parentKey, sortOrder: i });
+      if (n.children?.length) walk(n.children, n.id);
+    });
+  }
+  walk(cols, null);
+  return m;
+}
+
+/**
+ * 两棵树之间需要写入库的合集布局差量（仅 parentId / sortOrder 变化）。
+ * 用于拖拽/移动后只 PATCH 变更行，避免整棵树 N 次串行请求。
+ */
+export function diffCollectionLayoutPatches(
+  previousTree: Collection[],
+  nextTree: Collection[]
+): { id: string; parentId: string | null; sortOrder: number }[] {
+  const before = buildCollectionLayoutMap(previousTree);
+  const after = buildCollectionLayoutMap(nextTree);
+  const patches: {
+    id: string;
+    parentId: string | null;
+    sortOrder: number;
+  }[] = [];
+  for (const [id, pos] of after) {
+    const old = before.get(id);
+    if (!old) {
+      patches.push({ id, parentId: pos.parentId, sortOrder: pos.sortOrder });
+    } else if (
+      old.parentId !== pos.parentId ||
+      old.sortOrder !== pos.sortOrder
+    ) {
+      patches.push({ id, parentId: pos.parentId, sortOrder: pos.sortOrder });
+    }
+  }
+  return patches;
+}
+
+const LAYOUT_PATCH_CONCURRENCY = 8;
+
+async function persistCollectionLayoutPatchesRemote(
+  patches: { id: string; parentId: string | null; sortOrder: number }[],
+  onProgress?: (current: number, total: number) => void
+): Promise<boolean> {
+  const total = patches.length;
+  if (total === 0) return true;
+  onProgress?.(0, total);
+  let completed = 0;
+  for (let i = 0; i < patches.length; i += LAYOUT_PATCH_CONCURRENCY) {
+    const batch = patches.slice(i, i + LAYOUT_PATCH_CONCURRENCY);
+    const results = await Promise.all(
+      batch.map((p) =>
+        updateCollectionApi(p.id, {
+          parentId: p.parentId,
+          sortOrder: p.sortOrder,
+        })
+      )
+    );
+    if (results.some((ok) => !ok)) return false;
+    completed += batch.length;
+    onProgress?.(completed, total);
+  }
+  return true;
+}
+
 /** 远程模式：侧栏拖拽后的 parentId + 同级 sort_order 写入库 */
 export async function persistCollectionTreeLayoutRemote(
   nodes: Collection[],
@@ -307,18 +383,35 @@ export async function persistCollectionTreeLayoutRemote(
 
 /** 顺序 PATCH 偶发失败时整树再试一次，减少「排了一半就报错」 */
 export async function persistCollectionTreeLayoutRemoteWithRetry(
-  nodes: Collection[],
-  onProgress?: (current: number, total: number) => void
+  next: Collection[],
+  onProgress?: (current: number, total: number) => void,
+  /** 若传入移动/拖拽前的树，则只 PATCH 布局变化项并联请求；失败时再回退为整树顺序写 */
+  previousTree?: Collection[] | null
 ): Promise<boolean> {
-  const total = countCollectionNodes(nodes);
-  const progress =
-    onProgress && total > 0
-      ? { total, onProgress }
-      : undefined;
-  const run = () => persistCollectionTreeLayoutRemote(nodes, null, progress);
-  let ok = await run();
+  const runFullSequential = () => {
+    const total = countCollectionNodes(next);
+    if (total === 0) return Promise.resolve(true);
+    const progress =
+      onProgress && total > 0
+        ? { total, onProgress }
+        : undefined;
+    if (onProgress && total > 0) onProgress(0, total);
+    return persistCollectionTreeLayoutRemote(next, null, progress);
+  };
+
+  if (previousTree != null) {
+    const patches = diffCollectionLayoutPatches(previousTree, next);
+    if (patches.length === 0) return true;
+    let ok = await persistCollectionLayoutPatchesRemote(patches, onProgress);
+    if (ok) return true;
+    await new Promise((r) => setTimeout(r, 400));
+    ok = await runFullSequential();
+    return ok;
+  }
+
+  let ok = await runFullSequential();
   if (ok) return true;
   await new Promise((r) => setTimeout(r, 400));
-  ok = await run();
+  ok = await runFullSequential();
   return ok;
 }

@@ -151,7 +151,6 @@ import {
   mapCollectionById,
   mergeCollectionSubtreeIntoTarget,
   moveCollectionInTree,
-  countCollectionNodes,
   MOBILE_CHROME_MEDIA,
   matchesMobileChromeMedia,
   TABLET_WIDE_TOUCH_MEDIA,
@@ -365,15 +364,6 @@ export default function App() {
     } | null>(null);
   const collectionLayoutRemoteSync = useMemo(
     () => ({
-      start: (total: number) => {
-        if (total > 0) {
-          setCollectionCloudSyncProgress({
-            current: 0,
-            total,
-            variant: "layoutMove",
-          });
-        }
-      },
       progress: (current: number, total: number) => {
         setCollectionCloudSyncProgress({
           current,
@@ -3050,15 +3040,12 @@ export default function App() {
       }
 
       if (dataMode === "remote") {
-        const totalNodes = countCollectionNodes(next);
-        collectionLayoutRemoteSync.start(totalNodes);
         try {
           const ok = await persistCollectionTreeLayoutRemoteWithRetry(
             next,
-            totalNodes > 0
-              ? (current, total) =>
-                  collectionLayoutRemoteSync.progress(current, total)
-              : undefined
+            (current, total) =>
+              collectionLayoutRemoteSync.progress(current, total),
+            collections
           );
           if (!ok) {
             await resyncRemoteCollectionsTree();
