@@ -274,8 +274,16 @@ export async function runNoteAssist(payload) {
 
   if (task === "suggest_questions") {
     const sys =
-      `${weightHint}${visionHint} 你是学习助手，根据用户笔记生成延伸问题。回复必须且仅为一个 JSON 对象，不要 Markdown 代码围栏，不要其它说明文字。键 questions 为长度恰好 5 的字符串数组。每个问题用直接陈述式问句：就事论事、可客观作答；禁止「你觉得」「你认为」「你最喜欢」「对你来说」等把问题写成征求主观感受的措辞。`;
-    const user = `${ctxBlock}\n\n请根据以上内容生成 5 个相关的、具体可答的延伸问题（中文），句式宜简短直接，例如「剧中最好看或搞笑的情节或台词有哪些？」「该设定在剧情里如何体现？」；优先紧扣「当前笔记」正文，相关笔记仅在有明确关联时再体现。严格输出 JSON：{"questions":["…","…","…","…","…"]}`;
+      `${weightHint}${visionHint} 你是写作与学习助手。根据笔记生成 5 条「向外延伸的探索线索」：用户点选后会把该条交给 AI 做扩写/补充——不是在向用户提问，也不要求用户回答。回复必须且仅为一个 JSON 对象，不要 Markdown 代码围栏，不要其它说明文字。键 questions 为长度恰好 5 的字符串数组（语义上是延伸线索，字段名仍为 questions 以兼容客户端）。
+
+每条用简短中文，宜用「补充」「对比」「延伸」「常见误区」「落地步骤」「行业/竞品对照」等**扩展型**表述，帮读者把主题想深、想广；避免采访语气、避免句末一堆问号。
+
+禁止：反问用户、问卷口吻；禁止「用户」「笔者」「此人」等第三人称指代笔记作者；禁止「你觉得」「你认为」「你计划」「你准备」；禁止以「用户是否」「用户如何」「用户认为」开头。`;
+    const user = `${ctxBlock}\n\n请写 5 条互不重复、角度尽量不同的延伸线索（中文），每条约 12～40 字，像给 AI 的写作提示而非考题。优先紧扣「当前笔记」向外扩；相关笔记仅在有明确关联时一带而过。
+
+示例风格（勿照搬）：「补充：同类产品如何把阅读与任务流结合」「对比：收藏型笔记与输出型笔记的常见瓶颈」「延伸：个人时间管理里「工具」与「习惯」的分工」
+
+严格输出 JSON：{"questions":["…","…","…","…","…"]}`;
     const raw = await generateWithContent(sys, user, images);
     try {
       return parseQuestionsJson(raw);
@@ -317,8 +325,8 @@ export async function runNoteAssist(payload) {
       throw err;
     }
     const sys =
-      `${weightHint}${visionHint} 你是笔记学习助手，结合用户提供的笔记内容回答问题。只输出回答正文，不要重复整篇笔记。语言与问题一致（中文问题用中文答）。`;
-    const user = `${ctxBlock}\n\n【用户问题】\n${message}`;
+      `${weightHint}${visionHint} 你是笔记学习助手。用户输入可能是具体问题，也可能是一条「延伸线索」（短提示，用于扩写）。若是延伸线索，请结合笔记**直接展开成连贯正文**，不要把它当成反问、也不要再向用户提问。若是一般问题则正常作答。只输出正文，不要重复整篇笔记。语言与笔记一致时优先用中文。`;
+    const user = `${ctxBlock}\n\n【用户消息】\n${message}`;
     const text = await generateWithContent(sys, user, images);
     return { text: text.trim() };
   }
