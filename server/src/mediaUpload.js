@@ -564,6 +564,17 @@ export async function tryGenerateAvatarThumb(buffer, mimetype) {
   }
 }
 
+/**
+ * ISO BMFF：扩展名常为 .jpg/.jpeg，内容却是 HEIC（备忘录 / iOS 导出）
+ * @param {Buffer} buffer
+ */
+function isLikelyHeifOrAvifContainer(buffer) {
+  if (!buffer || buffer.length < 16) return false;
+  if (buffer.slice(4, 8).toString("ascii") !== "ftyp") return false;
+  const brand = buffer.slice(8, 12).toString("ascii");
+  return /^(heic|heix|hevc|hevx|mif1|msf1|avif)/i.test(brand);
+}
+
 /** 从扩展名推断 MIME（文件夹选入时浏览器常给空 File.type） */
 function inferMimeFromFilename(originalname) {
   const ext = safeExtFromOriginalName(
@@ -604,7 +615,9 @@ async function normalizeImageBufferForWeb(buffer, extRaw, mimetypeRaw) {
   if (m === "image/svg+xml") return null;
   if (!buffer || buffer.length < 16) return null;
 
-  const mustByExt = ["heic", "heif", "tif", "tiff"].includes(ext);
+  const mustByContainer = isLikelyHeifOrAvifContainer(buffer);
+  const mustByExt =
+    ["heic", "heif", "tif", "tiff"].includes(ext) || mustByContainer;
   const mustByMime =
     m === "image/tiff" || m.includes("heic") || m.includes("heif");
 
