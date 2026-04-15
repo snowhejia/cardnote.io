@@ -53,6 +53,10 @@ const ASSIST_REPLY_TONE_ZH =
 const ASSIST_STORY_FIRST_ZH =
   "若笔记或用户消息涉及影视剧、综艺、小说、动漫等叙述类内容，优先直接交代剧情与具体桥段：发生了什么事、关键转折、名场面里谁在做什么、人物关系用情节带出；少写社会影响、轰动一时、仍被津津乐道、观感、戏剧张力、为什么经典等泛评套话，也不要用作品内容当由头写空泛读后感。若延伸线索是演员表、台词梗、花絮、同类型推荐等，就按该线索给条目化信息与可查方向，不要答成泛泛作品评论。细节不确定时简短说明可能记错、建议核对，切勿编造具体人名与情节。";
 
+/** 用户明确要台词/名句时：必须给对白本身，不能用剧情梗概糊弄 */
+const ASSIST_LINES_WHEN_ASKED_ZH =
+  "若【用户消息】或延伸线索明确包含「台词」「对白」「经典句」「名句」「金句」「摘录」「整理台词」等意图，回答主体必须是逐条的具体台词或对白（可极短注明说话人或场景）；禁止用剧情梗概、角色小传、作品背景等大段替代本条需求。若担心措辞与播出稿不完全一致，开头用一句话说明「以下为常见流传/印象中的台词，个别字句可能与正片有出入」，仍须列出若干条对白，不要只写「可去网上搜台词」或仅介绍剧情。";
+
 /** 相关笔记：只参与「范围与缺口感」判断，不得把链接卡片内容写进回答 */
 const ASSIST_RELATED_SCOPE_ONLY_ZH =
   "上下文中的「相关笔记」摘录只供你判断当前主题是否还缺哪些信息维度、范围是否过窄，不得在回答中引用、复述、列举相关笔记里的原文、名句、段落或私密内容，不要单列一节「来自相关笔记」「相关名句联想」或类似表述。输出只围绕「当前笔记」本身，用通识或可查方向补足。";
@@ -412,7 +416,7 @@ export async function runNoteAssist(payload) {
       throw err;
     }
     const sys =
-      `${weightHint}${visionHint} 你是笔记学习助手，只输出正文，不要开场白套话。${ASSIST_PURPOSE_ZH} ${ASSIST_RELATED_SCOPE_ONLY_ZH} ${ASSIST_STORY_FIRST_ZH} ${ASSIST_REPLY_TONE_ZH} 总字数约 300～700 字为宜，以短段与「-」列表为主；不要用 # 标题、不要用星号加粗或 Markdown。`;
+      `${weightHint}${visionHint} 你是笔记学习助手，只输出正文，不要开场白套话。${ASSIST_PURPOSE_ZH} ${ASSIST_RELATED_SCOPE_ONLY_ZH} ${ASSIST_STORY_FIRST_ZH} ${ASSIST_LINES_WHEN_ASKED_ZH} ${ASSIST_REPLY_TONE_ZH} 总字数约 300～700 字为宜，以短段与「-」列表为主；不要用 # 标题、不要用星号加粗或 Markdown。`;
     const user = `${ctxBlock}\n\n${instr}`;
     const text = await generateWithContent(sys, user, images, {
       maxOutputTokens: 900,
@@ -429,7 +433,7 @@ export async function runNoteAssist(payload) {
       throw err;
     }
     const sys =
-      `${weightHint}${visionHint} 你是笔记学习助手。用户输入可能是具体问题，也可能是一条「延伸线索」。请补充与笔记相关的信息：要点、背景、对比、小知识、可进一步检索的方向；不要当成命题作文去扩写长文，不要重复整篇笔记，不要反问用户。${ASSIST_PURPOSE_ZH} ${ASSIST_RELATED_SCOPE_ONLY_ZH} ${ASSIST_STORY_FIRST_ZH} ${ASSIST_REPLY_TONE_ZH} 总字数约 350～800 字为宜，条目与短段优先。语言与笔记一致时优先用中文。不要使用 Markdown（不要用星号加粗、不要用 # 标题）。`;
+      `${weightHint}${visionHint} 你是笔记学习助手。用户输入可能是具体问题，也可能是一条「延伸线索」。请补充与笔记相关的信息：要点、背景、对比、小知识、可进一步检索的方向；不要当成命题作文去扩写长文，不要重复整篇笔记，不要反问用户。${ASSIST_PURPOSE_ZH} ${ASSIST_RELATED_SCOPE_ONLY_ZH} ${ASSIST_STORY_FIRST_ZH} ${ASSIST_LINES_WHEN_ASKED_ZH} ${ASSIST_REPLY_TONE_ZH} 总字数约 350～800 字为宜，条目与短段优先。语言与笔记一致时优先用中文。不要使用 Markdown（不要用星号加粗、不要用 # 标题）。`;
     const user = `${ctxBlock}\n\n【用户消息】\n${message}`;
     const text = await generateWithContent(sys, user, images, {
       maxOutputTokens: 900,
