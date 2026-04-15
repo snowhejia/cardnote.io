@@ -5519,6 +5519,14 @@ div.card__text--readonly:not(.card__text--preview) {
     padding: 10px 12px;
   }
 
+  /* 与 .sidebar__trash-hit 同字号与内边距（窄屏 / 触控侧栏） */
+  .sidebar__all-notes-hit {
+    font-size: 0.9375rem;
+    padding: 10px 12px;
+    border-radius: 6px;
+    min-height: auto;
+  }
+
   .sidebar__mobile-browse-action {
     font-size: 0.8125rem;
     height: 40px;
@@ -5885,6 +5893,10 @@ div.card__text--readonly:not(.card__text--preview) {
   .app--mobile-nav-open .sidebar__collections > .sidebar__favorites {
     padding-left: 0;
     padding-right: 0;
+    /* 月历在此态隐藏：与 .sidebar__trash / .sidebar__connections 同规格，隔开「全部笔记」与「收藏」 */
+    margin-top: 4px;
+    padding-top: 6px;
+    border-top: 1px solid rgba(55, 53, 47, 0.08);
     border-bottom: 1px solid rgba(55, 53, 47, 0.08);
     margin-bottom: 4px;
   }
@@ -5959,6 +5971,33 @@ div.card__text--readonly:not(.card__text--preview) {
     box-shadow: none;
     border-radius: 0;
     padding: 10px 16px;
+  }
+
+  /* 全屏抽屉内：「全部笔记」与「垃圾桶」同行高、同字重与左右留白 */
+  .app--mobile-nav-open .sidebar__all-notes-hit {
+    font-size: 0.9375rem;
+    font-weight: 500;
+    padding: 10px 16px;
+    border-radius: 0;
+    min-height: auto;
+  }
+
+  .app--mobile-nav-open .sidebar__all-notes-count {
+    min-width: 1.25rem;
+    padding: 2px 6px;
+    border-radius: 8px;
+    background: rgba(55, 53, 47, 0.1);
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.65rem;
+    font-weight: 600;
+    line-height: 1.2;
+    text-align: center;
+    color: rgba(55, 53, 47, 0.55);
+  }
+
+  .app--mobile-nav-open .sidebar__all-notes-hit.is-active .sidebar__all-notes-count {
+    background: rgba(55, 53, 47, 0.12);
+    color: rgba(55, 53, 47, 0.62);
   }
 
   .sidebar__header-row .sidebar__mobile-close {

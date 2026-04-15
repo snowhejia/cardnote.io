@@ -30,8 +30,51 @@ export function walkCollections(
 }
 
 /**
- * 以 server 树为准，把 local 各合集中「服务端尚无同 id」的卡片追加回去。
- * 用于首包种子 PUT 后立刻 GET：GET 若早于用户 POST 建卡完成，可避免乐观插入被整树覆盖而消失。
+ * 合并同一合集内的卡片列表：同 id 优先用服务端对象。
+ * - 若存在「仅本地已有、本包 GET 尚无」的 id（典型：乐观新建、POST 尚未进库）：**顺序跟本地**，
+ *   避免慢 GET 把新卡接在末尾再随下次同步顶上去而闪动。
+ * - 否则：**顺序跟服务端**（与历史行为一致，多设备 sort_order 一致）。
+ */
+function mergeCollectionCards(
+  serverCards: NoteCard[],
+  localCards: NoteCard[]
+): NoteCard[] {
+  const serverById = new Map(serverCards.map((c) => [c.id, c]));
+  const serverIdSet = new Set(serverCards.map((c) => c.id));
+  const hasPendingOnlyLocal = localCards.some((c) => !serverIdSet.has(c.id));
+
+  if (!hasPendingOnlyLocal) {
+    return serverCards;
+  }
+
+  const out: NoteCard[] = [];
+  const included = new Set<string>();
+
+  for (const lc of localCards) {
+    const s = serverById.get(lc.id);
+    if (s !== undefined) {
+      if (!included.has(s.id)) {
+        out.push(s);
+        included.add(s.id);
+      }
+    } else {
+      out.push(lc);
+      included.add(lc.id);
+    }
+  }
+  for (const s of serverCards) {
+    if (!included.has(s.id)) {
+      out.push(s);
+      included.add(s.id);
+    }
+  }
+  return out;
+}
+
+/**
+ * 以 server 树为准，把 local 各合集中「服务端尚无同 id」的卡片按**本地顺序**并回。
+ * 用于首包种子 PUT 后立刻 GET：GET 若早于用户 POST 建卡完成，可避免乐观插入被整树覆盖而消失，
+ * 且避免慢网时新卡先被画在列表底部再跳到顶部。
  */
 export function mergeServerTreeWithLocalExtraCards(
   serverTree: Collection[],
@@ -47,12 +90,11 @@ export function mergeServerTreeWithLocalExtraCards(
       ? col.children.map(mergeCol)
       : col.children;
     const localCol = localById.get(col.id);
-    let cards = col.cards ?? [];
-    if (localCol?.cards?.length) {
-      const haveIds = new Set(cards.map((c) => c.id));
-      const extra = (localCol.cards ?? []).filter((c) => !haveIds.has(c.id));
-      if (extra.length) cards = [...cards, ...extra];
-    }
+    const serverCards = col.cards ?? [];
+    const cards =
+      localCol?.cards?.length ?
+        mergeCollectionCards(serverCards, localCol.cards)
+      : serverCards;
     return {
       ...col,
       ...(mergedChildren !== undefined ? { children: mergedChildren } : {}),

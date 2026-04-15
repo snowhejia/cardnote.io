@@ -477,6 +477,9 @@ export default function App() {
   });
   const [connectionsViewActive, setConnectionsViewActive] = useState(() => {
     try {
+      if (typeof window !== "undefined" && matchesMobileChromeMedia()) {
+        return false;
+      }
       if (getAppDataMode() === "local") {
         const k = activeCollectionStorageKey("local", null);
         return (
@@ -492,6 +495,9 @@ export default function App() {
   /** 首次点开「笔记探索」后才扫描 relatedRefs，避免常驻全库遍历 */
   const [connectionsPrimed, setConnectionsPrimed] = useState(() => {
     try {
+      if (typeof window !== "undefined" && matchesMobileChromeMedia()) {
+        return false;
+      }
       if (getAppDataMode() === "local") {
         const k = activeCollectionStorageKey("local", null);
         return (
@@ -747,6 +753,13 @@ export default function App() {
     mq.addEventListener("change", onMq);
     return () => mq.removeEventListener("change", onMq);
   }, []);
+
+  /** 窄屏无「笔记探索」入口：从桌面切入窄屏或误入探索态时回到全部笔记 */
+  useEffect(() => {
+    if (!narrowUi || !connectionsViewActive) return;
+    setConnectionsViewActive(false);
+    setAllNotesViewActive(true);
+  }, [narrowUi, connectionsViewActive]);
 
   useEffect(() => {
     const mq = window.matchMedia(TABLET_WIDE_TOUCH_MEDIA);
@@ -1300,12 +1313,21 @@ export default function App() {
           setConnectionsViewActive(false);
         });
       } else if (raw === PERSISTED_WORKSPACE_CONNECTIONS) {
-        flushSync(() => {
-          setConnectionsViewActive(true);
-          setConnectionsPrimed(true);
-          setAllNotesViewActive(false);
-          setRemindersViewActive(false);
-        });
+        if (matchesMobileChromeMedia()) {
+          flushSync(() => {
+            setConnectionsViewActive(false);
+            setConnectionsPrimed(false);
+            setAllNotesViewActive(true);
+            setRemindersViewActive(false);
+          });
+        } else {
+          flushSync(() => {
+            setConnectionsViewActive(true);
+            setConnectionsPrimed(true);
+            setAllNotesViewActive(false);
+            setRemindersViewActive(false);
+          });
+        }
       }
     } catch {
       /* ignore */
@@ -4033,30 +4055,34 @@ export default function App() {
           </div>
         ) : null}
 
-        <div className="sidebar__all-notes sidebar__connections">
-          <button
-            type="button"
-            className={
-              "sidebar__all-notes-hit" +
-              (connectionsViewActive && !searchActive ? " is-active" : "")
-            }
-            onClick={() => {
-              setTrashViewActive(false);
-              setCalendarDay(null);
-              setSearchQuery("");
-              setSearchBarOpen(false);
-              setConnectionsPrimed(true);
-              setConnectionsViewActive(true);
-              setMobileNavOpen(false);
-            }}
-          >
-            <SidebarNavExploreIcon className="sidebar__nav-pillar-icon" />
-            <span className="sidebar__all-notes-label">{c.connectionsEntry}</span>
-            <span className="sidebar__all-notes-count">
-              {connectionsPrimed ? connectionEdges.length : "–"}
-            </span>
-          </button>
-        </div>
+        {!narrowUi ? (
+          <div className="sidebar__all-notes sidebar__connections">
+            <button
+              type="button"
+              className={
+                "sidebar__all-notes-hit" +
+                (connectionsViewActive && !searchActive ? " is-active" : "")
+              }
+              onClick={() => {
+                setTrashViewActive(false);
+                setCalendarDay(null);
+                setSearchQuery("");
+                setSearchBarOpen(false);
+                setConnectionsPrimed(true);
+                setConnectionsViewActive(true);
+                setMobileNavOpen(false);
+              }}
+            >
+              <SidebarNavExploreIcon className="sidebar__nav-pillar-icon" />
+              <span className="sidebar__all-notes-label">
+                {c.connectionsEntry}
+              </span>
+              <span className="sidebar__all-notes-count">
+                {connectionsPrimed ? connectionEdges.length : "–"}
+              </span>
+            </button>
+          </div>
+        ) : null}
 
         <div
           className={
