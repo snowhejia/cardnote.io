@@ -2,6 +2,7 @@ import dotenv from "dotenv";
 import express from "express";
 import cors from "cors";
 import jwt from "jsonwebtoken";
+import { createHash } from "crypto";
 import { access } from "fs/promises";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
@@ -1239,6 +1240,75 @@ const COS_READ_SIGN_EXPIRES_SEC = Math.min(
   )
 );
 
+const CDN_TOKEN_AUTH_ENABLED = /^(1|true|yes|on)$/i.test(
+  String(
+    process.env.CDN_TOKEN_AUTH_ENABLED ??
+      process.env.CDN_AUTH_ENABLED ??
+      ""
+  ).trim()
+);
+const CDN_TOKEN_PRIMARY_KEY = String(
+  process.env.CDN_TOKEN_AUTH_PRIMARY_KEY ??
+    process.env.CDN_AUTH_PRIMARY_KEY ??
+    process.env.CDN_TOKEN_AUTH_KEY ??
+    process.env.CDN_AUTH_KEY ??
+    ""
+).trim();
+const CDN_TOKEN_EXPIRES_SEC = Math.min(
+  86400 * 7,
+  Math.max(
+    60,
+    Number(
+      process.env.CDN_TOKEN_AUTH_EXPIRES_SEC ??
+        process.env.CDN_AUTH_EXPIRES_SEC ??
+        COS_READ_SIGN_EXPIRES_SEC
+    ) || COS_READ_SIGN_EXPIRES_SEC
+  )
+);
+const CDN_TOKEN_QUERY_SECRET_KEY = String(
+  process.env.CDN_TOKEN_AUTH_SECRET_PARAM ??
+    process.env.CDN_AUTH_SECRET_PARAM ??
+    "txSecret"
+).trim();
+const CDN_TOKEN_QUERY_TIME_KEY = String(
+  process.env.CDN_TOKEN_AUTH_TIME_PARAM ??
+    process.env.CDN_AUTH_TIME_PARAM ??
+    "txTime"
+).trim();
+const CDN_TOKEN_TIME_HEX = !/^(0|false|no|off)$/i.test(
+  String(
+    process.env.CDN_TOKEN_AUTH_TIME_HEX ??
+      process.env.CDN_AUTH_TIME_HEX ??
+      "1"
+  ).trim()
+);
+
+function buildCdnTokenAuthUrl(baseUrl, objectPath, expiresSec) {
+  if (!CDN_TOKEN_AUTH_ENABLED || !CDN_TOKEN_PRIMARY_KEY) return null;
+  if (!baseUrl || !/^https?:\/\//i.test(baseUrl)) return null;
+  const nowSec = Math.floor(Date.now() / 1000);
+  const expSec = nowSec + Math.max(60, Number(expiresSec) || CDN_TOKEN_EXPIRES_SEC);
+  const tokenTime = CDN_TOKEN_TIME_HEX
+    ? expSec.toString(16).toUpperCase()
+    : String(expSec);
+  const pathForSign =
+    typeof objectPath === "string" && objectPath.startsWith("/")
+      ? objectPath
+      : `/${String(objectPath || "").replace(/^\/+/, "")}`;
+  const token = createHash("md5")
+    .update(`${CDN_TOKEN_PRIMARY_KEY}${tokenTime}${pathForSign}`)
+    .digest("hex");
+  let u;
+  try {
+    u = new URL(baseUrl);
+  } catch {
+    return null;
+  }
+  u.searchParams.set(CDN_TOKEN_QUERY_SECRET_KEY, token);
+  u.searchParams.set(CDN_TOKEN_QUERY_TIME_KEY, tokenTime);
+  return u.toString();
+}
+
 /** 大于此字节数时用 COS 分片并行上传（每片大小） */
 const MULTIPART_MIN_BYTES = 8 * 1024 * 1024;
 const MULTIPART_PART_BYTES = 8 * 1024 * 1024;
@@ -1269,6 +1339,15 @@ app.get("/api/upload/cos-read", (req, res, next) => {
     }
     if (!canSessionReadCosObjectKey(key, req.jwtSession)) {
       return res.status(403).json({ error: "无权访问该对象" });
+    }
+    const publicUrl = buildObjectPublicUrl(key);
+    const cdnAuthedUrl = buildCdnTokenAuthUrl(
+      publicUrl,
+      `/${key.replace(/^\/+/, "")}`,
+      CDN_TOKEN_EXPIRES_SEC
+    );
+    if (cdnAuthedUrl) {
+      return res.json({ url: cdnAuthedUrl, expiresIn: CDN_TOKEN_EXPIRES_SEC });
     }
     const signedUrl = await getCosGetPresignedUrl(key, COS_READ_SIGN_EXPIRES_SEC);
     res.json({ url: signedUrl, expiresIn: COS_READ_SIGN_EXPIRES_SEC });
