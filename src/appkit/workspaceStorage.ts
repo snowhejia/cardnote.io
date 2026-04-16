@@ -12,6 +12,10 @@ export const PERSISTED_WORKSPACE_REMINDERS = "__mikujar_workspace_reminders__";
 /** 主区为「笔记探索」 */
 export const PERSISTED_WORKSPACE_CONNECTIONS = "__mikujar_workspace_connections__";
 
+/** 主区为「所有附件」 */
+export const PERSISTED_WORKSPACE_ALL_ATTACHMENTS =
+  "__mikujar_workspace_all_attachments__";
+
 export function activeCollectionStorageKey(
   mode: AppDataMode,
   userId: string | null

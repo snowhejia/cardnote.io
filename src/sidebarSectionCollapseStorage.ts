@@ -1,6 +1,8 @@
 import type { AppDataMode } from "./appDataModeStorage";
 
 export type SidebarSectionCollapseState = {
+  /** 侧栏「全部笔记 / 待办 / 笔记探索 / 所有附件」整块 */
+  features: boolean;
   calendar: boolean;
   favorites: boolean;
   collections: boolean;
@@ -9,6 +11,7 @@ export type SidebarSectionCollapseState = {
 
 export function defaultSidebarSectionCollapseState(): SidebarSectionCollapseState {
   return {
+    features: false,
     calendar: false,
     favorites: false,
     collections: false,
@@ -40,6 +43,7 @@ export function readSidebarSectionsCollapsed(
     if (!raw) return defaultState();
     const o = JSON.parse(raw) as Partial<SidebarSectionCollapseState>;
     return {
+      features: Boolean(o.features),
       calendar: Boolean(o.calendar),
       favorites: Boolean(o.favorites),
       collections: Boolean(o.collections),

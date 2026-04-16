@@ -39,10 +39,6 @@ BEGIN
     UPDATE cards
     SET media = replace(media::text, old_root, cdn_base)::jsonb
     WHERE media::text LIKE '%' || old_root || '%';
-
-    UPDATE trashed_notes
-    SET card = replace(card::text, old_root, cdn_base)::jsonb
-    WHERE card::text LIKE '%' || old_root || '%';
   END LOOP;
 END $$;
 

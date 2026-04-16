@@ -119,7 +119,7 @@ export async function updateCollectionApi(
   }
 }
 
-/** 删除合集（级联删子集和所有卡片） */
+/** 删除合集（子集级联；笔记不删，仅从该合集移除归属） */
 export async function deleteCollectionApi(id: string): Promise<boolean> {
   const base = apiBase();
   try {
@@ -185,6 +185,8 @@ export type CardRemotePatch = Partial<
   reminderCompletedAt?: string | null;
   /** 完成时快照的提醒备注；传 null 清除 */
   reminderCompletedNote?: string | null;
+  /** 更新置顶、排序或移动归属时必填：指哪一条「合集内出现」 */
+  placementCollectionId?: string;
   collectionId?: string;
   sortOrder?: number;
 };

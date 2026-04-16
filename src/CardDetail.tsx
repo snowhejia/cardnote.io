@@ -117,6 +117,8 @@ export interface CardDetailProps {
   onTogglePin: () => void;
   /** 打开提醒日期选择（与列表卡片「⋯」一致） */
   onOpenReminderPicker?: () => void;
+  /** 与列表卡片「⋯」一致：添加至其它合集（本地数据） */
+  onOpenAddToCollection?: () => void;
   onDelete: () => void;
   onChangeText: (html: string) => void;
   onTagsCommit: (colId: string, cardId: string, tags: string[]) => void;
@@ -143,6 +145,7 @@ export function CardDetail({
   onClearMedia,
   onTogglePin,
   onOpenReminderPicker,
+  onOpenAddToCollection,
   onDelete,
   onChangeText,
   onTagsCommit,
@@ -378,6 +381,19 @@ export function CardDetail({
                         >
                           {c.uiRelatedNotes}
                         </button>
+                        {canEdit && onOpenAddToCollection ? (
+                          <button
+                            type="button"
+                            className="card__menu-item"
+                            role="menuitem"
+                            onClick={() => {
+                              onOpenAddToCollection();
+                              setCardMenuId(null);
+                            }}
+                          >
+                            {c.cardMenuAddToCollection}
+                          </button>
+                        ) : null}
                         {canEdit && canAttachMedia ? (
                           <button
                             type="button"

@@ -60,7 +60,12 @@ export function mergeCollectionSubtreeIntoTarget(
   cols: Collection[],
   sourceRootId: string,
   targetColId: string
-): { nextTree: Collection[]; movedCardIds: string[] } | null {
+): {
+  nextTree: Collection[];
+  movedCardIds: string[];
+  /** 每张卡原所在合集 id，供云端 PATCH 归属 */
+  moves: { cardId: string; fromColId: string }[];
+} | null {
   if (sourceRootId === targetColId) return null;
   const sourceNode = findCollectionById(cols, sourceRootId);
   const targetNode = findCollectionById(cols, targetColId);
@@ -91,6 +96,10 @@ export function mergeCollectionSubtreeIntoTarget(
   return {
     nextTree: tree,
     movedCardIds: extracted.map((c) => c.id),
+    moves: items.map((it) => ({
+      cardId: it.card.id,
+      fromColId: it.colId,
+    })),
   };
 }
 
@@ -104,10 +113,13 @@ export async function persistMergeCollectionsRemote(
   targetColId: string,
   movedCardIds: Set<string>,
   sourceRootId: string,
+  moves: { cardId: string; fromColId: string }[],
   onProgress?: (current: number, total: number) => void
 ): Promise<boolean> {
   const targetCol = findCollectionById(nextTree, targetColId);
   if (!targetCol) return false;
+
+  const fromByCard = new Map(moves.map((m) => [m.cardId, m.fromColId]));
 
   const totalSteps = movedCardIds.size + 1;
   let done = 0;
@@ -115,9 +127,12 @@ export async function persistMergeCollectionsRemote(
   for (let i = 0; i < targetCol.cards.length; i++) {
     const card = targetCol.cards[i]!;
     if (!movedCardIds.has(card.id)) continue;
+    const fromColId = fromByCard.get(card.id);
+    if (!fromColId) return false;
     const ok = await updateCardApi(card.id, {
       sortOrder: i,
       collectionId: targetColId,
+      placementCollectionId: fromColId,
     });
     if (!ok) return false;
     done++;

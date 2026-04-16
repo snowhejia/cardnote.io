@@ -66,7 +66,8 @@ import {
   listFavoriteCollectionIds,
   replaceFavoriteCollectionIds,
   listTrashedNotes,
-  insertTrashedNote,
+  softTrashCard,
+  restoreTrashedCard,
   deleteTrashedNote,
   clearTrashedNotes,
 } from "./storage-pg.js";
@@ -1059,7 +1060,7 @@ app.patch("/api/collections/:id", collectionsWriterMw, async (req, res) => {
   }
 });
 
-/** DELETE /api/collections/:id — 删除合集（级联删子集和卡片） */
+/** DELETE /api/collections/:id — 删除合集（子集级联；笔记仅从该合集移除，仍保留在库中 / 全部笔记） */
 app.delete("/api/collections/:id", collectionsWriterMw, async (req, res) => {
   try {
     await deleteCollection(getUserId(req), req.params.id);
@@ -1166,32 +1167,63 @@ app.get("/api/me/trash", preferencesReaderMw, async (req, res) => {
 app.post("/api/me/trash", preferencesWriterMw, async (req, res) => {
   try {
     const b = req.body ?? {};
-    const trashId = typeof b.trashId === "string" ? b.trashId.trim() : "";
     const colId = typeof b.colId === "string" ? b.colId.trim() : "";
     const colPathLabel = typeof b.colPathLabel === "string" ? b.colPathLabel : "";
     const card = b.card;
     const deletedAt = typeof b.deletedAt === "string" ? b.deletedAt : undefined;
-    if (!trashId || !colId || !card || typeof card !== "object") {
+    const cardId =
+      card && typeof card === "object" && typeof card.id === "string"
+        ? card.id.trim()
+        : "";
+    if (!colId || !cardId || !card || typeof card !== "object") {
       return res.status(400).json({ error: "无效的回收站条目" });
     }
     const key = preferencesOwnerKey(req);
     if (adminGateEnabled && !key) {
       return res.status(401).json({ error: "未授权", code: "PUT_AUTH" });
     }
-    await insertTrashedNote(key, {
-      trashId,
+    await softTrashCard(key, {
       colId,
       colPathLabel,
-      card,
+      cardId,
       deletedAt,
     });
     notifyCollectionsSync(req);
     res.status(201).json({ ok: true });
   } catch (e) {
     console.error(e);
-    const dup = e.code === "23505";
-    const status = dup ? 409 : 400;
-    res.status(status).json({ error: e.message || "写入失败" });
+    res.status(400).json({ error: e.message || "写入失败" });
+  }
+});
+
+app.post("/api/me/trash/restore", preferencesWriterMw, async (req, res) => {
+  try {
+    const b = req.body ?? {};
+    const cardId = typeof b.cardId === "string" ? b.cardId.trim() : "";
+    const targetCollectionId =
+      typeof b.targetCollectionId === "string"
+        ? b.targetCollectionId.trim()
+        : "";
+    const insertAtStart = Boolean(b.insertAtStart);
+    if (!cardId || !targetCollectionId) {
+      return res.status(400).json({ error: "缺少 cardId 或 targetCollectionId" });
+    }
+    const key = preferencesOwnerKey(req);
+    if (adminGateEnabled && !key) {
+      return res.status(401).json({ error: "未授权", code: "PUT_AUTH" });
+    }
+    const card = await restoreTrashedCard(
+      key,
+      cardId,
+      targetCollectionId,
+      insertAtStart
+    );
+    notifyCollectionsSync(req);
+    res.json({ ok: true, card });
+  } catch (e) {
+    console.error(e);
+    const status = e.message?.includes("不存在") ? 404 : 400;
+    res.status(status).json({ error: e.message || "恢复失败" });
   }
 });
 

@@ -85,9 +85,13 @@ export async function persistNoteCardDropToRemote(
 
   for (let idx = 0; idx < toCol.cards.length; idx++) {
     const c = toCol.cards[idx];
-    const patch: CardRemotePatch = { sortOrder: idx };
+    const patch: CardRemotePatch = {
+      sortOrder: idx,
+      placementCollectionId: toColId,
+    };
     if (c.id === movedId && fromColId !== toColId) {
       patch.collectionId = toColId;
+      patch.placementCollectionId = fromColId;
     }
     const ok = await updateCardApi(c.id, patch);
     if (!ok) return false;
@@ -97,6 +101,7 @@ export async function persistNoteCardDropToRemote(
     for (let idx = 0; idx < fromCol.cards.length; idx++) {
       const ok = await updateCardApi(fromCol.cards[idx].id, {
         sortOrder: idx,
+        placementCollectionId: fromColId,
       });
       if (!ok) return false;
     }

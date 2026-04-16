@@ -91,6 +91,8 @@ export type NoteTimelineCardProps = {
   deleteCard: (colId: string, cardId: string) => void;
   setCardText: (colId: string, cardId: string, text: string) => void;
   setCardTags: (colId: string, cardId: string, tags: string[]) => void;
+  /** 打开「添加至合集」选择器（本地数据；远端模式内会提示不可用） */
+  openAddToCollectionPicker: (colId: string, cardId: string) => void;
   /** 时间线列数（用于大屏触控平板 1 列时附件与正文左右分栏） */
   timelineColumnCount: number;
   /** MasonryShortestColumns 注入，须落到根 li 供量高 */
@@ -130,6 +132,7 @@ export function NoteTimelineCard(p: NoteTimelineCardProps) {
     deleteCard,
     setCardText,
     setCardTags,
+    openAddToCollectionPicker,
     timelineColumnCount,
     "data-masonry-slot": dataMasonrySlot,
   } = p;
@@ -403,6 +406,18 @@ export function NoteTimelineCard(p: NoteTimelineCardProps) {
                     >
                       {c.uiRelatedNotes}
                     </button>
+                    {canEdit ? (
+                      <button
+                        type="button"
+                        className="card__menu-item"
+                        role="menuitem"
+                        onClick={() => {
+                          openAddToCollectionPicker(colId, card.id);
+                        }}
+                      >
+                        {c.cardMenuAddToCollection}
+                      </button>
+                    ) : null}
                     {canEdit && canAttachMedia ? (
                       <button
                         type="button"

@@ -1,5 +1,5 @@
 /**
- * 邮箱 + 6 位验证码注册；验证码存 PostgreSQL，SMTP 发信（见 mail.js）。
+ * 邮箱 + 6 位验证码注册；验证码存 PostgreSQL `email_verification_codes`（kind=registration），SMTP 发信（见 mail.js）。
  */
 import { randomInt } from "crypto";
 import bcrypt from "bcryptjs";
@@ -58,9 +58,10 @@ export async function sendRegistrationCode(emailRaw, ip) {
   const expiresAt = new Date(Date.now() + CODE_TTL_MS);
 
   await query(
-    `INSERT INTO email_registration_codes (email, code_hash, expires_at)
-     VALUES ($1, $2, $3)
-     ON CONFLICT (email) DO UPDATE SET
+    `INSERT INTO email_verification_codes (kind, subject_key, email, code_hash, expires_at, user_id)
+     VALUES ('registration', $1, $1, $2, $3, NULL)
+     ON CONFLICT (kind, subject_key) DO UPDATE SET
+       email = EXCLUDED.email,
        code_hash = EXCLUDED.code_hash,
        expires_at = EXCLUDED.expires_at,
        created_at = now()`,
@@ -95,21 +96,28 @@ export async function completeRegistration(body) {
     typeof body?.displayName === "string" ? body.displayName : "";
 
   const res = await query(
-    "SELECT code_hash, expires_at FROM email_registration_codes WHERE email = $1",
+    `SELECT code_hash, expires_at FROM email_verification_codes
+     WHERE kind = 'registration' AND subject_key = $1`,
     [emailNorm]
   );
   const row = res.rows[0];
   if (!row) throw new Error("请先获取验证码");
 
   if (new Date(row.expires_at) < new Date()) {
-    await query("DELETE FROM email_registration_codes WHERE email = $1", [emailNorm]);
+    await query(
+      `DELETE FROM email_verification_codes WHERE kind = 'registration' AND subject_key = $1`,
+      [emailNorm]
+    );
     throw new Error("验证码已过期，请重新获取");
   }
 
   const match = await bcrypt.compare(code, row.code_hash);
   if (!match) throw new Error("验证码不正确");
 
-  await query("DELETE FROM email_registration_codes WHERE email = $1", [emailNorm]);
+  await query(
+    `DELETE FROM email_verification_codes WHERE kind = 'registration' AND subject_key = $1`,
+    [emailNorm]
+  );
 
   return createUserWithEmail({
     email: emailNorm,

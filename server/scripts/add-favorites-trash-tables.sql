@@ -1,12 +1,5 @@
--- 已有库增量：星标合集 + 垃圾桶表（幂等）
-CREATE TABLE IF NOT EXISTS user_favorite_collections (
-  owner_key      TEXT NOT NULL,
-  collection_id  TEXT NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
-  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-  PRIMARY KEY (owner_key, collection_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_user_fav_col_owner ON user_favorite_collections(owner_key);
+-- 已有库增量（幂等）。星标已并入 collections.is_favorite / favorite_sort，请用 npm run db:migrate。
+-- 本文件仅保留垃圾桶表，供极老环境手工执行时参考。
 
 CREATE TABLE IF NOT EXISTS trashed_notes (
   trash_id       TEXT PRIMARY KEY,

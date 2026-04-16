@@ -23,6 +23,7 @@ export type CollectionSidebarTreeProps = {
   trashViewActive: boolean;
   allNotesViewActive: boolean;
   connectionsViewActive: boolean;
+  attachmentsViewActive: boolean;
   remindersViewActive: boolean;
   collapsedFolderIds: Set<string>;
   dropIndicator: {
@@ -60,6 +61,7 @@ export type CollectionSidebarTreeProps = {
   setTrashViewActive: Dispatch<SetStateAction<boolean>>;
   setAllNotesViewActive: Dispatch<SetStateAction<boolean>>;
   setConnectionsViewActive: Dispatch<SetStateAction<boolean>>;
+  setAttachmentsViewActive: Dispatch<SetStateAction<boolean>>;
   setRemindersViewActive: Dispatch<SetStateAction<boolean>>;
   setCalendarDay: Dispatch<SetStateAction<string | null>>;
   setActiveId: Dispatch<SetStateAction<string>>;
@@ -80,6 +82,7 @@ function CollectionTreeRows(p: CollectionSidebarTreeProps): ReactNode {
     trashViewActive,
     allNotesViewActive,
     connectionsViewActive,
+    attachmentsViewActive,
     remindersViewActive,
     collapsedFolderIds,
     dropIndicator,
@@ -105,6 +108,7 @@ function CollectionTreeRows(p: CollectionSidebarTreeProps): ReactNode {
     setTrashViewActive,
     setAllNotesViewActive,
     setConnectionsViewActive,
+    setAttachmentsViewActive,
     setRemindersViewActive,
     setCalendarDay,
     setActiveId,
@@ -142,6 +146,7 @@ function CollectionTreeRows(p: CollectionSidebarTreeProps): ReactNode {
             !trashViewActive &&
             !allNotesViewActive &&
             !connectionsViewActive &&
+            !attachmentsViewActive &&
             !remindersViewActive
               ? " is-active"
               : "") +
@@ -219,6 +224,7 @@ function CollectionTreeRows(p: CollectionSidebarTreeProps): ReactNode {
               setTrashViewActive(false);
               setAllNotesViewActive(false);
               setConnectionsViewActive(false);
+              setAttachmentsViewActive(false);
               setRemindersViewActive(false);
               setCalendarDay(null);
               expandAncestorsOf(c.id);
@@ -232,6 +238,7 @@ function CollectionTreeRows(p: CollectionSidebarTreeProps): ReactNode {
                 setTrashViewActive(false);
                 setAllNotesViewActive(false);
                 setConnectionsViewActive(false);
+                setAttachmentsViewActive(false);
                 setRemindersViewActive(false);
                 setCalendarDay(null);
                 expandAncestorsOf(c.id);

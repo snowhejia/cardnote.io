@@ -40,18 +40,37 @@ const STEPS = [
     sql: `ALTER TABLE collections ADD COLUMN IF NOT EXISTS hint TEXT NOT NULL DEFAULT ''`,
   },
   {
-    label: "user_favorite_collections（星标合集）",
+    label:
+      "collections.is_favorite / favorite_sort（星标并入合集表；迁移旧 junction）",
     sql: `
-CREATE TABLE IF NOT EXISTS user_favorite_collections (
-  owner_key      TEXT NOT NULL,
-  collection_id  TEXT NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
-  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-  PRIMARY KEY (owner_key, collection_id)
-)`,
-  },
-  {
-    label: "idx_user_fav_col_owner",
-    sql: `CREATE INDEX IF NOT EXISTS idx_user_fav_col_owner ON user_favorite_collections(owner_key)`,
+ALTER TABLE collections ADD COLUMN IF NOT EXISTS is_favorite BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE collections ADD COLUMN IF NOT EXISTS favorite_sort INTEGER NULL;
+
+CREATE INDEX IF NOT EXISTS idx_collections_user_favorites
+  ON collections (user_id, favorite_sort)
+  WHERE is_favorite = true;
+
+DO $$
+BEGIN
+  IF to_regclass('public.user_favorite_collections') IS NOT NULL THEN
+    UPDATE collections c
+    SET is_favorite = true,
+        favorite_sort = s.rn
+    FROM (
+      SELECT ufc.collection_id,
+             (ROW_NUMBER() OVER (PARTITION BY ufc.owner_key ORDER BY ufc.created_at ASC) - 1)::int AS rn,
+             ufc.owner_key
+      FROM user_favorite_collections ufc
+    ) s
+    WHERE c.id = s.collection_id
+      AND (
+        (s.owner_key = '__single__' AND c.user_id IS NULL)
+        OR (c.user_id IS NOT NULL AND c.user_id = s.owner_key)
+      );
+    DROP TABLE user_favorite_collections;
+  END IF;
+END $$;
+`,
   },
   {
     label: "trashed_notes（回收站快照）",
@@ -86,25 +105,25 @@ CREATE TABLE IF NOT EXISTS trashed_notes (
     sql: `CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique ON users (email) WHERE email IS NOT NULL`,
   },
   {
-    label: "email_registration_codes",
+    label:
+      "email_verification_codes（注册 + 换绑；旧库由后续步骤从两表合并）",
     sql: `
-CREATE TABLE IF NOT EXISTS email_registration_codes (
-  email        TEXT PRIMARY KEY,
-  code_hash    TEXT NOT NULL,
-  expires_at   TIMESTAMPTZ NOT NULL,
-  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
-)`,
-  },
-  {
-    label: "email_change_codes（个人中心换绑邮箱验证码）",
-    sql: `
-CREATE TABLE IF NOT EXISTS email_change_codes (
-  user_id      TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+CREATE TABLE IF NOT EXISTS email_verification_codes (
+  kind         TEXT NOT NULL CHECK (kind IN ('registration', 'email_change')),
+  subject_key  TEXT NOT NULL,
   email        TEXT NOT NULL,
   code_hash    TEXT NOT NULL,
   expires_at   TIMESTAMPTZ NOT NULL,
-  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
-)`,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  user_id      TEXT REFERENCES users(id) ON DELETE CASCADE,
+  PRIMARY KEY (kind, subject_key),
+  CONSTRAINT chk_email_ver_codes_user CHECK (
+    (kind = 'registration' AND user_id IS NULL)
+    OR (kind = 'email_change' AND user_id IS NOT NULL)
+  )
+);
+
+CREATE INDEX IF NOT EXISTS idx_email_ver_codes_expires ON email_verification_codes (expires_at)`,
   },
   {
     label: "users.media_plan / media_usage_month / media_uploaded_bytes_month",
@@ -162,6 +181,147 @@ CREATE INDEX IF NOT EXISTS idx_users_deletion_pending ON users (deletion_request
     sql: `
 ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_usage_month TEXT NOT NULL DEFAULT '';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_note_assist_calls_month INTEGER NOT NULL DEFAULT 0`,
+  },
+  {
+    label:
+      "card_placements + cards.user_id（多合集归属；删合集不删笔记）",
+    sql: `
+CREATE TABLE IF NOT EXISTS card_placements (
+  card_id         TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+  collection_id   TEXT NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+  pinned          BOOLEAN NOT NULL DEFAULT false,
+  sort_order      INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (card_id, collection_id)
+);
+CREATE INDEX IF NOT EXISTS idx_card_placements_col ON card_placements(collection_id);
+CREATE INDEX IF NOT EXISTS idx_card_placements_card ON card_placements(card_id);
+
+ALTER TABLE cards ADD COLUMN IF NOT EXISTS user_id TEXT REFERENCES users(id) ON DELETE CASCADE;
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'cards' AND column_name = 'collection_id'
+  ) THEN
+    UPDATE cards c
+    SET user_id = col.user_id
+    FROM collections col
+    WHERE c.collection_id = col.id;
+
+    INSERT INTO card_placements (card_id, collection_id, pinned, sort_order)
+    SELECT id, collection_id, COALESCE(pinned, false), COALESCE(sort_order, 0)
+    FROM cards
+    ON CONFLICT (card_id, collection_id) DO NOTHING;
+
+    ALTER TABLE cards DROP CONSTRAINT IF EXISTS cards_collection_id_fkey;
+    DROP INDEX IF EXISTS idx_cards_collection_id;
+    ALTER TABLE cards DROP COLUMN IF EXISTS collection_id;
+    ALTER TABLE cards DROP COLUMN IF EXISTS pinned;
+    ALTER TABLE cards DROP COLUMN IF EXISTS sort_order;
+  END IF;
+END $$;
+`,
+  },
+  {
+    label:
+      "legacy email_*_codes → email_verification_codes（一次性迁移旧表）",
+    sql: `
+DO $$
+BEGIN
+  IF to_regclass('public.email_registration_codes') IS NOT NULL THEN
+    INSERT INTO email_verification_codes (kind, subject_key, email, code_hash, expires_at, user_id, created_at)
+    SELECT 'registration', email, email, code_hash, expires_at, NULL, created_at
+    FROM email_registration_codes
+    ON CONFLICT (kind, subject_key) DO NOTHING;
+    DROP TABLE email_registration_codes;
+  END IF;
+  IF to_regclass('public.email_change_codes') IS NOT NULL THEN
+    INSERT INTO email_verification_codes (kind, subject_key, email, code_hash, expires_at, user_id, created_at)
+    SELECT 'email_change', user_id, email, code_hash, expires_at, user_id, created_at
+    FROM email_change_codes
+    ON CONFLICT (kind, subject_key) DO NOTHING;
+    DROP TABLE email_change_codes;
+  END IF;
+END $$;
+`,
+  },
+  {
+    label: "回收站并入 cards（trashed_at；迁移后删 trashed_notes）",
+    sql: `
+ALTER TABLE cards ADD COLUMN IF NOT EXISTS trashed_at TIMESTAMPTZ NULL;
+ALTER TABLE cards ADD COLUMN IF NOT EXISTS trash_col_id TEXT NULL;
+ALTER TABLE cards ADD COLUMN IF NOT EXISTS trash_col_path_label TEXT NOT NULL DEFAULT '';
+
+CREATE INDEX IF NOT EXISTS idx_cards_user_trashed
+  ON cards (user_id, trashed_at DESC)
+  WHERE trashed_at IS NOT NULL;
+
+DO $$
+BEGIN
+  IF to_regclass('public.trashed_notes') IS NULL THEN
+    RETURN;
+  END IF;
+
+  INSERT INTO cards (
+    id, user_id, text, minutes_of_day, added_on,
+    reminder_on, reminder_time, reminder_note, reminder_completed_at, reminder_completed_note,
+    tags, related_refs, media,
+    trashed_at, trash_col_id, trash_col_path_label
+  )
+  SELECT
+    trim(t.card->>'id'),
+    CASE WHEN t.owner_key = '__single__' THEN NULL ELSE t.owner_key END,
+    COALESCE(t.card->>'text', ''),
+    CASE
+      WHEN (t.card->>'minutesOfDay') ~ '^-?[0-9]+$'
+      THEN (t.card->>'minutesOfDay')::integer
+      ELSE 0
+    END,
+    NULLIF(t.card->>'addedOn', ''),
+    NULLIF(t.card->>'reminderOn', ''),
+    NULLIF(t.card->>'reminderTime', ''),
+    NULLIF(t.card->>'reminderNote', ''),
+    NULLIF(t.card->>'reminderCompletedAt', ''),
+    NULLIF(t.card->>'reminderCompletedNote', ''),
+    COALESCE(
+      ARRAY(SELECT jsonb_array_elements_text(COALESCE(t.card->'tags', '[]'::jsonb))),
+      '{}'::text[]
+    ),
+    COALESCE(t.card->'relatedRefs', '[]'::jsonb),
+    COALESCE(t.card->'media', '[]'::jsonb),
+    t.deleted_at,
+    t.col_id,
+    t.col_path_label
+  FROM trashed_notes t
+  WHERE t.card->>'id' IS NOT NULL
+    AND length(trim(t.card->>'id')) > 0
+    AND NOT EXISTS (SELECT 1 FROM cards c WHERE c.id = trim(t.card->>'id'));
+
+  UPDATE cards c
+  SET
+    trashed_at = COALESCE(c.trashed_at, t.deleted_at),
+    trash_col_id = COALESCE(c.trash_col_id, t.col_id),
+    trash_col_path_label = CASE
+      WHEN c.trash_col_path_label = '' THEN t.col_path_label
+      ELSE c.trash_col_path_label
+    END
+  FROM trashed_notes t
+  WHERE c.id = trim(t.card->>'id')
+    AND (
+      (t.owner_key = '__single__' AND c.user_id IS NULL)
+      OR (c.user_id IS NOT NULL AND c.user_id = t.owner_key)
+    );
+
+  DELETE FROM card_placements p
+  USING trashed_notes t
+  WHERE p.card_id = trim(t.card->>'id');
+
+  DROP TABLE trashed_notes;
+END $$;
+
+DROP INDEX IF EXISTS idx_trashed_notes_owner;
+`,
   },
 ];
 

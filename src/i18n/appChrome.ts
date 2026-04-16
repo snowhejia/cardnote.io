@@ -44,6 +44,8 @@ export type AppChrome = {
   closeMenu: string;
   openMenu: string;
   browseByDate: string;
+  /** 侧栏主导航分区标题：全部笔记 / 待办 / 探索 / 附件 */
+  sidebarFeaturesSection: string;
   allNotesEntry: string;
   titleAllNotes: string;
   /** 内部「未归类」合集展示名（侧栏不显示该合集） */
@@ -54,6 +56,32 @@ export type AppChrome = {
   connectionsIntro: string;
   connectionsOpenTarget: string;
   connectionsBoardHint: string;
+  allAttachmentsEntry: string;
+  titleAllAttachments: string;
+  allAttachmentsEmpty: string;
+  allAttachmentsEmptyFiltered: string;
+  allAttachmentsFilterAll: string;
+  allAttachmentsFilterImage: string;
+  allAttachmentsFilterVideo: string;
+  allAttachmentsFilterAudio: string;
+  allAttachmentsFilterDocument: string;
+  allAttachmentsFilterOther: string;
+  allAttachmentsFiltersAria: string;
+  allAttachmentsMetaDash: string;
+  allAttachmentsPaginationPrev: string;
+  allAttachmentsPaginationNext: string;
+  allAttachmentsPaginationPageOf: (
+    page: number,
+    totalPages: number
+  ) => string;
+  allAttachmentsPaginationNavAria: string;
+  cardMenuAddToCollection: string;
+  cardAddToCollectionTitle: string;
+  cardAddToCollectionHint: string;
+  cardAddToCollectionEmpty: string;
+  cardAddToCollectionCancel: string;
+  cardAddToCollectionRemoteBlocked: string;
+  cardAddToCollectionAlreadyThere: string;
   /** 笔记探索白板卡片左侧灰条：拖动拉线建立关联 */
   connectionsLinkRailAria: string;
   /** 笔记探索 · 问 AI 侧栏 */
@@ -206,6 +234,7 @@ export type AppChrome = {
   importAppleNotesBlockedNoEdit: string;
   importAppleNotesBlockedTrash: string;
   importAppleNotesBlockedConnections: string;
+  importAppleNotesBlockedAttachments: string;
   importAppleNotesBlockedReminders: string;
   importAppleNotesBlockedCalendar: string;
   importAppleNotesBlockedSearch: string;
@@ -286,6 +315,7 @@ const zh: AppChrome = {
   closeMenu: "关闭菜单",
   openMenu: "打开菜单",
   browseByDate: "日历",
+  sidebarFeaturesSection: "功能",
   allNotesEntry: "全部笔记",
   titleAllNotes: "全部笔记",
   looseNotesCollectionName: "未归类笔记",
@@ -297,6 +327,31 @@ const zh: AppChrome = {
   connectionsOpenTarget: "打开目标笔记",
   connectionsBoardHint:
     "空白处拖曳平移画布，滚轮缩放。在卡片左侧灰条上按下并拖到另一张卡片可建立相关笔记。",
+  allAttachmentsEntry: "所有附件",
+  titleAllAttachments: "所有附件",
+  allAttachmentsEmpty: "还没有带附件的笔记～在卡片里添加图片、视频或文件后会出现在这里。",
+  allAttachmentsEmptyFiltered: "没有符合当前筛选的附件。",
+  allAttachmentsFilterAll: "全部",
+  allAttachmentsFilterImage: "图片",
+  allAttachmentsFilterVideo: "视频",
+  allAttachmentsFilterAudio: "音频",
+  allAttachmentsFilterDocument: "文档",
+  allAttachmentsFilterOther: "其他",
+  allAttachmentsFiltersAria: "按类型筛选附件",
+  allAttachmentsMetaDash: "—",
+  allAttachmentsPaginationPrev: "上一页",
+  allAttachmentsPaginationNext: "下一页",
+  allAttachmentsPaginationPageOf: (page, totalPages) =>
+    `第 ${page} / ${totalPages} 页`,
+  allAttachmentsPaginationNavAria: "附件列表分页",
+  cardMenuAddToCollection: "添加至合集",
+  cardAddToCollectionTitle: "添加至合集",
+  cardAddToCollectionHint: "选择要加入的合集；同一张笔记会在多个合集中显示，内容会同步。",
+  cardAddToCollectionEmpty: "没有可选的合集（已在所有合集中）。",
+  cardAddToCollectionCancel: "取消",
+  cardAddToCollectionRemoteBlocked:
+    "云端数据模式下暂不支持将同一张笔记加入多个合集（需服务端结构升级）。请使用本地数据模式，或改用「相关笔记」关联。",
+  cardAddToCollectionAlreadyThere: "该合集里已经有这条笔记了。",
   connectionsLinkRailAria: "从此处拖动连线到另一张笔记",
   cardAskAiTitle: "问 AI",
   cardAskAiToolbar: "问 AI",
@@ -448,6 +503,7 @@ const zh: AppChrome = {
   importAppleNotesBlockedNoEdit: "当前不可编辑，无法导入。",
   importAppleNotesBlockedTrash: "请先退出回收站视图再导入。",
   importAppleNotesBlockedConnections: "请先退出「笔记探索」视图再导入。",
+  importAppleNotesBlockedAttachments: "请先退出「所有附件」视图再导入。",
   importAppleNotesBlockedReminders: "请先退出「我的待办」入口再导入。",
   importAppleNotesBlockedCalendar: "请先关闭日历单日视图再导入。",
   importAppleNotesBlockedSearch: "请先清空搜索再导入。",
@@ -530,6 +586,7 @@ const en: AppChrome = {
   closeMenu: "Close menu",
   openMenu: "Open menu",
   browseByDate: "Browse by date",
+  sidebarFeaturesSection: "Features",
   allNotesEntry: "All notes",
   titleAllNotes: "All Notes",
   looseNotesCollectionName: "Inbox",
@@ -541,6 +598,33 @@ const en: AppChrome = {
   connectionsOpenTarget: "Open target",
   connectionsBoardHint:
     "Drag empty space to pan. Scroll wheel to zoom. Drag from the left rail on a card to another to link.",
+  allAttachmentsEntry: "All attachments",
+  titleAllAttachments: "All attachments",
+  allAttachmentsEmpty:
+    "No attachments yet — add images, video, or files to a note to see them here.",
+  allAttachmentsEmptyFiltered: "Nothing matches the current filter.",
+  allAttachmentsFilterAll: "All",
+  allAttachmentsFilterImage: "Images",
+  allAttachmentsFilterVideo: "Video",
+  allAttachmentsFilterAudio: "Audio",
+  allAttachmentsFilterDocument: "Documents",
+  allAttachmentsFilterOther: "Other",
+  allAttachmentsFiltersAria: "Filter attachments by type",
+  allAttachmentsMetaDash: "—",
+  allAttachmentsPaginationPrev: "Previous",
+  allAttachmentsPaginationNext: "Next",
+  allAttachmentsPaginationPageOf: (page, totalPages) =>
+    `Page ${page} of ${totalPages}`,
+  allAttachmentsPaginationNavAria: "Attachments pagination",
+  cardMenuAddToCollection: "Add to collection",
+  cardAddToCollectionTitle: "Add to collection",
+  cardAddToCollectionHint:
+    "Pick a collection. The same note can appear in several places and stays in sync.",
+  cardAddToCollectionEmpty: "No collections left to pick (it’s already in all of them).",
+  cardAddToCollectionCancel: "Cancel",
+  cardAddToCollectionRemoteBlocked:
+    "Adding the same note to multiple collections isn’t supported in cloud mode yet. Use local data mode, or link notes with Related notes.",
+  cardAddToCollectionAlreadyThere: "This note is already in that collection.",
   connectionsLinkRailAria: "Drag a line from here to another note",
   cardAskAiTitle: "Ask AI",
   cardAskAiToolbar: "Ask AI",
@@ -697,6 +781,7 @@ const en: AppChrome = {
   importAppleNotesBlockedNoEdit: "Editing is disabled; import is unavailable.",
   importAppleNotesBlockedTrash: "Leave the trash view before importing.",
   importAppleNotesBlockedConnections: "Leave Explore before importing.",
+  importAppleNotesBlockedAttachments: "Leave All attachments before importing.",
   importAppleNotesBlockedReminders: "Leave the reminders entry before importing.",
   importAppleNotesBlockedCalendar: "Close the calendar day view before importing.",
   importAppleNotesBlockedSearch: "Clear search before importing.",

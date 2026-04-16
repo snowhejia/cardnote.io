@@ -22,10 +22,6 @@ BEGIN
   SET media = replace(media::text, old_accelerate, new_root)::jsonb
   WHERE media::text LIKE '%' || old_accelerate || '%';
 
-  UPDATE trashed_notes
-  SET card = replace(card::text, old_accelerate, new_root)::jsonb
-  WHERE card::text LIKE '%' || old_accelerate || '%';
-
   -- ── 1b) 旧地域域名 → 新域名 ──
   UPDATE users
   SET avatar_url = replace(avatar_url, old_regional, new_root)
@@ -34,10 +30,6 @@ BEGIN
   UPDATE cards
   SET media = replace(media::text, old_regional, new_root)::jsonb
   WHERE media::text LIKE '%' || old_regional || '%';
-
-  UPDATE trashed_notes
-  SET card = replace(card::text, old_regional, new_root)::jsonb
-  WHERE card::text LIKE '%' || old_regional || '%';
 
   -- ── 2) 路径：/mikujar/media/ → /media/，/mikujar/avatars/ → /avatars/ ──
   UPDATE users
@@ -52,15 +44,6 @@ BEGIN
       '/avatars/'
     )::jsonb
   WHERE media::text LIKE '%/mikujar/%';
-
-  UPDATE trashed_notes
-  SET card =
-    replace(
-      replace(card::text, '/mikujar/media/', '/media/'),
-      '/mikujar/avatars/',
-      '/avatars/'
-    )::jsonb
-  WHERE card::text LIKE '%/mikujar/%';
 
   -- 正文里若贴过完整链：
   -- UPDATE cards SET text = replace(replace(replace(replace(text, old_accelerate, new_root), old_regional, new_root), '/mikujar/media/', '/media/'), '/mikujar/avatars/', '/avatars/') WHERE text LIKE '%myqcloud.com%' OR text LIKE '%mikujar%';

@@ -35,38 +35,60 @@ CREATE TABLE IF NOT EXISTS collections (
   dot_color   TEXT NOT NULL DEFAULT '',
   hint        TEXT NOT NULL DEFAULT '',
   sort_order  INTEGER NOT NULL DEFAULT 0,
+  is_favorite BOOLEAN NOT NULL DEFAULT false,
+  favorite_sort INTEGER NULL,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS idx_collections_user_id   ON collections(user_id);
 CREATE INDEX IF NOT EXISTS idx_collections_parent_id ON collections(parent_id);
+CREATE INDEX IF NOT EXISTS idx_collections_user_favorites
+  ON collections (user_id, favorite_sort)
+  WHERE is_favorite = true;
 
--- ─── 卡片表（替代 JSON 内 NoteCard 对象）───────────────────────────────
--- user_id 通过 collections 级联删除；查询时须先验证 collection 属于目标用户
+-- ─── 卡片表：正文与附件等全局字段；归属合集见 card_placements ───────────
+-- user_id 与 collections 一致：多用户为 JWT sub；单用户模式可为 NULL
 CREATE TABLE IF NOT EXISTS cards (
   id              TEXT PRIMARY KEY,
-  collection_id   TEXT NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+  user_id         TEXT REFERENCES users(id) ON DELETE CASCADE,
   text            TEXT NOT NULL DEFAULT '',
   minutes_of_day  INTEGER NOT NULL DEFAULT 0,
-  added_on        TEXT,                          -- YYYY-MM-DD 字符串，保留原格式
-  reminder_on     TEXT,                          -- 提醒日期 YYYY-MM-DD；可与 added_on 不同
-  reminder_time   TEXT,                          -- 提醒时间 HH:mm（可选）
-  reminder_note   TEXT,                          -- 提醒备注（可选）
-  reminder_completed_at TEXT,                    -- 待办勾选完成时间 ISO 8601
-  reminder_completed_note TEXT,                  -- 完成时快照的提醒备注
-  pinned          BOOLEAN NOT NULL DEFAULT false,
+  added_on        TEXT,
+  reminder_on     TEXT,
+  reminder_time   TEXT,
+  reminder_note   TEXT,
+  reminder_completed_at TEXT,
+  reminder_completed_note TEXT,
   tags            TEXT[] NOT NULL DEFAULT '{}',
-  related_refs    JSONB NOT NULL DEFAULT '[]',   -- [{colId, cardId}]
-  media           JSONB NOT NULL DEFAULT '[]',   -- [{url, kind, name?, coverUrl?, thumbnailUrl?}]
-  sort_order      INTEGER NOT NULL DEFAULT 0,
+  related_refs    JSONB NOT NULL DEFAULT '[]',
+  media           JSONB NOT NULL DEFAULT '[]',
+  trashed_at      TIMESTAMPTZ NULL,
+  trash_col_id    TEXT NULL,
+  trash_col_path_label TEXT NOT NULL DEFAULT '',
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS idx_cards_collection_id ON cards(collection_id);
+CREATE INDEX IF NOT EXISTS idx_cards_user_id       ON cards(user_id);
 CREATE INDEX IF NOT EXISTS idx_cards_added_on      ON cards(added_on);
 CREATE INDEX IF NOT EXISTS idx_cards_reminder_on   ON cards(reminder_on);
+
+CREATE INDEX IF NOT EXISTS idx_cards_user_trashed
+  ON cards (user_id, trashed_at DESC)
+  WHERE trashed_at IS NOT NULL;
+
+-- 笔记在多个合集中的出现位置；置顶与排序按合集独立。删合集只删归属行，不删 cards 行。
+CREATE TABLE IF NOT EXISTS card_placements (
+  card_id         TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+  collection_id   TEXT NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+  pinned          BOOLEAN NOT NULL DEFAULT false,
+  sort_order      INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (card_id, collection_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_card_placements_col ON card_placements(collection_id);
+CREATE INDEX IF NOT EXISTS idx_card_placements_card ON card_placements(card_id);
 
 -- ─── 自动更新 updated_at ─────────────────────────────────────────────────
 CREATE OR REPLACE FUNCTION touch_updated_at()
@@ -88,40 +110,20 @@ CREATE TRIGGER trg_card_upd
   BEFORE UPDATE ON cards
   FOR EACH ROW EXECUTE PROCEDURE touch_updated_at();
 
--- ─── 侧栏星标合集（按 owner_key 隔离；多用户为 JWT sub，单用户模式为 __single__）────
-CREATE TABLE IF NOT EXISTS user_favorite_collections (
-  owner_key      TEXT NOT NULL,
-  collection_id  TEXT NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
-  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-  PRIMARY KEY (owner_key, collection_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_user_fav_col_owner ON user_favorite_collections(owner_key);
-
--- ─── 垃圾桶：删除的卡片快照（col_id 不设 FK，合集已删时仍可展示/尝试恢复）────────
-CREATE TABLE IF NOT EXISTS trashed_notes (
-  trash_id       TEXT PRIMARY KEY,
-  owner_key      TEXT NOT NULL,
-  col_id         TEXT NOT NULL,
-  col_path_label TEXT NOT NULL DEFAULT '',
-  card           JSONB NOT NULL,
-  deleted_at     TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE INDEX IF NOT EXISTS idx_trashed_notes_owner ON trashed_notes(owner_key);
-
--- ─── 邮箱验证码 ──────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS email_registration_codes (
-  email        TEXT PRIMARY KEY,
-  code_hash    TEXT NOT NULL,
-  expires_at   TIMESTAMPTZ NOT NULL,
-  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS email_change_codes (
-  user_id      TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+-- ─── 邮箱验证码（注册 / 换绑同一表，kind 区分）──────────────────────────
+CREATE TABLE IF NOT EXISTS email_verification_codes (
+  kind         TEXT NOT NULL CHECK (kind IN ('registration', 'email_change')),
+  subject_key  TEXT NOT NULL,
   email        TEXT NOT NULL,
   code_hash    TEXT NOT NULL,
   expires_at   TIMESTAMPTZ NOT NULL,
-  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  user_id      TEXT REFERENCES users(id) ON DELETE CASCADE,
+  PRIMARY KEY (kind, subject_key),
+  CONSTRAINT chk_email_ver_codes_user CHECK (
+    (kind = 'registration' AND user_id IS NULL)
+    OR (kind = 'email_change' AND user_id IS NOT NULL)
+  )
 );
+
+CREATE INDEX IF NOT EXISTS idx_email_ver_codes_expires ON email_verification_codes (expires_at);

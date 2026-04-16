@@ -269,3 +269,27 @@ export function SidebarNavExploreIcon({
     </svg>
   );
 }
+
+/** 侧栏「所有附件」：回形针 */
+export function SidebarNavAttachmentsIcon({
+  className,
+}: {
+  className?: string;
+}) {
+  return (
+    <svg
+      className={className}
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M21.44 11.05 12.25 20.24a5.47 5.47 0 0 1-7.75-7.75l9.19-9.19a3.65 3.65 0 0 1 5.16 5.16l-8.49 8.49a2.43 2.43 0 0 1-3.44-3.44l7.78-7.78" />
+    </svg>
+  );
+}

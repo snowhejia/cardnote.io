@@ -117,9 +117,10 @@ async function runCards() {
 
 async function runTrash() {
   const { rows } = await query(
-    `SELECT trash_id, card FROM trashed_notes t
-     WHERE EXISTS (
-       SELECT 1 FROM jsonb_array_elements(COALESCE(t.card->'media', '[]'::jsonb)) elem
+    `SELECT id, media FROM cards t
+     WHERE t.trashed_at IS NOT NULL
+     AND EXISTS (
+       SELECT 1 FROM jsonb_array_elements(COALESCE(t.media, '[]'::jsonb)) elem
        WHERE (elem->>'kind' = 'video' OR elem->>'kind' = 'image')
          AND (elem->>'thumbnailUrl' IS NULL OR btrim(elem->>'thumbnailUrl') = '')
      )`
@@ -127,24 +128,19 @@ async function runTrash() {
   console.log(`\n[trash] 待处理行数: ${rows.length}`);
   let updated = 0;
   for (const row of rows) {
-    const card =
-      row.card && typeof row.card === "object"
-        ? { ...row.card }
-        : {};
-    const media = Array.isArray(card.media) ? card.media : [];
+    const media = Array.isArray(row.media) ? row.media : [];
     const { changed, media: nextMedia } = await patchMediaArray(media);
     if (changed && !dryRun) {
-      card.media = nextMedia;
       await query(
-        `UPDATE trashed_notes SET card = $1::jsonb WHERE trash_id = $2`,
-        [JSON.stringify(card), row.trash_id]
+        `UPDATE cards SET media = $1::jsonb, updated_at = now() WHERE id = $2`,
+        [JSON.stringify(nextMedia), row.id]
       );
       updated += 1;
-      console.log(`[trash] 已更新 trash_id=${row.trash_id}`);
+      console.log(`[trash] 已更新 id=${row.id}`);
     }
   }
   if (dryRun) console.log("[trash] dry-run：未写库");
-  else console.log(`[trash] 共更新 ${updated} 条快照`);
+  else console.log(`[trash] 共更新 ${updated} 条回收站卡片`);
 }
 
 try {

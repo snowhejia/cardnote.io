@@ -8,7 +8,7 @@ import {
 import { updateCardApi } from "../api/collections";
 import type { AppDataMode } from "../appDataModeStorage";
 import type { Collection } from "../types";
-import { mapCollectionById } from "./collectionModel";
+import { patchNoteCardByIdInTree } from "./collectionModel";
 
 const TEXT_SAVE_DEBOUNCE_MS = 400;
 
@@ -51,14 +51,9 @@ export function useCardTextRemoteAutosave(
   }, [dataMode, flushPendingCardTextToRemote]);
 
   const setCardText = useCallback(
-    (colId: string, cardId: string, text: string) => {
+    (_colId: string, cardId: string, text: string) => {
       setCollections((prev) =>
-        mapCollectionById(prev, colId, (col) => ({
-          ...col,
-          cards: col.cards.map((card) =>
-            card.id === cardId ? { ...card, text } : card
-          ),
-        }))
+        patchNoteCardByIdInTree(prev, cardId, (card) => ({ ...card, text }))
       );
       if (dataMode !== "local") {
         pendingCardTextById.current.set(cardId, text);

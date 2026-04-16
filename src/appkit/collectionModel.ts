@@ -1,6 +1,7 @@
 import { htmlToPlainText } from "../noteEditor/plainHtml";
-import type { Collection, NoteCard } from "../types";
+import type { Collection, NoteCard, NoteMediaItem } from "../types";
 import {
+  PERSISTED_WORKSPACE_ALL_ATTACHMENTS,
   PERSISTED_WORKSPACE_ALL_NOTES,
   PERSISTED_WORKSPACE_CONNECTIONS,
   PERSISTED_WORKSPACE_REMINDERS,
@@ -229,6 +230,40 @@ export function collectReminderCompletionEntries(
   return out;
 }
 
+export type MediaAttachmentListEntry = {
+  col: Collection;
+  card: NoteCard;
+  mediaIndex: number;
+  item: NoteMediaItem;
+};
+
+/** 全库卡片附件扁平列表，新笔记优先（addedOn / 时刻），同卡按附件顺序 */
+export function collectAllMediaAttachmentEntries(
+  cols: Collection[]
+): MediaAttachmentListEntry[] {
+  const out: MediaAttachmentListEntry[] = [];
+  walkCollections(cols, (col) => {
+    for (const card of col.cards) {
+      const media = card.media;
+      if (!media?.length) continue;
+      media.forEach((item, mediaIndex) => {
+        out.push({ col, card, mediaIndex, item });
+      });
+    }
+  });
+  out.sort((a, b) => {
+    const dateA = a.card.addedOn ?? "";
+    const dateB = b.card.addedOn ?? "";
+    if (dateB !== dateA) return dateB.localeCompare(dateA);
+    const minDiff = (b.card.minutesOfDay ?? 0) - (a.card.minutesOfDay ?? 0);
+    if (minDiff !== 0) return minDiff;
+    if (a.col.id !== b.col.id) return a.col.id.localeCompare(b.col.id);
+    if (a.card.id !== b.card.id) return a.card.id.localeCompare(b.card.id);
+    return a.mediaIndex - b.mediaIndex;
+  });
+  return out;
+}
+
 /** 月历底部小点：该日有笔记（addedOn） */
 export function datesWithNoteAddedOn(cols: Collection[]): Set<string> {
   const s = new Set<string>();
@@ -287,7 +322,8 @@ export function resolveActiveCollectionId(
   if (
     savedId === PERSISTED_WORKSPACE_ALL_NOTES ||
     savedId === PERSISTED_WORKSPACE_REMINDERS ||
-    savedId === PERSISTED_WORKSPACE_CONNECTIONS
+    savedId === PERSISTED_WORKSPACE_CONNECTIONS ||
+    savedId === PERSISTED_WORKSPACE_ALL_ATTACHMENTS
   ) {
     return cols[0]?.id ?? "";
   }
@@ -358,6 +394,23 @@ export function stripRelatedRefsToTarget(
     const filtered = refs.filter(
       (r) => !(r.colId === targetColId && r.cardId === targetCardId)
     );
+    if (filtered.length === refs.length) return card;
+    if (filtered.length === 0) {
+      const { relatedRefs: _r, ...rest } = card;
+      return rest;
+    }
+    return { ...card, relatedRefs: filtered };
+  });
+}
+
+/** 移除所有指向「该 cardId」的 relatedRefs（多合集下同一 id 多处出现时，删除/解链用） */
+export function stripRelatedRefsToCardId(
+  cols: Collection[],
+  cardId: string
+): Collection[] {
+  return mapEveryCard(cols, (_col, card) => {
+    const refs = card.relatedRefs ?? [];
+    const filtered = refs.filter((r) => r.cardId !== cardId);
     if (filtered.length === refs.length) return card;
     if (filtered.length === 0) {
       const { relatedRefs: _r, ...rest } = card;
@@ -530,6 +583,59 @@ export function mapCollectionById(
     }
     return c;
   });
+}
+
+/** 全树内所有「同一 cardId」的卡片同步 patch（多合集镜像） */
+export function patchNoteCardByIdInTree(
+  cols: Collection[],
+  cardId: string,
+  patcher: (card: NoteCard) => NoteCard
+): Collection[] {
+  return mapEveryCard(cols, (_col, card) =>
+    card.id === cardId ? patcher(card) : card
+  );
+}
+
+/** 已包含该 cardId 的合集 id（含子树） */
+export function collectionIdsContainingCardId(
+  cols: Collection[],
+  cardId: string
+): Set<string> {
+  const out = new Set<string>();
+  walkCollections(cols, (col) => {
+    if (col.cards.some((c) => c.id === cardId)) out.add(col.id);
+  });
+  return out;
+}
+
+/** 将卡片深拷贝一份追加到目标合集（同 id；目标内已存在同 id 则不变） */
+export function appendCardCopyToCollection(
+  cols: Collection[],
+  targetColId: string,
+  card: NoteCard,
+  insertAtStart: boolean
+): Collection[] {
+  return mapCollectionById(cols, targetColId, (col) => {
+    if (col.cards.some((c) => c.id === card.id)) return col;
+    const copy = structuredClone(card) as NoteCard;
+    const cards = insertAtStart ? [copy, ...col.cards] : [...col.cards, copy];
+    return { ...col, cards };
+  });
+}
+
+/** 从全树移除所有该 cardId 的卡片行 */
+export function removeCardIdFromAllCollections(
+  cols: Collection[],
+  cardId: string
+): Collection[] {
+  function rec(nodes: Collection[]): Collection[] {
+    return nodes.map((col) => ({
+      ...col,
+      cards: col.cards.filter((c) => c.id !== cardId),
+      children: col.children?.length ? rec(col.children) : undefined,
+    }));
+  }
+  return rec(cols);
 }
 
 export function insertChildCollection(

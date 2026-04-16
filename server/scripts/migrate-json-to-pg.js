@@ -218,7 +218,8 @@ async function migrateUsers() {
 
 function flattenTree(userId, tree) {
   const collections = [];
-  const cards = [];
+  const cardById = new Map();
+  const placements = [];
 
   function walk(nodes, parentId) {
     nodes.forEach((col, idx) => {
@@ -233,17 +234,23 @@ function flattenTree(userId, tree) {
       });
       const cardList = col.cards ?? col.blocks ?? [];
       cardList.forEach((card, ci) => {
-        cards.push({
-          id: card.id,
+        if (!cardById.has(card.id)) {
+          cardById.set(card.id, {
+            id: card.id,
+            user_id: userId,
+            text: card.text ?? "",
+            minutes_of_day: card.minutesOfDay ?? 0,
+            added_on: card.addedOn ?? null,
+            reminder_on: card.reminderOn ?? null,
+            tags: card.tags ?? [],
+            related_refs: card.relatedRefs ?? [],
+            media: card.media ?? [],
+          });
+        }
+        placements.push({
+          card_id: card.id,
           collection_id: col.id,
-          text: card.text ?? "",
-          minutes_of_day: card.minutesOfDay ?? 0,
-          added_on: card.addedOn ?? null,
-          reminder_on: card.reminderOn ?? null,
           pinned: card.pinned ?? false,
-          tags: card.tags ?? [],
-          related_refs: card.relatedRefs ?? [],
-          media: card.media ?? [],
           sort_order: ci,
         });
       });
@@ -254,7 +261,7 @@ function flattenTree(userId, tree) {
   }
 
   walk(tree, null);
-  return { collections, cards };
+  return { collections, cards: [...cardById.values()], placements };
 }
 
 // ─── 迁移单个合集（接受已解析的数组）────────────────────────────────────────
@@ -262,7 +269,7 @@ function flattenTree(userId, tree) {
 async function migrateCollectionsData(data, userId) {
   if (!Array.isArray(data) || data.length === 0) return { collections: 0, cards: 0 };
 
-  const { collections, cards } = flattenTree(userId, data);
+  const { collections, cards, placements } = flattenTree(userId, data);
 
   const client = await pool.connect();
   try {
@@ -292,24 +299,30 @@ async function migrateCollectionsData(data, userId) {
     for (const c of cards) {
       const res = await client.query(
         `INSERT INTO cards
-           (id, collection_id, text, minutes_of_day, added_on, reminder_on, pinned, tags, related_refs, media, sort_order)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+           (id, user_id, text, minutes_of_day, added_on, reminder_on, tags, related_refs, media)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
          ON CONFLICT (id) DO NOTHING`,
         [
           c.id,
-          c.collection_id,
+          c.user_id,
           c.text,
           c.minutes_of_day,
           c.added_on,
           c.reminder_on,
-          c.pinned,
           c.tags,
           JSON.stringify(c.related_refs),
           JSON.stringify(c.media),
-          c.sort_order,
         ]
       );
       if (res.rowCount > 0) cardCount++;
+    }
+    for (const p of placements) {
+      await client.query(
+        `INSERT INTO card_placements (card_id, collection_id, pinned, sort_order)
+         VALUES ($1,$2,$3,$4)
+         ON CONFLICT (card_id, collection_id) DO NOTHING`,
+        [p.card_id, p.collection_id, p.pinned, p.sort_order]
+      );
     }
 
     await client.query("COMMIT");

@@ -228,9 +228,9 @@ const zh: ScatteredUiChrome = {
   errMoveCollectionUnder: "现在移不过去喔…换个目标或刷新再试？",
   uiDeleteCollectionDialogTitle: "删除合集",
   uiDeleteCollectionWithSubtree: (name) =>
-    `要连「${name}」带子文件夹一锅端吗？里面的笔记也会一起蒸发，救不回喔。`,
+    `要连「${name}」带子文件夹一锅端吗？笔记不会删，仍可在「全部笔记」里看到；只是从这些文件夹里拿掉归类。`,
   uiDeleteCollectionLeaf: (name) =>
-    `确定拆掉「${name}」这个合集？里面的笔记也会一起消失喔。`,
+    `确定拆掉「${name}」这个合集？笔记不会删，仍可在「全部笔记」里看到。`,
   uiConfirmDelete: "确定删除",
   uiHighlightAria: (colorLabel) => `${colorLabel}高亮`,
   adminBackToNotes: "← 返回笔记",
@@ -375,9 +375,9 @@ const en: ScatteredUiChrome = {
     "Couldn’t move right now. Try another target or refresh.",
   uiDeleteCollectionDialogTitle: "Delete collection",
   uiDeleteCollectionWithSubtree: (name) =>
-    `Delete “${name}” and all subfolders? Notes inside will be removed and can’t be restored.`,
+    `Delete “${name}” and all subfolders? Your notes stay in “All notes”; they’re only removed from these folders.`,
   uiDeleteCollectionLeaf: (name) =>
-    `Delete collection “${name}”? Notes inside will be removed.`,
+    `Delete collection “${name}”? Notes stay in “All notes”; only this folder is removed.`,
   uiConfirmDelete: "Delete",
   uiHighlightAria: (colorLabel) => `${colorLabel} highlight`,
   adminBackToNotes: "← Back to notes",

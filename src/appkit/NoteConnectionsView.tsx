@@ -26,6 +26,9 @@ import {
   type CardAskAiRelatedEntry,
 } from "./CardAskAiPanel";
 
+/** 笔记探索「问 AI」：暂时关闭；改回 true 恢复入口与侧栏 */
+const NOTE_CONNECTIONS_ASK_AI_ENABLED = false;
+
 const WORLD = 8000;
 /** 减轻 transform 亚像素合成分辨率导致的文字、描边发糊 */
 function snapZoom(z: number): number {
@@ -1461,6 +1464,7 @@ export function NoteConnectionsView({
                   linkRubber?.hoverTargetKey === id
                     ? "connections-board__node-wrap--link-drop-target"
                     : "",
+                  NOTE_CONNECTIONS_ASK_AI_ENABLED &&
                   askAi?.nodeKey === id
                     ? "connections-board__node-wrap--ask-ai"
                     : "",
@@ -1495,17 +1499,20 @@ export function NoteConnectionsView({
                   colId={col.id}
                   card={card}
                   onOpenDetail={() => onOpenTarget(col.id, card.id)}
-                  onOpenAskAi={() =>
-                    setAskAi({
-                      nodeKey: id,
-                      colId: col.id,
-                      card,
-                      relatedCards: relatedCardsPayloadForAskAi(
-                        edges,
-                        col.id,
-                        card.id
-                      ),
-                    })
+                  onOpenAskAi={
+                    NOTE_CONNECTIONS_ASK_AI_ENABLED
+                      ? () =>
+                          setAskAi({
+                            nodeKey: id,
+                            colId: col.id,
+                            card,
+                            relatedCards: relatedCardsPayloadForAskAi(
+                              edges,
+                              col.id,
+                              card.id
+                            ),
+                          })
+                      : undefined
                   }
                   onLinkRailPointerDown={
                     linkGestureEnabled
@@ -1519,14 +1526,16 @@ export function NoteConnectionsView({
           })}
         </div>
       </div>
-      <CardAskAiPanel
-        open={askAi !== null}
-        context={askAi}
-        gate={askAiGate}
-        canEdit={canEdit}
-        onSaveAnswerAsCard={onSaveAiAnswer}
-        onClose={() => setAskAi(null)}
-      />
+      {NOTE_CONNECTIONS_ASK_AI_ENABLED ? (
+        <CardAskAiPanel
+          open={askAi !== null}
+          context={askAi}
+          gate={askAiGate}
+          canEdit={canEdit}
+          onSaveAnswerAsCard={onSaveAiAnswer}
+          onClose={() => setAskAi(null)}
+        />
+      ) : null}
     </div>
   );
 }

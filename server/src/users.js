@@ -557,7 +557,6 @@ export async function finalizeUserDeletionInDb(userId) {
     [id]
   );
   if (check.rowCount === 0) return 0;
-  await query(`DELETE FROM trashed_notes WHERE owner_key = $1`, [id]);
   const del = await query(
     `DELETE FROM users WHERE id = $1 AND COALESCE(deletion_pending, false) = true`,
     [id]

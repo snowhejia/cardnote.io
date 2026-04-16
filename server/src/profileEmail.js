@@ -1,5 +1,5 @@
 /**
- * 登录用户在个人中心绑定/更换邮箱：发码、验码（数据表 email_change_codes）。
+ * 登录用户在个人中心绑定/更换邮箱：发码、验码（表 email_verification_codes，kind=email_change）。
  */
 import { randomInt } from "crypto";
 import bcrypt from "bcryptjs";
@@ -69,9 +69,9 @@ export async function sendProfileEmailChangeCode(userId, emailRaw, ip) {
   const expiresAt = new Date(Date.now() + CODE_TTL_MS);
 
   await query(
-    `INSERT INTO email_change_codes (user_id, email, code_hash, expires_at)
-     VALUES ($1, $2, $3, $4)
-     ON CONFLICT (user_id) DO UPDATE SET
+    `INSERT INTO email_verification_codes (kind, subject_key, email, code_hash, expires_at, user_id)
+     VALUES ('email_change', $1, $2, $3, $4, $1)
+     ON CONFLICT (kind, subject_key) DO UPDATE SET
        email = EXCLUDED.email,
        code_hash = EXCLUDED.code_hash,
        expires_at = EXCLUDED.expires_at,
@@ -106,7 +106,8 @@ export async function consumeProfileEmailChangeCode(userId, emailNorm, code) {
   }
 
   const res = await query(
-    "SELECT email, code_hash, expires_at FROM email_change_codes WHERE user_id = $1",
+    `SELECT email, code_hash, expires_at FROM email_verification_codes
+     WHERE kind = 'email_change' AND subject_key = $1`,
     [userId]
   );
   const row = res.rows[0];
@@ -117,12 +118,18 @@ export async function consumeProfileEmailChangeCode(userId, emailNorm, code) {
   }
 
   if (new Date(row.expires_at) < new Date()) {
-    await query("DELETE FROM email_change_codes WHERE user_id = $1", [userId]);
+    await query(
+      `DELETE FROM email_verification_codes WHERE kind = 'email_change' AND subject_key = $1`,
+      [userId]
+    );
     throw new Error("验证码已过期，请重新获取");
   }
 
   const match = await bcrypt.compare(String(code).trim(), row.code_hash);
   if (!match) throw new Error("验证码不正确");
 
-  await query("DELETE FROM email_change_codes WHERE user_id = $1", [userId]);
+  await query(
+    `DELETE FROM email_verification_codes WHERE kind = 'email_change' AND subject_key = $1`,
+    [userId]
+  );
 }

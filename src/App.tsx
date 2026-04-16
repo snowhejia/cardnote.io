@@ -18,7 +18,6 @@ import {
   deleteCollectionApi,
   createCardApi,
   updateCardApi,
-  deleteCardApi,
   fetchCollectionsFromApi,
 } from "./api/collections";
 import { noteBodyToHtml } from "./noteEditor/plainHtml";
@@ -28,6 +27,7 @@ import {
   fetchMeFavorites,
   fetchMeTrash,
   postMeTrashEntry,
+  postMeTrashRestore,
   putMeFavorites,
 } from "./api/mePreferences";
 import { uploadCardMedia } from "./api/upload";
@@ -131,6 +131,7 @@ import {
   collapsedFoldersStorageKey,
   type CollectionDropPosition,
   collectAllTagsFromCollections,
+  collectAllMediaAttachmentEntries,
   collectAllReminderEntries,
   collectCardsOnDate,
   cloneInitialCollections,
@@ -148,6 +149,7 @@ import {
   readCollapsedFolderIdsFromStorage,
   readPersistedActiveCollectionId,
   PERSISTED_WORKSPACE_ALL_NOTES,
+  PERSISTED_WORKSPACE_ALL_ATTACHMENTS,
   PERSISTED_WORKSPACE_CONNECTIONS,
   PERSISTED_WORKSPACE_REMINDERS,
   formatCalendarDayTitle,
@@ -173,9 +175,16 @@ import {
   IconTimelineMasonry1Col,
   IconTimelineMasonry2Col,
   SidebarNavAllNotesIcon,
+  SidebarNavAttachmentsIcon,
   SidebarNavExploreIcon,
   SidebarNavRemindersIcon,
   NoteTimelineCard,
+  AddToCollectionModal,
+  appendCardCopyToCollection,
+  collectionIdsContainingCardId,
+  patchNoteCardByIdInTree,
+  removeCardIdFromAllCollections,
+  stripRelatedRefsToCardId,
   persistMergeCollectionsRemote,
   persistCollectionTreeLayoutRemoteWithRetry,
   pruneCollapsedFolderIds,
@@ -205,6 +214,10 @@ import {
 } from "./appkit";
 import { collectConnectionEdges } from "./appkit/connectionEdges";
 import { mergeServerTreeWithLocalExtraCards } from "./appkit/collectionModel";
+import {
+  ATTACHMENT_FILTER_KEYS,
+  type AttachmentFilterKey,
+} from "./noteMediaCategory";
 
 /** 时间线虚拟列表：每批挂载卡片数（全部笔记 / 单合集 / 日历 / 搜索等共用） */
 const TIMELINE_VIRTUAL_BATCH = 40;
@@ -241,6 +254,11 @@ const NoteConnectionsView = lazy(() =>
 const AllRemindersView = lazy(() =>
   import("./appkit/AllRemindersView").then((m) => ({
     default: m.AllRemindersView,
+  }))
+);
+const AllAttachmentsView = lazy(() =>
+  import("./appkit/AllAttachmentsView").then((m) => ({
+    default: m.AllAttachmentsView,
   }))
 );
 const RelatedCardsSidePanel = lazy(() =>
@@ -371,6 +389,11 @@ export default function App() {
     return new Date(d.getFullYear(), d.getMonth(), 1);
   });
   const [cardMenuId, setCardMenuId] = useState<string | null>(null);
+  /** 「⋯」→ 添加至合集：选目标合集 */
+  const [addToCollectionTarget, setAddToCollectionTarget] = useState<{
+    colId: string;
+    cardId: string;
+  } | null>(null);
   /** 从卡片「⋯」或「新建待办」打开提醒弹窗 */
   const [reminderPicker, setReminderPicker] = useState<ReminderPickerTarget | null>(
     null
@@ -510,11 +533,31 @@ export default function App() {
     }
     return false;
   });
+  const [attachmentsViewActive, setAttachmentsViewActive] = useState(() => {
+    try {
+      if (typeof window !== "undefined" && matchesMobileChromeMedia()) {
+        return false;
+      }
+      if (getAppDataMode() === "local") {
+        const k = activeCollectionStorageKey("local", null);
+        return (
+          readPersistedActiveCollectionId(k) ===
+          PERSISTED_WORKSPACE_ALL_ATTACHMENTS
+        );
+      }
+    } catch {
+      /* ignore */
+    }
+    return false;
+  });
+  const [attachmentsFilterKey, setAttachmentsFilterKey] =
+    useState<AttachmentFilterKey>("all");
   /** 持久化主区时读取，避免 persist 的 useEffect 先于 layout 恢复「全部笔记」而用旧闭包把 sentinel 盖成合集 id */
   const allNotesViewForPersistRef = useRef(allNotesViewActive);
   const activeIdForPersistRef = useRef(activeId);
   const remindersViewForPersistRef = useRef(remindersViewActive);
   const connectionsViewForPersistRef = useRef(connectionsViewActive);
+  const attachmentsViewForPersistRef = useRef(attachmentsViewActive);
   const [draggingCollectionId, setDraggingCollectionId] = useState<
     string | null
   >(null);
@@ -754,12 +797,18 @@ export default function App() {
     return () => mq.removeEventListener("change", onMq);
   }, []);
 
-  /** 窄屏无「笔记探索」入口：从桌面切入窄屏或误入探索态时回到全部笔记 */
+  /** 窄屏无「笔记探索 / 所有附件」入口：从桌面切入窄屏或误入对应态时回到全部笔记 */
   useEffect(() => {
-    if (!narrowUi || !connectionsViewActive) return;
+    if (!narrowUi) return;
+    if (!connectionsViewActive && !attachmentsViewActive) return;
     setConnectionsViewActive(false);
+    setAttachmentsViewActive(false);
     setAllNotesViewActive(true);
-  }, [narrowUi, connectionsViewActive]);
+  }, [narrowUi, connectionsViewActive, attachmentsViewActive]);
+
+  useEffect(() => {
+    if (!attachmentsViewActive) setAttachmentsFilterKey("all");
+  }, [attachmentsViewActive]);
 
   useEffect(() => {
     const mq = window.matchMedia(TABLET_WIDE_TOUCH_MEDIA);
@@ -1129,6 +1178,7 @@ export default function App() {
       setTrashViewActive(false);
       setAllNotesViewActive(false);
       setConnectionsViewActive(false);
+      setAttachmentsViewActive(false);
       setRemindersViewActive(false);
     }
   }, [calendarDay]);
@@ -1137,6 +1187,7 @@ export default function App() {
     if (trashViewActive) {
       setAllNotesViewActive(false);
       setConnectionsViewActive(false);
+      setAttachmentsViewActive(false);
       setRemindersViewActive(false);
     }
   }, [trashViewActive]);
@@ -1145,6 +1196,7 @@ export default function App() {
     if (remindersViewActive) {
       setAllNotesViewActive(false);
       setConnectionsViewActive(false);
+      setAttachmentsViewActive(false);
     }
   }, [remindersViewActive]);
 
@@ -1152,6 +1204,7 @@ export default function App() {
     if (allNotesViewActive) {
       setRemindersViewActive(false);
       setConnectionsViewActive(false);
+      setAttachmentsViewActive(false);
     }
   }, [allNotesViewActive]);
 
@@ -1159,8 +1212,17 @@ export default function App() {
     if (connectionsViewActive) {
       setAllNotesViewActive(false);
       setRemindersViewActive(false);
+      setAttachmentsViewActive(false);
     }
   }, [connectionsViewActive]);
+
+  useEffect(() => {
+    if (attachmentsViewActive) {
+      setAllNotesViewActive(false);
+      setRemindersViewActive(false);
+      setConnectionsViewActive(false);
+    }
+  }, [attachmentsViewActive]);
 
   const allNotesViewActiveRef = useRef(false);
   useEffect(() => {
@@ -1170,9 +1232,14 @@ export default function App() {
   useEffect(() => {
     connectionsViewActiveRef.current = connectionsViewActive;
   }, [connectionsViewActive]);
+  const attachmentsViewActiveRef = useRef(false);
+  useEffect(() => {
+    attachmentsViewActiveRef.current = attachmentsViewActive;
+  }, [attachmentsViewActive]);
   useEffect(() => {
     if (allNotesViewActiveRef.current) setAllNotesViewActive(false);
     if (connectionsViewActiveRef.current) setConnectionsViewActive(false);
+    if (attachmentsViewActiveRef.current) setAttachmentsViewActive(false);
     if (remindersViewForPersistRef.current) setRemindersViewActive(false);
   }, [activeId]);
 
@@ -1261,6 +1328,7 @@ export default function App() {
     if (!canEdit) return c.importAppleNotesBlockedNoEdit;
     if (trashViewActive) return c.importAppleNotesBlockedTrash;
     if (connectionsViewActive) return c.importAppleNotesBlockedConnections;
+    if (attachmentsViewActive) return c.importAppleNotesBlockedAttachments;
     if (remindersViewActive) return c.importAppleNotesBlockedReminders;
     if (calendarDay !== null) return c.importAppleNotesBlockedCalendar;
     if (searchQuery.trim().length > 0) return c.importAppleNotesBlockedSearch;
@@ -1270,6 +1338,7 @@ export default function App() {
     canEdit,
     trashViewActive,
     connectionsViewActive,
+    attachmentsViewActive,
     remindersViewActive,
     calendarDay,
     searchQuery,
@@ -1277,6 +1346,7 @@ export default function App() {
     c.importAppleNotesBlockedNoEdit,
     c.importAppleNotesBlockedTrash,
     c.importAppleNotesBlockedConnections,
+    c.importAppleNotesBlockedAttachments,
     c.importAppleNotesBlockedReminders,
     c.importAppleNotesBlockedCalendar,
     c.importAppleNotesBlockedSearch,
@@ -1287,6 +1357,7 @@ export default function App() {
   activeIdForPersistRef.current = activeId;
   remindersViewForPersistRef.current = remindersViewActive;
   connectionsViewForPersistRef.current = connectionsViewActive;
+  attachmentsViewForPersistRef.current = attachmentsViewActive;
 
   useEffect(() => {
     if (activeId && !findCollectionById(collections, activeId)) {
@@ -1305,12 +1376,14 @@ export default function App() {
           setAllNotesViewActive(true);
           setRemindersViewActive(false);
           setConnectionsViewActive(false);
+          setAttachmentsViewActive(false);
         });
       } else if (raw === PERSISTED_WORKSPACE_REMINDERS) {
         flushSync(() => {
           setRemindersViewActive(true);
           setAllNotesViewActive(false);
           setConnectionsViewActive(false);
+          setAttachmentsViewActive(false);
         });
       } else if (raw === PERSISTED_WORKSPACE_CONNECTIONS) {
         if (matchesMobileChromeMedia()) {
@@ -1319,6 +1392,7 @@ export default function App() {
             setConnectionsPrimed(false);
             setAllNotesViewActive(true);
             setRemindersViewActive(false);
+            setAttachmentsViewActive(false);
           });
         } else {
           flushSync(() => {
@@ -1326,6 +1400,25 @@ export default function App() {
             setConnectionsPrimed(true);
             setAllNotesViewActive(false);
             setRemindersViewActive(false);
+            setAttachmentsViewActive(false);
+          });
+        }
+      } else if (raw === PERSISTED_WORKSPACE_ALL_ATTACHMENTS) {
+        if (matchesMobileChromeMedia()) {
+          flushSync(() => {
+            setAttachmentsViewActive(false);
+            setAllNotesViewActive(true);
+            setRemindersViewActive(false);
+            setConnectionsViewActive(false);
+            setConnectionsPrimed(false);
+          });
+        } else {
+          flushSync(() => {
+            setAttachmentsViewActive(true);
+            setAllNotesViewActive(false);
+            setRemindersViewActive(false);
+            setConnectionsViewActive(false);
+            setConnectionsPrimed(false);
           });
         }
       }
@@ -1342,6 +1435,7 @@ export default function App() {
       const allNotes = allNotesViewForPersistRef.current;
       const reminders = remindersViewForPersistRef.current;
       const connections = connectionsViewForPersistRef.current;
+      const attachments = attachmentsViewForPersistRef.current;
       const aid = activeIdForPersistRef.current;
       if (allNotes) {
         localStorage.setItem(
@@ -1358,6 +1452,11 @@ export default function App() {
           activeCollectionKey,
           PERSISTED_WORKSPACE_CONNECTIONS
         );
+      } else if (attachments) {
+        localStorage.setItem(
+          activeCollectionKey,
+          PERSISTED_WORKSPACE_ALL_ATTACHMENTS
+        );
       } else if (aid) {
         localStorage.setItem(activeCollectionKey, aid);
       }
@@ -1369,6 +1468,7 @@ export default function App() {
     allNotesViewActive,
     remindersViewActive,
     connectionsViewActive,
+    attachmentsViewActive,
     activeCollectionKey,
     authReady,
     dataMode,
@@ -1427,6 +1527,11 @@ export default function App() {
 
   const allReminderEntries = useMemo(
     () => collectAllReminderEntries(collections),
+    [collections]
+  );
+
+  const allMediaAttachmentEntries = useMemo(
+    () => collectAllMediaAttachmentEntries(collections),
     [collections]
   );
 
@@ -1596,6 +1701,7 @@ export default function App() {
       trashViewActive ||
       remindersViewActive ||
       connectionsViewActive ||
+      attachmentsViewActive ||
       !active
     ) {
       collectionTimelineSessionRef.current = undefined;
@@ -1620,6 +1726,7 @@ export default function App() {
     trashViewActive,
     remindersViewActive,
     connectionsViewActive,
+    attachmentsViewActive,
   ]);
 
   useEffect(() => {
@@ -1630,6 +1737,7 @@ export default function App() {
       trashViewActive ||
       remindersViewActive ||
       connectionsViewActive ||
+      attachmentsViewActive ||
       !active
     )
       return;
@@ -1660,6 +1768,7 @@ export default function App() {
     trashViewActive,
     remindersViewActive,
     connectionsViewActive,
+    attachmentsViewActive,
     collectionRestVisibleCount,
     rest.length,
   ]);
@@ -1866,21 +1975,23 @@ export default function App() {
     (colId: string, cardId: string) => {
       let newPinned: boolean | undefined;
       setCollections((prev) => {
-        const col = findCollectionById(prev, colId);
-        const card = col?.cards.find((c) => c.id === cardId);
-        newPinned = !card?.pinned;
-        return mapCollectionById(prev, colId, (c) => ({
-          ...c,
-          cards: c.cards.map((cd) =>
+        const hit = findCardInTree(prev, colId, cardId);
+        if (!hit?.card) return prev;
+        newPinned = !hit.card.pinned;
+        return mapCollectionById(prev, colId, (col) => ({
+          ...col,
+          cards: col.cards.map((cd) =>
             cd.id === cardId ? { ...cd, pinned: newPinned } : cd
           ),
         }));
       });
       if (dataMode !== "local") {
-        // newPinned 在 setCollections 回调中同步赋值
         Promise.resolve().then(() => {
           if (newPinned !== undefined) {
-            void updateCardApi(cardId, { pinned: newPinned });
+            void updateCardApi(cardId, {
+              pinned: newPinned,
+              placementCollectionId: colId,
+            });
           }
         });
       }
@@ -1890,34 +2001,31 @@ export default function App() {
 
   const commitCardReminder = useCallback(
     (
-      colId: string,
+      _colId: string,
       cardId: string,
       isoDate: string | null,
       time?: string,
       note?: string
     ) => {
       setCollections((prev) =>
-        mapCollectionById(prev, colId, (c) => ({
-          ...c,
-          cards: c.cards.map((cd) => {
-            if (cd.id !== cardId) return cd;
-            if (isoDate == null || isoDate === "") {
-              const { reminderOn: _r, reminderTime: _t, reminderNote: _n, ...rest } = cd;
-              return rest;
-            }
-            const {
-              reminderCompletedAt: _done,
-              reminderCompletedNote: _cnote,
-              ...base
-            } = cd;
-            return {
-              ...base,
-              reminderOn: isoDate,
-              ...(time ? { reminderTime: time } : { reminderTime: undefined }),
-              ...(note ? { reminderNote: note } : { reminderNote: undefined }),
-            };
-          }),
-        }))
+        patchNoteCardByIdInTree(prev, cardId, (cd) => {
+          if (isoDate == null || isoDate === "") {
+            const { reminderOn: _r, reminderTime: _t, reminderNote: _n, ...rest } =
+              cd;
+            return rest;
+          }
+          const {
+            reminderCompletedAt: _done,
+            reminderCompletedNote: _cnote,
+            ...base
+          } = cd;
+          return {
+            ...base,
+            reminderOn: isoDate,
+            ...(time ? { reminderTime: time } : { reminderTime: undefined }),
+            ...(note ? { reminderNote: note } : { reminderNote: undefined }),
+          };
+        })
       );
       if (dataMode !== "local") {
         void updateCardApi(cardId, {
@@ -1936,29 +2044,25 @@ export default function App() {
 
   /** 待办列表勾选：记录完成时间、快照提醒备注，并清除当前提醒 */
   const completeReminderTask = useCallback(
-    (colId: string, cardId: string) => {
+    (_colId: string, cardId: string) => {
       const doneAt = new Date().toISOString();
       let remoteCompletedNote: string | null = null;
       setCollections((prev) =>
-        mapCollectionById(prev, colId, (c) => ({
-          ...c,
-          cards: c.cards.map((cd) => {
-            if (cd.id !== cardId) return cd;
-            const snap = cd.reminderNote?.trim();
-            if (snap) remoteCompletedNote = snap;
-            const {
-              reminderOn: _ro,
-              reminderTime: _rt,
-              reminderNote: _rn,
-              ...rest
-            } = cd;
-            return {
-              ...rest,
-              reminderCompletedAt: doneAt,
-              ...(snap ? { reminderCompletedNote: snap } : {}),
-            };
-          }),
-        }))
+        patchNoteCardByIdInTree(prev, cardId, (cd) => {
+          const snap = cd.reminderNote?.trim();
+          if (snap) remoteCompletedNote = snap;
+          const {
+            reminderOn: _ro,
+            reminderTime: _rt,
+            reminderNote: _rn,
+            ...rest
+          } = cd;
+          return {
+            ...rest,
+            reminderCompletedAt: doneAt,
+            ...(snap ? { reminderCompletedNote: snap } : {}),
+          };
+        })
       );
       if (dataMode !== "local") {
         void updateCardApi(cardId, {
@@ -1979,7 +2083,10 @@ export default function App() {
       const card = col?.cards.find((c) => c.id === cardId);
       if (card && canEdit) {
         const entry: TrashedNoteEntry = {
-          trashId: `t-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+          trashId:
+            dataMode === "local"
+              ? `t-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+              : card.id,
           colId,
           colPathLabel: collectionPathLabel(collections, colId),
           card: structuredClone(card) as NoteCard,
@@ -2001,11 +2108,8 @@ export default function App() {
         });
       }
       setCollections((prev) => {
-        const next = mapCollectionById(prev, colId, (c) => ({
-          ...c,
-          cards: c.cards.filter((c0) => c0.id !== cardId),
-        }));
-        return stripRelatedRefsToTarget(next, colId, cardId);
+        const next = removeCardIdFromAllCollections(prev, cardId);
+        return stripRelatedRefsToCardId(next, cardId);
       });
       setCardMenuId(null);
       setRelatedPanel((p) =>
@@ -2014,11 +2118,17 @@ export default function App() {
       setDetailCard((d) =>
         d && d.colId === colId && d.card.id === cardId ? null : d
       );
-      if (dataMode !== "local") {
-        void deleteCardApi(cardId);
-      }
     },
     [canEdit, collections, trashStorageKey, dataMode, c.errTrashMove]
+  );
+
+  const openAddToCollectionPicker = useCallback(
+    (colId: string, cardId: string) => {
+      if (!canEdit) return;
+      setCardMenuId(null);
+      setAddToCollectionTarget({ colId, cardId });
+    },
+    [canEdit]
   );
 
   const restoreTrashedEntry = useCallback(
@@ -2057,18 +2167,16 @@ export default function App() {
             return;
           }
         }
-        const created = await createCardApi(targetColId, entry.card, {
+        const restored = await postMeTrashRestore({
+          cardId: entry.card.id,
+          targetCollectionId: targetColId,
           insertAtStart: newNotePlacement === "top",
         });
-        if (!created) {
+        if (!restored.ok) {
           window.alert(c.errTrashRestore);
           return;
         }
-        cardToAppend = created;
-        const delOk = await deleteMeTrashEntry(entry.trashId);
-        if (!delOk) {
-          window.alert(c.errTrashRestoreTag);
-        }
+        cardToAppend = restored.card;
       }
       setTrashEntries((te) => {
         const next = te.filter((t) => t.trashId !== entry.trashId);
@@ -2110,7 +2218,6 @@ export default function App() {
       newNotePlacement,
       c.looseNotesCollectionName,
       c.errTrashRestore,
-      c.errTrashRestoreTag,
     ]
   );
 
@@ -2320,19 +2427,15 @@ export default function App() {
   );
 
   const setCardTags = useCallback(
-    (colId: string, cardId: string, tags: string[]) => {
+    (_colId: string, cardId: string, tags: string[]) => {
       setCollections((prev) =>
-        mapCollectionById(prev, colId, (col) => ({
-          ...col,
-          cards: col.cards.map((card) => {
-            if (card.id !== cardId) return card;
-            if (tags.length === 0) {
-              const { tags: _t, ...rest } = card;
-              return rest;
-            }
-            return { ...card, tags };
-          }),
-        }))
+        patchNoteCardByIdInTree(prev, cardId, (card) => {
+          if (tags.length === 0) {
+            const { tags: _t, ...rest } = card;
+            return rest;
+          }
+          return { ...card, tags };
+        })
       );
       if (dataMode !== "local") {
         void updateCardApi(cardId, { tags });
@@ -2347,14 +2450,11 @@ export default function App() {
       // 必须先同步落盘 React 状态，再 PATCH；否则微任务可能先于 updater 执行，nextMedia 仍为 undefined，附件不会写入服务端
       flushSync(() => {
         setCollections((prev) => {
-          const col = findCollectionById(prev, colId);
-          const card = col?.cards.find((c) => c.id === cardId);
-          nextMedia = [...(card?.media ?? []), item];
-          return mapCollectionById(prev, colId, (c) => ({
-            ...c,
-            cards: c.cards.map((cd) =>
-              cd.id === cardId ? { ...cd, media: nextMedia } : cd
-            ),
+          const hit = findCardInTree(prev, colId, cardId);
+          nextMedia = [...(hit?.card?.media ?? []), item];
+          return patchNoteCardByIdInTree(prev, cardId, (cd) => ({
+            ...cd,
+            media: nextMedia,
           }));
         });
       });
@@ -2458,19 +2558,14 @@ export default function App() {
   const clearCardMedia = useCallback(
     (colId: string, cardId: string) => {
       setCollections((prev) => {
-        const col = findCollectionById(prev, colId);
-        const card = col?.cards.find((c) => c.id === cardId);
-        for (const m of card?.media ?? []) {
+        const hit = findCardInTree(prev, colId, cardId);
+        for (const m of hit?.card?.media ?? []) {
           void deleteLocalMediaFile(m.url);
         }
-        return mapCollectionById(prev, colId, (c) => ({
-          ...c,
-          cards: c.cards.map((cd) => {
-            if (cd.id !== cardId) return cd;
-            const { media: _m, ...rest } = cd;
-            return rest;
-          }),
-        }));
+        return patchNoteCardByIdInTree(prev, cardId, (cd) => {
+          const { media: _m, ...rest } = cd;
+          return rest;
+        });
       });
       setCardMenuId(null);
       if (dataMode !== "local") {
@@ -2481,35 +2576,31 @@ export default function App() {
   );
 
   const removeCardMediaItem = useCallback(
-    (colId: string, cardId: string, item: NoteMediaItem) => {
+    (_colId: string, cardId: string, item: NoteMediaItem) => {
       void deleteLocalMediaFile(item.url);
       let nextMedia: NoteMediaItem[] | undefined;
       flushSync(() => {
         setCollections((prev) =>
-          mapCollectionById(prev, colId, (col) => ({
-            ...col,
-            cards: col.cards.map((card) => {
-              if (card.id !== cardId) return card;
-              const raw = card.media ?? [];
-              const idx = raw.findIndex(
-                (m) =>
-                  m.url === item.url &&
-                  m.kind === item.kind &&
-                  (m.name ?? "") === (item.name ?? "") &&
-                  (m.coverUrl ?? "") === (item.coverUrl ?? "") &&
-                  (m.thumbnailUrl ?? "") === (item.thumbnailUrl ?? "")
-              );
-              if (idx < 0) return card;
-              const next = [...raw];
-              next.splice(idx, 1);
-              nextMedia = next;
-              if (next.length === 0) {
-                const { media: _m, ...rest } = card;
-                return rest;
-              }
-              return { ...card, media: next };
-            }),
-          }))
+          patchNoteCardByIdInTree(prev, cardId, (card) => {
+            const raw = card.media ?? [];
+            const idx = raw.findIndex(
+              (m) =>
+                m.url === item.url &&
+                m.kind === item.kind &&
+                (m.name ?? "") === (item.name ?? "") &&
+                (m.coverUrl ?? "") === (item.coverUrl ?? "") &&
+                (m.thumbnailUrl ?? "") === (item.thumbnailUrl ?? "")
+            );
+            if (idx < 0) return card;
+            const next = [...raw];
+            next.splice(idx, 1);
+            nextMedia = next;
+            if (next.length === 0) {
+              const { media: _m, ...rest } = card;
+              return rest;
+            }
+            return { ...card, media: next };
+          })
         );
       });
       // 未找到对应项时不要 PATCH media: []，否则会误清空整张卡附件
@@ -2522,31 +2613,27 @@ export default function App() {
 
   /** 将指定附件移到 media 数组首位，作为轮播默认首帧（封面） */
   const setCardMediaCoverItem = useCallback(
-    (colId: string, cardId: string, item: NoteMediaItem) => {
+    (_colId: string, cardId: string, item: NoteMediaItem) => {
       let nextMedia: NoteMediaItem[] | undefined;
       flushSync(() => {
         setCollections((prev) =>
-          mapCollectionById(prev, colId, (col) => ({
-            ...col,
-            cards: col.cards.map((card) => {
-              if (card.id !== cardId) return card;
-              const raw = card.media ?? [];
-              const idx = raw.findIndex(
-                (m) =>
-                  m.url === item.url &&
-                  m.kind === item.kind &&
-                  (m.name ?? "") === (item.name ?? "") &&
-                  (m.coverUrl ?? "") === (item.coverUrl ?? "") &&
-                  (m.thumbnailUrl ?? "") === (item.thumbnailUrl ?? "")
-              );
-              if (idx <= 0) return card;
-              const next = [...raw];
-              const [picked] = next.splice(idx, 1);
-              next.unshift(picked);
-              nextMedia = next;
-              return { ...card, media: next };
-            }),
-          }))
+          patchNoteCardByIdInTree(prev, cardId, (card) => {
+            const raw = card.media ?? [];
+            const idx = raw.findIndex(
+              (m) =>
+                m.url === item.url &&
+                m.kind === item.kind &&
+                (m.name ?? "") === (item.name ?? "") &&
+                (m.coverUrl ?? "") === (item.coverUrl ?? "") &&
+                (m.thumbnailUrl ?? "") === (item.thumbnailUrl ?? "")
+            );
+            if (idx <= 0) return card;
+            const next = [...raw];
+            const [picked] = next.splice(idx, 1);
+            next.unshift(picked);
+            nextMedia = next;
+            return { ...card, media: next };
+          })
         );
       });
       if (dataMode !== "local" && nextMedia !== undefined) {
@@ -2576,6 +2663,7 @@ export default function App() {
       if (!canEdit) return null;
       if (trashViewActive) return null;
       if (connectionsViewActive) return null;
+      if (attachmentsViewActive) return null;
       if (remindersViewActive && !opts?.reminderOn) return null;
       if (calendarDay !== null) return null;
       if (searchQuery.trim().length > 0) return null;
@@ -2680,6 +2768,7 @@ export default function App() {
       canEdit,
       trashViewActive,
       connectionsViewActive,
+      attachmentsViewActive,
       remindersViewActive,
       calendarDay,
       active?.id,
@@ -3208,7 +3297,10 @@ export default function App() {
 
       const batchTs = Date.now();
       const newTrashEntries: TrashedNoteEntry[] = toTrash.map((item, idx) => ({
-        trashId: `t-${batchTs}-${idx}-${Math.random().toString(36).slice(2, 9)}`,
+        trashId:
+          dataMode === "remote"
+            ? item.card.id
+            : `t-${batchTs}-${idx}-${Math.random().toString(36).slice(2, 9)}`,
         colId: LOOSE_NOTES_COLLECTION_ID,
         colPathLabel: item.colPathLabel,
         card: structuredClone(item.card) as NoteCard,
@@ -3347,6 +3439,7 @@ export default function App() {
             targetId,
             new Set(movedCardIds),
             sourceId,
+            merged.moves,
             (current, total) => {
               setCollectionCloudSyncProgress({
                 current,
@@ -3696,6 +3789,7 @@ export default function App() {
         setCardText={setCardText}
         setCardTags={setCardTags}
         timelineColumnCount={timelineColumnCount}
+        openAddToCollectionPicker={openAddToCollectionPicker}
       />
     );
   }
@@ -3998,91 +4092,163 @@ export default function App() {
           ) : null}
         </div>
 
-        <div className="sidebar__all-notes">
-          <button
-            type="button"
-            className={
-              "sidebar__all-notes-hit" +
-              (allNotesViewActive && !searchActive ? " is-active" : "")
-            }
-            onClick={() => {
-              setTrashViewActive(false);
-              setCalendarDay(null);
-              setSearchQuery("");
-              setSearchBarOpen(false);
-              setAllNotesViewActive(true);
-              setMobileNavOpen(false);
-            }}
-          >
-            <SidebarNavAllNotesIcon className="sidebar__nav-pillar-icon" />
-            <span className="sidebar__all-notes-label">{c.allNotesEntry}</span>
-            <span className="sidebar__all-notes-count">
-              {allNotesSorted.length}
-            </span>
-          </button>
+        <div
+          className={
+            "sidebar__features-section" +
+            (!sidebarSectionCollapsed.features
+              ? " sidebar__features-section--expanded"
+              : "")
+          }
+        >
+          <div className="sidebar__section-row sidebar__section-row--collapsible">
+            <button
+              type="button"
+              className="sidebar__section-hit"
+              onClick={() => toggleSidebarSection("features")}
+              aria-expanded={!sidebarSectionCollapsed.features}
+              aria-label={sidebarSectionToggleAria(
+                "features",
+                c.sidebarFeaturesSection
+              )}
+            >
+              <span
+                className={
+                  "sidebar__chevron" +
+                  (!sidebarSectionCollapsed.features ? " is-expanded" : "")
+                }
+                aria-hidden
+              >
+                <span className="sidebar__chevron-icon">›</span>
+              </span>
+              <span className="sidebar__section">{c.sidebarFeaturesSection}</span>
+            </button>
+          </div>
+          {!sidebarSectionCollapsed.features ? (
+            <>
+              <div className="sidebar__all-notes">
+                <button
+                  type="button"
+                  className={
+                    "sidebar__all-notes-hit" +
+                    (allNotesViewActive && !searchActive ? " is-active" : "")
+                  }
+                  onClick={() => {
+                    setTrashViewActive(false);
+                    setCalendarDay(null);
+                    setSearchQuery("");
+                    setSearchBarOpen(false);
+                    setAllNotesViewActive(true);
+                    setMobileNavOpen(false);
+                  }}
+                >
+                  <SidebarNavAllNotesIcon className="sidebar__nav-pillar-icon" />
+                  <span className="sidebar__all-notes-label">
+                    {c.allNotesEntry}
+                  </span>
+                  <span className="sidebar__all-notes-count">
+                    {allNotesSorted.length}
+                  </span>
+                </button>
+              </div>
+
+              {allReminderEntries.length > 0 ? (
+                <div
+                  className="sidebar__all-reminders"
+                  aria-label={c.remindersEntry}
+                >
+                  <button
+                    type="button"
+                    className={
+                      "sidebar__all-reminders-hit" +
+                      (remindersViewActive && !searchActive
+                        ? " is-active"
+                        : "")
+                    }
+                    onClick={() => {
+                      setTrashViewActive(false);
+                      setCalendarDay(null);
+                      setSearchQuery("");
+                      setSearchBarOpen(false);
+                      setAllNotesViewActive(false);
+                      setConnectionsViewActive(false);
+                      setAttachmentsViewActive(false);
+                      setRemindersViewActive(true);
+                      setMobileNavOpen(false);
+                    }}
+                  >
+                    <SidebarNavRemindersIcon className="sidebar__nav-pillar-icon" />
+                    <span className="sidebar__all-reminders-label">
+                      {c.remindersTitle}
+                    </span>
+                    <span className="sidebar__all-reminders-count">
+                      {allReminderEntries.length}
+                    </span>
+                  </button>
+                </div>
+              ) : null}
+
+              {!narrowUi ? (
+                <>
+                  <div className="sidebar__all-notes">
+                    <button
+                      type="button"
+                      className={
+                        "sidebar__all-notes-hit" +
+                        (connectionsViewActive && !searchActive
+                          ? " is-active"
+                          : "")
+                      }
+                      onClick={() => {
+                        setTrashViewActive(false);
+                        setCalendarDay(null);
+                        setSearchQuery("");
+                        setSearchBarOpen(false);
+                        setConnectionsPrimed(true);
+                        setConnectionsViewActive(true);
+                        setMobileNavOpen(false);
+                      }}
+                    >
+                      <SidebarNavExploreIcon className="sidebar__nav-pillar-icon" />
+                      <span className="sidebar__all-notes-label">
+                        {c.connectionsEntry}
+                      </span>
+                      <span className="sidebar__all-notes-count">
+                        {connectionsPrimed ? connectionEdges.length : "–"}
+                      </span>
+                    </button>
+                  </div>
+                  <div className="sidebar__all-notes sidebar__connections">
+                    <button
+                      type="button"
+                      className={
+                        "sidebar__all-notes-hit" +
+                        (attachmentsViewActive && !searchActive
+                          ? " is-active"
+                          : "")
+                      }
+                      onClick={() => {
+                        setTrashViewActive(false);
+                        setCalendarDay(null);
+                        setSearchQuery("");
+                        setSearchBarOpen(false);
+                        setAttachmentsViewActive(true);
+                        setMobileNavOpen(false);
+                      }}
+                    >
+                      <SidebarNavAttachmentsIcon className="sidebar__nav-pillar-icon" />
+                      <span className="sidebar__all-notes-label">
+                        {c.allAttachmentsEntry}
+                      </span>
+                      <span className="sidebar__all-notes-count">
+                        {allMediaAttachmentEntries.length}
+                      </span>
+                    </button>
+                  </div>
+                </>
+              ) : null}
+            </>
+          ) : null}
         </div>
-
-        {allReminderEntries.length > 0 ? (
-          <div
-            className="sidebar__all-reminders"
-            aria-label={c.remindersEntry}
-          >
-            <button
-              type="button"
-              className={
-                "sidebar__all-reminders-hit" +
-                (remindersViewActive && !searchActive ? " is-active" : "")
-              }
-              onClick={() => {
-                setTrashViewActive(false);
-                setCalendarDay(null);
-                setSearchQuery("");
-                setSearchBarOpen(false);
-                setAllNotesViewActive(false);
-                setConnectionsViewActive(false);
-                setRemindersViewActive(true);
-                setMobileNavOpen(false);
-              }}
-            >
-              <SidebarNavRemindersIcon className="sidebar__nav-pillar-icon" />
-              <span className="sidebar__all-reminders-label">
-                {c.remindersTitle}
-              </span>
-              <span className="sidebar__all-reminders-count">
-                {allReminderEntries.length}
-              </span>
-            </button>
-          </div>
-        ) : null}
-
-        {!narrowUi ? (
-          <div className="sidebar__all-notes sidebar__connections">
-            <button
-              type="button"
-              className={
-                "sidebar__all-notes-hit" +
-                (connectionsViewActive && !searchActive ? " is-active" : "")
-              }
-              onClick={() => {
-                setTrashViewActive(false);
-                setCalendarDay(null);
-                setSearchQuery("");
-                setSearchBarOpen(false);
-                setConnectionsPrimed(true);
-                setConnectionsViewActive(true);
-                setMobileNavOpen(false);
-              }}
-            >
-              <SidebarNavExploreIcon className="sidebar__nav-pillar-icon" />
-              <span className="sidebar__all-notes-label">
-                {c.connectionsEntry}
-              </span>
-              <span className="sidebar__all-notes-count">
-                {connectionsPrimed ? connectionEdges.length : "–"}
-              </span>
-            </button>
-          </div>
-        ) : null}
 
         <div
           className={
@@ -4179,6 +4345,7 @@ export default function App() {
                           !trashViewActive &&
                           !allNotesViewActive &&
                           !connectionsViewActive &&
+                          !attachmentsViewActive &&
                           !remindersViewActive
                             ? " is-active"
                             : "")
@@ -4196,6 +4363,7 @@ export default function App() {
                             setTrashViewActive(false);
                             setAllNotesViewActive(false);
                             setConnectionsViewActive(false);
+                            setAttachmentsViewActive(false);
                             setRemindersViewActive(false);
                             setSearchQuery("");
                             setSearchBarOpen(false);
@@ -4287,6 +4455,7 @@ export default function App() {
                   trashViewActive={trashViewActive}
                   allNotesViewActive={allNotesViewActive}
                   connectionsViewActive={connectionsViewActive}
+                  attachmentsViewActive={attachmentsViewActive}
                   remindersViewActive={remindersViewActive}
                   collapsedFolderIds={collapsedFolderIds}
                   dropIndicator={dropIndicator}
@@ -4312,6 +4481,7 @@ export default function App() {
                   setTrashViewActive={setTrashViewActive}
                   setAllNotesViewActive={setAllNotesViewActive}
                   setConnectionsViewActive={setConnectionsViewActive}
+                  setAttachmentsViewActive={setAttachmentsViewActive}
                   setRemindersViewActive={setRemindersViewActive}
                   setCalendarDay={setCalendarDay}
                   setActiveId={setActiveId}
@@ -4497,6 +4667,7 @@ export default function App() {
                 setTrashViewActive(false);
                 setAllNotesViewActive(false);
                 setConnectionsViewActive(false);
+                setAttachmentsViewActive(false);
                 setRemindersViewActive(false);
                 setMobileNavOpen(true);
               }}
@@ -4573,7 +4744,14 @@ export default function App() {
                 />
               </svg>
             </button>
-            <div className="main__heading-wrap">
+            <div
+              className={
+                "main__heading-wrap" +
+                (attachmentsViewActive
+                  ? " main__heading-wrap--attachments-filters"
+                  : "")
+              }
+            >
               <h1 className="main__heading">
                 {searchActive
                   ? c.titleSearch
@@ -4583,18 +4761,53 @@ export default function App() {
                       ? c.titleAllNotes
                       : connectionsViewActive
                         ? c.titleConnections
-                        : remindersViewActive
+                        : attachmentsViewActive
+                          ? c.titleAllAttachments
+                          : remindersViewActive
                           ? c.titleReminders
                           : calendarDay
                             ? formatCalendarDayTitle(calendarDay, appUiLang)
                             : active?.name ?? c.titleNoCollection}
               </h1>
+              {attachmentsViewActive ? (
+                <div
+                  className="main__attachments-filters"
+                  role="toolbar"
+                  aria-label={c.allAttachmentsFiltersAria}
+                >
+                  {ATTACHMENT_FILTER_KEYS.map((k) => (
+                    <button
+                      key={k}
+                      type="button"
+                      className={
+                        "main__attachments-filter" +
+                        (attachmentsFilterKey === k ? " is-active" : "")
+                      }
+                      aria-pressed={attachmentsFilterKey === k}
+                      onClick={() => setAttachmentsFilterKey(k)}
+                    >
+                      {k === "all"
+                        ? c.allAttachmentsFilterAll
+                        : k === "image"
+                          ? c.allAttachmentsFilterImage
+                          : k === "video"
+                            ? c.allAttachmentsFilterVideo
+                            : k === "audio"
+                              ? c.allAttachmentsFilterAudio
+                              : k === "document"
+                                ? c.allAttachmentsFilterDocument
+                                : c.allAttachmentsFilterOther}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
               {active &&
               !calendarDay &&
               !searchActive &&
               !trashViewActive &&
               !allNotesViewActive &&
               !connectionsViewActive &&
+              !attachmentsViewActive &&
               !remindersViewActive ? (
                 <button
                   type="button"
@@ -4649,7 +4862,7 @@ export default function App() {
                   </svg>
                 </button>
               ) : null}
-              {!remindersViewActive ? (
+              {!remindersViewActive && !attachmentsViewActive ? (
                 columnStepList.length === 2 ? (
                   <button
                     type="button"
@@ -4765,7 +4978,8 @@ export default function App() {
               !calendarDay &&
               !searchActive &&
               !trashViewActive &&
-              !connectionsViewActive ? (
+              !connectionsViewActive &&
+              !attachmentsViewActive ? (
                 <button
                   type="button"
                   className="main__header-icon-btn"
@@ -4814,7 +5028,10 @@ export default function App() {
           !calendarDay &&
           !searchActive &&
           !trashViewActive &&
-          !remindersViewActive && (
+          !remindersViewActive &&
+          !allNotesViewActive &&
+          !connectionsViewActive &&
+          !attachmentsViewActive && (
             <div className="main__hint-wrap">
               {editingHintCollectionId === active.id ? (
                 <textarea
@@ -5082,6 +5299,29 @@ export default function App() {
                 }}
               />
             </Suspense>
+          ) : attachmentsViewActive ? (
+            <Suspense
+              fallback={
+                <div
+                  className="connections-page connections-page--empty"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <p className="timeline__empty">{c.loading}</p>
+                </div>
+              }
+            >
+              <AllAttachmentsView
+                entries={allMediaAttachmentEntries}
+                filterKey={attachmentsFilterKey}
+                onOpenCard={(colId, cardId) => {
+                  const hit = findCardInTree(collections, colId, cardId);
+                  if (hit) {
+                    setDetailCard({ card: hit.card, colId });
+                  }
+                }}
+              />
+            </Suspense>
           ) : remindersViewActive ? (
             <Suspense
               fallback={
@@ -5249,7 +5489,8 @@ export default function App() {
           !calendarDay &&
           !searchActive &&
           !trashViewActive &&
-          !connectionsViewActive ? (
+          !connectionsViewActive &&
+          !attachmentsViewActive ? (
             <div className="timeline__add-bottom">
               <button
                 type="button"
@@ -5275,6 +5516,7 @@ export default function App() {
       !searchActive &&
       !trashViewActive &&
       !connectionsViewActive &&
+      !attachmentsViewActive &&
       (!mobileNavOpen || tabletSplitNav) &&
       !mobileCalendarOpen &&
       !remindersViewActive ? (
@@ -5346,6 +5588,7 @@ export default function App() {
           onClick={() => {
             setMobileNavOpen(false);
             setMobileCalendarOpen(false);
+            setAttachmentsViewActive(false);
             setRemindersViewActive((o) => !o);
           }}
         >
@@ -5396,7 +5639,8 @@ export default function App() {
                   searchQuery.trim().length > 0 ||
                   (!active && !allNotesViewActive && !remindersViewActive) ||
                   !canEdit ||
-                  connectionsViewActive
+                  connectionsViewActive ||
+                  attachmentsViewActive
           }
           onClick={() => {
             if (remindersViewActive) {
@@ -5884,8 +6128,65 @@ export default function App() {
                   )
               : undefined
           }
+          onOpenAddToCollection={
+            canEdit
+              ? () =>
+                  openAddToCollectionPicker(
+                    detailCardLive.colId,
+                    detailCardLive.card.id
+                  )
+              : undefined
+          }
         />
         </Suspense>
+      ) : null}
+      {addToCollectionTarget && canEdit ? (
+        <AddToCollectionModal
+          open
+          collections={collections}
+          occupiedCollectionIds={collectionIdsContainingCardId(
+            collections,
+            addToCollectionTarget.cardId
+          )}
+          onClose={() => setAddToCollectionTarget(null)}
+          onPick={async (targetColId) => {
+            const { colId, cardId } = addToCollectionTarget;
+            const hit = findCardInTree(collections, colId, cardId);
+            if (!hit?.card) {
+              setAddToCollectionTarget(null);
+              return;
+            }
+            if (
+              collectionIdsContainingCardId(collections, cardId).has(
+                targetColId
+              )
+            ) {
+              window.alert(c.cardAddToCollectionAlreadyThere);
+              setAddToCollectionTarget(null);
+              return;
+            }
+            setAddToCollectionTarget(null);
+            if (dataMode === "local") {
+              setCollections((prev) =>
+                appendCardCopyToCollection(
+                  prev,
+                  targetColId,
+                  hit.card,
+                  newNotePlacement === "top"
+                )
+              );
+              return;
+            }
+            const created = await createCardApi(targetColId, hit.card, {
+              insertAtStart: newNotePlacement === "top",
+            });
+            if (!created) {
+              window.alert(c.errMergeColSave);
+              return;
+            }
+            await resyncRemoteCollectionsTree();
+          }}
+        />
       ) : null}
       {reminderPicker ? (
         <Suspense fallback={null}>

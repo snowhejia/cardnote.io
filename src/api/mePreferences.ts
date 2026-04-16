@@ -1,4 +1,4 @@
-import type { TrashedNoteEntry } from "../types";
+import type { NoteCard, TrashedNoteEntry } from "../types";
 import { apiBase, apiFetchInit } from "./apiBase";
 import { buildHeadersGet, buildHeadersPut } from "./collections";
 
@@ -75,6 +75,35 @@ export async function fetchMeTrash(): Promise<TrashedNoteEntry[] | null> {
 }
 
 /** 写入一条回收站快照（删除笔记前调用） */
+/** 从回收站恢复到指定合集（服务端清除 trashed 标记并插入归属） */
+export async function postMeTrashRestore(args: {
+  cardId: string;
+  targetCollectionId: string;
+  insertAtStart?: boolean;
+}): Promise<{ ok: true; card: NoteCard } | { ok: false }> {
+  const base = apiBase();
+  try {
+    const r = await fetch(
+      `${base}/api/me/trash/restore`,
+      apiFetchInit({
+        method: "POST",
+        headers: buildHeadersPut({ "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          cardId: args.cardId,
+          targetCollectionId: args.targetCollectionId,
+          insertAtStart: args.insertAtStart ?? false,
+        }),
+      })
+    );
+    if (!r.ok) return { ok: false };
+    const j = (await r.json()) as { card?: unknown };
+    if (!j.card || typeof j.card !== "object") return { ok: false };
+    return { ok: true, card: j.card as NoteCard };
+  } catch {
+    return { ok: false };
+  }
+}
+
 export async function postMeTrashEntry(entry: TrashedNoteEntry): Promise<boolean> {
   const base = apiBase();
   try {

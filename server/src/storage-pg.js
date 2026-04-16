@@ -28,12 +28,15 @@ function rowToCard(row) {
     ...(row.reminder_completed_note
       ? { reminderCompletedNote: row.reminder_completed_note }
       : {}),
-    pinned: row.pinned,
+    pinned: row.pinned ?? false,
     tags: row.tags ?? [],
     relatedRefs: row.related_refs ?? [],
     media: row.media ?? [],
   };
 }
+
+const LOOSE_NOTES_COLLECTION_ID = "__loose_notes";
+const LOOSE_NOTES_DOT_COLOR = "#a8a29e";
 
 /**
  * 把数据库行（snake_case）转换为前端期望的合集格式（不含 cards/children，由调用方组装）。
@@ -105,15 +108,17 @@ function buildTree(colRows, cardRows) {
 }
 
 /**
- * 把嵌套 Collection[] 平铺成 { collections: Row[], cards: Row[] }，并分配 sort_order。
+ * 把嵌套 Collection[] 平铺成 collections + 去重后的 cards + placements（同 id 多合集只存一条 cards 行）。
  * @param {string|null} userId
  * @param {Array} tree
  */
 function flattenTree(userId, tree) {
   const collections = [];
-  const cards = [];
+  /** @type {Map<string, object>} */
+  const cardById = new Map();
+  const placements = [];
 
-  function walk(nodes, parentId, depth) {
+  function walk(nodes, parentId) {
     nodes.forEach((col, idx) => {
       collections.push({
         id: col.id,
@@ -124,35 +129,40 @@ function flattenTree(userId, tree) {
         sort_order: idx,
         hint: typeof col.hint === "string" ? col.hint : "",
       });
-      // 卡片（旧 JSON 有时叫 blocks，统一读两个字段）
       const cardList = col.cards ?? col.blocks ?? [];
       cardList.forEach((card, ci) => {
-        cards.push({
-          id: card.id,
+        if (!cardById.has(card.id)) {
+          cardById.set(card.id, {
+            id: card.id,
+            user_id: userId,
+            text: card.text ?? "",
+            minutes_of_day: card.minutesOfDay ?? 0,
+            added_on: card.addedOn ?? null,
+            reminder_on: card.reminderOn ?? null,
+            reminder_time: card.reminderTime ?? null,
+            reminder_note: card.reminderNote ?? null,
+            reminder_completed_at: card.reminderCompletedAt ?? null,
+            reminder_completed_note: card.reminderCompletedNote ?? null,
+            tags: card.tags ?? [],
+            related_refs: card.relatedRefs ?? [],
+            media: card.media ?? [],
+          });
+        }
+        placements.push({
+          card_id: card.id,
           collection_id: col.id,
-          text: card.text ?? "",
-          minutes_of_day: card.minutesOfDay ?? 0,
-          added_on: card.addedOn ?? null,
-          reminder_on: card.reminderOn ?? null,
-          reminder_time: card.reminderTime ?? null,
-          reminder_note: card.reminderNote ?? null,
-          reminder_completed_at: card.reminderCompletedAt ?? null,
-          reminder_completed_note: card.reminderCompletedNote ?? null,
           pinned: card.pinned ?? false,
-          tags: card.tags ?? [],
-          related_refs: card.relatedRefs ?? [],
-          media: card.media ?? [],
           sort_order: ci,
         });
       });
       if (Array.isArray(col.children) && col.children.length > 0) {
-        walk(col.children, col.id, depth + 1);
+        walk(col.children, col.id);
       }
     });
   }
 
-  walk(tree, null, 0);
-  return { collections, cards };
+  walk(tree, null);
+  return { collections, cards: [...cardById.values()], placements };
 }
 
 /**
@@ -180,7 +190,6 @@ function userIdCondition(userId, paramIdx) {
 export async function getCollectionsTree(userId) {
   const { sql: uidSql, params: uidParams } = userIdCondition(userId, 1);
 
-  // 按 sort_order 取全部合集
   const colRes = await query(
     `SELECT id, user_id, parent_id, name, dot_color, sort_order, hint
      FROM collections
@@ -189,22 +198,65 @@ export async function getCollectionsTree(userId) {
     uidParams
   );
 
-  if (colRes.rows.length === 0) return [];
+  const { sql: cUidSql, params: cUidParams } = userIdCondition(userId, 1);
+  const orphanRes = await query(
+    `SELECT c.id, c.text, c.minutes_of_day, c.added_on, c.reminder_on,
+            c.reminder_time, c.reminder_note, c.reminder_completed_at, c.reminder_completed_note,
+            c.tags, c.related_refs, c.media
+     FROM cards c
+     WHERE (${cUidSql})
+       AND c.trashed_at IS NULL
+       AND NOT EXISTS (SELECT 1 FROM card_placements p WHERE p.card_id = c.id)
+     ORDER BY c.updated_at DESC`,
+    cUidParams
+  );
+
+  if (colRes.rows.length === 0) {
+    if (orphanRes.rows.length === 0) return [];
+    const looseCards = orphanRes.rows.map((r) => ({
+      ...rowToCard({ ...r, pinned: false }),
+    }));
+    return [
+      {
+        id: LOOSE_NOTES_COLLECTION_ID,
+        name: "",
+        dotColor: LOOSE_NOTES_DOT_COLOR,
+        cards: looseCards,
+        children: [],
+      },
+    ];
+  }
 
   const colIds = colRes.rows.map((r) => r.id);
 
-  // 一次取出所有相关卡片
   const cardRes = await query(
-    `SELECT id, collection_id, text, minutes_of_day, added_on, reminder_on,
-            reminder_time, reminder_note, reminder_completed_at, reminder_completed_note,
-            pinned, tags, related_refs, media, sort_order
-     FROM cards
-     WHERE collection_id = ANY($1)
-     ORDER BY sort_order`,
+    `SELECT c.id, c.text, c.minutes_of_day, c.added_on, c.reminder_on,
+            c.reminder_time, c.reminder_note, c.reminder_completed_at, c.reminder_completed_note,
+            c.tags, c.related_refs, c.media,
+            p.collection_id, p.pinned, p.sort_order
+     FROM card_placements p
+     INNER JOIN cards c ON c.id = p.card_id AND c.trashed_at IS NULL
+     WHERE p.collection_id = ANY($1)
+     ORDER BY p.collection_id, p.sort_order`,
     [colIds]
   );
 
-  return buildTree(colRes.rows, cardRes.rows);
+  const roots = buildTree(colRes.rows, cardRes.rows);
+
+  if (orphanRes.rows.length > 0) {
+    const looseCards = orphanRes.rows.map((r) => ({
+      ...rowToCard({ ...r, pinned: false }),
+    }));
+    roots.push({
+      id: LOOSE_NOTES_COLLECTION_ID,
+      name: "",
+      dotColor: LOOSE_NOTES_DOT_COLOR,
+      cards: looseCards,
+      children: [],
+    });
+  }
+
+  return roots;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -218,19 +270,27 @@ export async function getCollectionsTree(userId) {
  * @param {Array} collectionsArray
  */
 export async function replaceCollectionsTree(userId, collectionsArray) {
-  const { collections, cards } = flattenTree(userId, collectionsArray);
+  const { collections, cards, placements } = flattenTree(
+    userId,
+    collectionsArray
+  );
   const { sql: uidSql, params: uidParams } = userIdCondition(userId, 1);
+  const { sql: cardUidSql, params: cardUidParams } = userIdCondition(
+    userId,
+    1
+  );
 
   const client = await getClient();
   try {
     await client.query("BEGIN");
-    // SET CONSTRAINTS DEFERRED 允许 parent_id FK 在事务结束时才校验
     await client.query("SET CONSTRAINTS ALL DEFERRED");
 
-    // 删除旧数据（ON DELETE CASCADE 自动删卡片）
+    await client.query(
+      `DELETE FROM cards WHERE ${cardUidSql}`,
+      cardUidParams
+    );
     await client.query(`DELETE FROM collections WHERE ${uidSql}`, uidParams);
 
-    // 批量插入合集
     if (collections.length > 0) {
       const vals = collections
         .map(
@@ -253,19 +313,18 @@ export async function replaceCollectionsTree(userId, collectionsArray) {
       );
     }
 
-    // 批量插入卡片
     if (cards.length > 0) {
       const vals = cards
         .map(
           (_, i) =>
-            `($${i * 15 + 1}, $${i * 15 + 2}, $${i * 15 + 3}, $${i * 15 + 4}, $${i * 15 + 5}, ` +
-            `$${i * 15 + 6}, $${i * 15 + 7}, $${i * 15 + 8}, $${i * 15 + 9}, $${i * 15 + 10}, ` +
-            `$${i * 15 + 11}, $${i * 15 + 12}, $${i * 15 + 13}, $${i * 15 + 14}, $${i * 15 + 15})`
+            `($${i * 13 + 1}, $${i * 13 + 2}, $${i * 13 + 3}, $${i * 13 + 4}, $${i * 13 + 5}, ` +
+            `$${i * 13 + 6}, $${i * 13 + 7}, $${i * 13 + 8}, $${i * 13 + 9}, $${i * 13 + 10}, ` +
+            `$${i * 13 + 11}, $${i * 13 + 12}, $${i * 13 + 13})`
         )
         .join(",");
       const flat = cards.flatMap((c) => [
         c.id,
-        c.collection_id,
+        c.user_id,
         c.text,
         c.minutes_of_day,
         c.added_on,
@@ -274,18 +333,35 @@ export async function replaceCollectionsTree(userId, collectionsArray) {
         c.reminder_note ?? null,
         c.reminder_completed_at ?? null,
         c.reminder_completed_note ?? null,
-        c.pinned,
         c.tags,
         JSON.stringify(c.related_refs),
         JSON.stringify(c.media),
-        c.sort_order,
       ]);
       await client.query(
         `INSERT INTO cards
-           (id, collection_id, text, minutes_of_day, added_on, reminder_on,
+           (id, user_id, text, minutes_of_day, added_on, reminder_on,
             reminder_time, reminder_note, reminder_completed_at, reminder_completed_note,
-            pinned, tags, related_refs, media, sort_order)
+            tags, related_refs, media)
          VALUES ${vals}`,
+        flat
+      );
+    }
+
+    if (placements.length > 0) {
+      const vals = placements
+        .map(
+          (_, i) =>
+            `($${i * 4 + 1}, $${i * 4 + 2}, $${i * 4 + 3}, $${i * 4 + 4})`
+        )
+        .join(",");
+      const flat = placements.flatMap((p) => [
+        p.card_id,
+        p.collection_id,
+        p.pinned,
+        p.sort_order,
+      ]);
+      await client.query(
+        `INSERT INTO card_placements (card_id, collection_id, pinned, sort_order) VALUES ${vals}`,
         flat
       );
     }
@@ -398,7 +474,7 @@ export async function updateCollection(userId, collectionId, patch) {
 }
 
 /**
- * 删除合集（ON DELETE CASCADE 自动删子合集和所有卡片）。
+ * 删除合集（子合集随 parent_id CASCADE；笔记归属行随 collection CASCADE，cards 表不删）。
  * @param {string|null} userId
  * @param {string} collectionId
  */
@@ -423,7 +499,6 @@ export async function deleteCollection(userId, collectionId) {
  * @param {object} card
  */
 export async function createCard(userId, collectionId, card) {
-  // 验证合集属于该用户
   const { sql: uidSql, params: uidParams } = userIdCondition(userId, 2);
   const colCheck = await query(
     `SELECT id FROM collections WHERE id = $1 AND ${uidSql}`,
@@ -453,27 +528,58 @@ export async function createCard(userId, collectionId, card) {
   let sortOrder;
   if (insertAtStart) {
     const minRes = await query(
-      `SELECT MIN(sort_order) AS m FROM cards WHERE collection_id = $1`,
+      `SELECT MIN(sort_order) AS m FROM card_placements WHERE collection_id = $1`,
       [collectionId]
     );
     const m = minRes.rows[0]?.m;
     sortOrder = m === null || m === undefined ? 0 : m - 1;
   } else {
     const orderRes = await query(
-      "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM cards WHERE collection_id = $1",
+      `SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM card_placements WHERE collection_id = $1`,
       [collectionId]
     );
     sortOrder = orderRes.rows[0].next;
   }
 
+  const { sql: cUidSql, params: cUidParams } = userIdCondition(userId, 2);
+  const existing = await query(
+    `SELECT id, user_id, trashed_at FROM cards WHERE id = $1 AND ${cUidSql}`,
+    [id, ...cUidParams]
+  );
+
+  if (existing.rowCount > 0) {
+    if (existing.rows[0].trashed_at != null) {
+      throw new Error("该笔记在回收站中，请先恢复");
+    }
+    await query(
+      `INSERT INTO card_placements (card_id, collection_id, pinned, sort_order)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (card_id, collection_id) DO UPDATE SET
+         pinned = EXCLUDED.pinned,
+         sort_order = EXCLUDED.sort_order`,
+      [id, collectionId, pinned, sortOrder]
+    );
+    const row = await query(
+      `SELECT c.id, c.text, c.minutes_of_day, c.added_on, c.reminder_on,
+              c.reminder_time, c.reminder_note, c.reminder_completed_at, c.reminder_completed_note,
+              c.tags, c.related_refs, c.media, p.pinned
+       FROM cards c
+       JOIN card_placements p ON p.card_id = c.id AND p.collection_id = $2
+       WHERE c.id = $1`,
+      [id, collectionId]
+    );
+    const r = row.rows[0];
+    return rowToCard(r);
+  }
+
   await query(
     `INSERT INTO cards
-       (id, collection_id, text, minutes_of_day, added_on, reminder_on,
-        reminder_time, reminder_note, reminder_completed_at, reminder_completed_note, pinned, tags, related_refs, media, sort_order)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+       (id, user_id, text, minutes_of_day, added_on, reminder_on,
+        reminder_time, reminder_note, reminder_completed_at, reminder_completed_note, tags, related_refs, media)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
     [
       id,
-      collectionId,
+      userId ?? null,
       text,
       minutesOfDay,
       addedOn,
@@ -482,12 +588,16 @@ export async function createCard(userId, collectionId, card) {
       reminderNote,
       reminderCompletedAt,
       reminderCompletedNote,
-      pinned,
       tags,
       JSON.stringify(relatedRefs),
       JSON.stringify(media),
-      sortOrder,
     ]
+  );
+
+  await query(
+    `INSERT INTO card_placements (card_id, collection_id, pinned, sort_order)
+     VALUES ($1, $2, $3, $4)`,
+    [id, collectionId, pinned, sortOrder]
   );
 
   return {
@@ -508,116 +618,167 @@ export async function createCard(userId, collectionId, card) {
 }
 
 /**
- * 更新卡片的任意字段子集。
- * 验证卡片所属合集的 user_id 与传入 userId 一致。
+ * 更新卡片：正文等在 cards 表；置顶、排序、跨合集在 card_placements。
+ * patch.placementCollectionId 在更新 pinned / sortOrder / collectionId（移动）时必填。
  * @param {string|null} userId
  * @param {string} cardId
- * @param {object} patch — { text?, tags?, media?, pinned?, relatedRefs?, minutesOfDay?, addedOn?, reminderOn?, collectionId?, sortOrder? }
+ * @param {object} patch
  */
 export async function updateCard(userId, cardId, patch) {
-  const fields = [];
-  const params = [];
-  let i = 1;
+  const placementCollectionId =
+    typeof patch.placementCollectionId === "string"
+      ? patch.placementCollectionId.trim()
+      : "";
 
-  if (typeof patch.text === "string") {
-    fields.push(`text = $${i++}`);
-    params.push(patch.text);
-  }
-  if (Array.isArray(patch.tags)) {
-    fields.push(`tags = $${i++}`);
-    params.push(patch.tags);
-  }
-  if (Array.isArray(patch.media)) {
-    fields.push(`media = $${i++}`);
-    params.push(JSON.stringify(patch.media));
-  }
-  if (typeof patch.pinned === "boolean") {
-    fields.push(`pinned = $${i++}`);
-    params.push(patch.pinned);
-  }
-  if (Array.isArray(patch.relatedRefs)) {
-    fields.push(`related_refs = $${i++}`);
-    params.push(JSON.stringify(patch.relatedRefs));
-  }
-  if (typeof patch.minutesOfDay === "number") {
-    fields.push(`minutes_of_day = $${i++}`);
-    params.push(patch.minutesOfDay);
-  }
-  if ("addedOn" in patch) {
-    fields.push(`added_on = $${i++}`);
-    params.push(patch.addedOn ?? null);
-  }
-  if ("reminderOn" in patch) {
-    fields.push(`reminder_on = $${i++}`);
-    params.push(patch.reminderOn ?? null);
-  }
-  if ("reminderTime" in patch) {
-    fields.push(`reminder_time = $${i++}`);
-    params.push(patch.reminderTime ?? null);
-  }
-  if ("reminderNote" in patch) {
-    fields.push(`reminder_note = $${i++}`);
-    params.push(patch.reminderNote ?? null);
-  }
-  if ("reminderCompletedAt" in patch) {
-    fields.push(`reminder_completed_at = $${i++}`);
-    params.push(patch.reminderCompletedAt ?? null);
-  }
-  if ("reminderCompletedNote" in patch) {
-    fields.push(`reminder_completed_note = $${i++}`);
-    params.push(patch.reminderCompletedNote ?? null);
+  const moveToColId =
+    typeof patch.collectionId === "string" && patch.collectionId.trim()
+      ? patch.collectionId.trim()
+      : null;
+
+  const hasPlacementPatch =
+    typeof patch.pinned === "boolean" ||
+    (typeof patch.sortOrder === "number" &&
+      Number.isFinite(patch.sortOrder)) ||
+    Boolean(moveToColId);
+
+  if (hasPlacementPatch && !placementCollectionId) {
+    throw new Error("placementCollectionId 为必填（置顶、排序或移动归属时）");
   }
 
-  let newColId = null;
-  if (typeof patch.collectionId === "string" && patch.collectionId.trim()) {
-    newColId = patch.collectionId.trim();
-    fields.push(`collection_id = $${i++}`);
-    params.push(newColId);
-  }
-  if (typeof patch.sortOrder === "number" && Number.isFinite(patch.sortOrder)) {
-    fields.push(`sort_order = $${i++}`);
-    params.push(patch.sortOrder);
-  }
-
-  if (fields.length === 0) throw new Error("未提供任何可更新字段");
-
-  if (newColId) {
+  if (moveToColId) {
     if (userId === null || userId === undefined) {
       const chk = await query(
         `SELECT 1 FROM collections nc WHERE nc.id = $1 AND nc.user_id IS NULL`,
-        [newColId]
+        [moveToColId]
       );
       if (chk.rowCount === 0) throw new Error("目标合集不存在或无权限");
     } else {
       const chk = await query(
         `SELECT 1 FROM collections nc WHERE nc.id = $1 AND nc.user_id = $2`,
-        [newColId, userId]
+        [moveToColId, userId]
       );
       if (chk.rowCount === 0) throw new Error("目标合集不存在或无权限");
     }
   }
 
-  // 通过 JOIN 同时验证归属（迁移合集前须仍位于当前用户名下某合集内）
-  params.push(cardId); // $i
-  const cardIdParam = i++;
+  const cardCols = [];
+  const cardParams = [];
+  let i = 1;
 
-  const { sql: uidSql, params: uidParams } = userIdCondition(userId, i);
+  if (typeof patch.text === "string") {
+    cardCols.push(`text = $${i++}`);
+    cardParams.push(patch.text);
+  }
+  if (Array.isArray(patch.tags)) {
+    cardCols.push(`tags = $${i++}`);
+    cardParams.push(patch.tags);
+  }
+  if (Array.isArray(patch.media)) {
+    cardCols.push(`media = $${i++}`);
+    cardParams.push(JSON.stringify(patch.media));
+  }
+  if (Array.isArray(patch.relatedRefs)) {
+    cardCols.push(`related_refs = $${i++}`);
+    cardParams.push(JSON.stringify(patch.relatedRefs));
+  }
+  if (typeof patch.minutesOfDay === "number") {
+    cardCols.push(`minutes_of_day = $${i++}`);
+    cardParams.push(patch.minutesOfDay);
+  }
+  if ("addedOn" in patch) {
+    cardCols.push(`added_on = $${i++}`);
+    cardParams.push(patch.addedOn ?? null);
+  }
+  if ("reminderOn" in patch) {
+    cardCols.push(`reminder_on = $${i++}`);
+    cardParams.push(patch.reminderOn ?? null);
+  }
+  if ("reminderTime" in patch) {
+    cardCols.push(`reminder_time = $${i++}`);
+    cardParams.push(patch.reminderTime ?? null);
+  }
+  if ("reminderNote" in patch) {
+    cardCols.push(`reminder_note = $${i++}`);
+    cardParams.push(patch.reminderNote ?? null);
+  }
+  if ("reminderCompletedAt" in patch) {
+    cardCols.push(`reminder_completed_at = $${i++}`);
+    cardParams.push(patch.reminderCompletedAt ?? null);
+  }
+  if ("reminderCompletedNote" in patch) {
+    cardCols.push(`reminder_completed_note = $${i++}`);
+    cardParams.push(patch.reminderCompletedNote ?? null);
+  }
 
-  const res = await query(
-    `UPDATE cards
-     SET ${fields.join(", ")}
-     WHERE id = $${cardIdParam}
-       AND collection_id IN (
-         SELECT id FROM collections WHERE ${uidSql}
-       )
-     RETURNING id`,
-    [...params, ...uidParams]
-  );
-  if (res.rowCount === 0) throw new Error("卡片不存在或无权限");
+  if (cardCols.length === 0 && !hasPlacementPatch) {
+    throw new Error("未提供任何可更新字段");
+  }
+
+  const client = await getClient();
+  try {
+    await client.query("BEGIN");
+
+    if (cardCols.length > 0) {
+      const { sql: cUidSql, params: cUidParams } = userIdCondition(userId, i + 1);
+      const res = await client.query(
+        `UPDATE cards SET ${cardCols.join(", ")}
+         WHERE id = $${i} AND (${cUidSql}) AND trashed_at IS NULL`,
+        [...cardParams, cardId, ...cUidParams]
+      );
+      if (res.rowCount === 0) throw new Error("卡片不存在或无权限");
+    }
+
+    if (hasPlacementPatch) {
+      const pCols = [];
+      const pParams = [];
+      let k = 1;
+      if (moveToColId) {
+        pCols.push(`collection_id = $${k++}`);
+        pParams.push(moveToColId);
+      }
+      if (typeof patch.pinned === "boolean") {
+        pCols.push(`pinned = $${k++}`);
+        pParams.push(patch.pinned);
+      }
+      if (
+        typeof patch.sortOrder === "number" &&
+        Number.isFinite(patch.sortOrder)
+      ) {
+        pCols.push(`sort_order = $${k++}`);
+        pParams.push(patch.sortOrder);
+      }
+      if (pCols.length === 0) {
+        throw new Error("未提供可更新的归属字段");
+      }
+      const { sql: pUidSql, params: pUidParams } = userIdCondition(
+        userId,
+        k + 2
+      );
+      const pUidQualified = pUidSql.replace(/\buser_id\b/g, "c.user_id");
+      const res = await client.query(
+        `UPDATE card_placements p
+         SET ${pCols.join(", ")}
+         FROM cards c
+         WHERE p.card_id = c.id
+           AND p.card_id = $${k}
+           AND p.collection_id = $${k + 1}
+           AND (${pUidQualified})`,
+        [...pParams, cardId, placementCollectionId, ...pUidParams]
+      );
+      if (res.rowCount === 0) throw new Error("卡片归属不存在或无权限");
+    }
+
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
 }
 
 /**
- * 删除卡片。同样验证归属。
+ * 删除整张笔记（所有合集中的出现一并删除）。
  * @param {string|null} userId
  * @param {string} cardId
  */
@@ -625,18 +786,25 @@ export async function deleteCard(userId, cardId) {
   const { sql: uidSql, params: uidParams } = userIdCondition(userId, 2);
   const res = await query(
     `DELETE FROM cards
-     WHERE id = $1
-       AND collection_id IN (
-         SELECT id FROM collections WHERE ${uidSql}
-       )`,
+     WHERE id = $1 AND (${uidSql})`,
     [cardId, ...uidParams]
   );
   if (res.rowCount === 0) throw new Error("卡片不存在或无权限");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 侧栏：星标合集 + 垃圾桶（owner_key：多用户为 JWT sub，单用户模式 __single__）
+// 侧栏：星标（collections.is_favorite）+ 垃圾桶（软删除在 cards.trashed_at）
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * preferences owner_key → cards.user_id（与 listFavoriteCollectionIds 一致）
+ * @param {string} ownerKey
+ * @returns {string|null}
+ */
+function ownerKeyToUserId(ownerKey) {
+  if (!ownerKey || ownerKey === "__single__") return null;
+  return ownerKey;
+}
 
 /**
  * @param {import("pg").PoolClient} client
@@ -659,40 +827,72 @@ async function collectionOwnedByUser(client, collectionId, userId) {
 }
 
 /**
- * @param {string} ownerKey
+ * 星标合集 id 列表（顺序与侧栏一致）。
+ * @param {string} ownerKey 多用户为 JWT sub；单库为 __single__
  * @returns {Promise<string[]>}
  */
 export async function listFavoriteCollectionIds(ownerKey) {
+  if (!ownerKey || ownerKey === "__single__") {
+    const res = await query(
+      `SELECT id FROM collections
+       WHERE user_id IS NULL AND is_favorite = true
+       ORDER BY favorite_sort ASC NULLS LAST, sort_order ASC, id ASC`,
+      []
+    );
+    return res.rows.map((r) => r.id);
+  }
   const res = await query(
-    `SELECT collection_id FROM user_favorite_collections
-     WHERE owner_key = $1 ORDER BY created_at ASC`,
+    `SELECT id FROM collections
+     WHERE user_id = $1 AND is_favorite = true
+     ORDER BY favorite_sort ASC NULLS LAST, sort_order ASC, id ASC`,
     [ownerKey]
   );
-  return res.rows.map((r) => r.collection_id);
+  return res.rows.map((r) => r.id);
 }
 
 /**
- * 整表替换星标 id 列表；仅插入仍属于该用户的合集 id。
- * @param {string} ownerKey
+ * 整表替换星标：先清空当前用户名下所有 is_favorite，再按数组顺序写回。
+ * @param {string} ownerKey 与 preferencesOwnerKey 一致（保留参数供调用方对齐）
  * @param {string[]} collectionIds
  * @param {string|null|undefined} userId
  */
-export async function replaceFavoriteCollectionIds(ownerKey, collectionIds, userId) {
+export async function replaceFavoriteCollectionIds(
+  _ownerKey,
+  collectionIds,
+  userId
+) {
   const ids = Array.isArray(collectionIds) ? collectionIds : [];
   const client = await getClient();
   try {
     await client.query("BEGIN");
-    await client.query(`DELETE FROM user_favorite_collections WHERE owner_key = $1`, [ownerKey]);
+    if (userId === null || userId === undefined) {
+      await client.query(
+        `UPDATE collections SET is_favorite = false, favorite_sort = NULL WHERE user_id IS NULL`
+      );
+    } else {
+      await client.query(
+        `UPDATE collections SET is_favorite = false, favorite_sort = NULL WHERE user_id = $1`,
+        [userId]
+      );
+    }
+    let sort = 0;
     for (const cid of ids) {
       if (typeof cid !== "string" || !cid.trim()) continue;
       const id = cid.trim();
       const ok = await collectionOwnedByUser(client, id, userId);
       if (!ok) continue;
-      await client.query(
-        `INSERT INTO user_favorite_collections (owner_key, collection_id) VALUES ($1, $2)
-         ON CONFLICT (owner_key, collection_id) DO NOTHING`,
-        [ownerKey, id]
-      );
+      if (userId === null || userId === undefined) {
+        await client.query(
+          `UPDATE collections SET is_favorite = true, favorite_sort = $1 WHERE id = $2 AND user_id IS NULL`,
+          [sort, id]
+        );
+      } else {
+        await client.query(
+          `UPDATE collections SET is_favorite = true, favorite_sort = $1 WHERE id = $2 AND user_id = $3`,
+          [sort, id, userId]
+        );
+      }
+      sort += 1;
     }
     await client.query("COMMIT");
   } catch (e) {
@@ -707,60 +907,177 @@ export async function replaceFavoriteCollectionIds(ownerKey, collectionIds, user
  * @param {string} ownerKey
  */
 export async function listTrashedNotes(ownerKey) {
+  const userId = ownerKeyToUserId(ownerKey);
+  const { sql: uidSql, params: uidParams } = userIdCondition(userId, 1);
   const res = await query(
-    `SELECT trash_id, col_id, col_path_label, card, deleted_at FROM trashed_notes
-     WHERE owner_key = $1 ORDER BY deleted_at DESC`,
-    [ownerKey]
+    `SELECT c.id, c.text, c.minutes_of_day, c.added_on, c.reminder_on,
+            c.reminder_time, c.reminder_note, c.reminder_completed_at, c.reminder_completed_note,
+            c.tags, c.related_refs, c.media,
+            c.trashed_at, c.trash_col_id, c.trash_col_path_label
+     FROM cards c
+     WHERE (${uidSql}) AND c.trashed_at IS NOT NULL
+     ORDER BY c.trashed_at DESC`,
+    uidParams
   );
   return res.rows.map((r) => ({
-    trashId: r.trash_id,
-    colId: r.col_id,
-    colPathLabel: r.col_path_label ?? "",
-    card: r.card,
+    trashId: r.id,
+    colId: r.trash_col_id ?? "",
+    colPathLabel: r.trash_col_path_label ?? "",
+    card: rowToCard({ ...r, pinned: false }),
     deletedAt:
-      r.deleted_at instanceof Date
-        ? r.deleted_at.toISOString()
-        : String(r.deleted_at),
+      r.trashed_at instanceof Date
+        ? r.trashed_at.toISOString()
+        : String(r.trashed_at),
   }));
 }
 
 /**
+ * 软删除：移除所有归属行并标记 trashed_at（不再使用独立 trashed_notes 表）。
  * @param {string} ownerKey
- * @param {{ trashId: string, colId: string, colPathLabel?: string, card: object, deletedAt?: string }} row
+ * @param {{ colId: string, colPathLabel?: string, cardId: string, deletedAt?: string }} row
  */
-export async function insertTrashedNote(ownerKey, row) {
-  const {
-    trashId,
-    colId,
-    colPathLabel = "",
-    card,
-    deletedAt,
-  } = row;
-  if (!trashId || !colId || !card || typeof card !== "object") {
-    throw new Error("回收站条目缺少 trashId、colId 或 card");
+export async function softTrashCard(ownerKey, row) {
+  const { colId, colPathLabel = "", cardId, deletedAt } = row;
+  if (!colId || !cardId) {
+    throw new Error("回收站条目缺少 colId 或 card.id");
   }
-  await query(
-    `INSERT INTO trashed_notes (trash_id, owner_key, col_id, col_path_label, card, deleted_at)
-     VALUES ($1,$2,$3,$4,$5::jsonb,$6::timestamptz)`,
-    [
-      trashId,
-      ownerKey,
-      colId,
-      String(colPathLabel ?? ""),
-      JSON.stringify(card),
-      deletedAt || new Date().toISOString(),
-    ]
-  );
+  const userId = ownerKeyToUserId(ownerKey);
+  const { sql: cUidSql, params: cUidParams } = userIdCondition(userId, 2);
+  const client = await getClient();
+  try {
+    await client.query("BEGIN");
+    const chk = await client.query(
+      `SELECT trashed_at FROM cards WHERE id = $1 AND (${cUidSql})`,
+      [cardId, ...cUidParams]
+    );
+    if (chk.rowCount === 0) throw new Error("卡片不存在或无权限");
+    if (chk.rows[0].trashed_at != null) {
+      throw new Error("卡片已在回收站中");
+    }
+    await client.query(`DELETE FROM card_placements WHERE card_id = $1`, [
+      cardId,
+    ]);
+    const ts = deletedAt ? new Date(deletedAt) : new Date();
+    const { sql: uSql, params: uParams } = userIdCondition(userId, 5);
+    const up = await client.query(
+      `UPDATE cards SET trashed_at = $1::timestamptz, trash_col_id = $2, trash_col_path_label = $3
+       WHERE id = $4 AND (${uSql}) AND trashed_at IS NULL`,
+      [
+        ts.toISOString(),
+        colId,
+        String(colPathLabel ?? ""),
+        cardId,
+        ...uParams,
+      ]
+    );
+    if (up.rowCount === 0) throw new Error("无法移入回收站");
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
 }
 
 /**
+ * 从回收站恢复到指定合集（清除 trashed 标记并插入一条归属）。
+ * @param {string} ownerKey
+ * @param {string} cardId
+ * @param {string} targetCollectionId
+ * @param {boolean} [insertAtStart]
+ * @returns {Promise<object>}
+ */
+export async function restoreTrashedCard(
+  ownerKey,
+  cardId,
+  targetCollectionId,
+  insertAtStart = false
+) {
+  const userId = ownerKeyToUserId(ownerKey);
+  const { sql: colUidSql, params: colUidParams } = userIdCondition(
+    userId,
+    2
+  );
+  const colCheck = await query(
+    `SELECT id FROM collections WHERE id = $1 AND (${colUidSql})`,
+    [targetCollectionId, ...colUidParams]
+  );
+  if (colCheck.rowCount === 0) throw new Error("合集不存在或无权限");
+
+  const { sql: cUidSql, params: cUidParams } = userIdCondition(userId, 2);
+  const cardChk = await query(
+    `SELECT id FROM cards WHERE id = $1 AND (${cUidSql}) AND trashed_at IS NOT NULL`,
+    [cardId, ...cUidParams]
+  );
+  if (cardChk.rowCount === 0) {
+    throw new Error("回收站中找不到该笔记或无权恢复");
+  }
+
+  let sortOrder;
+  if (insertAtStart) {
+    const minRes = await query(
+      `SELECT MIN(sort_order) AS m FROM card_placements WHERE collection_id = $1`,
+      [targetCollectionId]
+    );
+    const m = minRes.rows[0]?.m;
+    sortOrder = m === null || m === undefined ? 0 : m - 1;
+  } else {
+    const orderRes = await query(
+      `SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM card_placements WHERE collection_id = $1`,
+      [targetCollectionId]
+    );
+    sortOrder = orderRes.rows[0].next;
+  }
+
+  const client = await getClient();
+  try {
+    await client.query("BEGIN");
+    const { sql: uSql, params: uParams } = userIdCondition(userId, 2);
+    const up = await client.query(
+      `UPDATE cards SET trashed_at = NULL, trash_col_id = NULL, trash_col_path_label = ''
+       WHERE id = $1 AND (${uSql}) AND trashed_at IS NOT NULL`,
+      [cardId, ...uParams]
+    );
+    if (up.rowCount === 0) throw new Error("恢复失败");
+    await client.query(
+      `INSERT INTO card_placements (card_id, collection_id, pinned, sort_order)
+       VALUES ($1, $2, false, $3)`,
+      [cardId, targetCollectionId, sortOrder]
+    );
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
+
+  const row = await query(
+    `SELECT c.id, c.text, c.minutes_of_day, c.added_on, c.reminder_on,
+            c.reminder_time, c.reminder_note, c.reminder_completed_at, c.reminder_completed_note,
+            c.tags, c.related_refs, c.media, p.pinned
+     FROM cards c
+     JOIN card_placements p ON p.card_id = c.id AND p.collection_id = $2
+     WHERE c.id = $1`,
+    [cardId, targetCollectionId]
+  );
+  const r = row.rows[0];
+  return r ? rowToCard(r) : { id: cardId };
+}
+
+/**
+ * 永久删除回收站中的一条（按卡片 id，与 trashId 一致）。
  * @param {string} ownerKey
  * @param {string} trashId
  */
 export async function deleteTrashedNote(ownerKey, trashId) {
+  const userId = ownerKeyToUserId(ownerKey);
+  const { sql: uidSql, params: uidParams } = userIdCondition(userId, 2);
   const res = await query(
-    `DELETE FROM trashed_notes WHERE owner_key = $1 AND trash_id = $2`,
-    [ownerKey, trashId]
+    `DELETE FROM cards
+     WHERE id = $1 AND (${uidSql}) AND trashed_at IS NOT NULL`,
+    [trashId, ...uidParams]
   );
   if (res.rowCount === 0) throw new Error("回收站记录不存在或无权限");
 }
@@ -769,5 +1086,7 @@ export async function deleteTrashedNote(ownerKey, trashId) {
  * @param {string} ownerKey
  */
 export async function clearTrashedNotes(ownerKey) {
-  await query(`DELETE FROM trashed_notes WHERE owner_key = $1`, [ownerKey]);
+  const userId = ownerKeyToUserId(ownerKey);
+  const { sql: uidSql, params: uidParams } = userIdCondition(userId, 1);
+  await query(`DELETE FROM cards WHERE (${uidSql}) AND trashed_at IS NOT NULL`, uidParams);
 }
