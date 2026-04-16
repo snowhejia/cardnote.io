@@ -1275,11 +1275,13 @@ const CDN_TOKEN_QUERY_TIME_KEY = String(
     process.env.CDN_AUTH_TIME_PARAM ??
     "txTime"
 ).trim();
+// 腾讯云 CDN Type D：?sign=md5hash&t=timestamp，md5 串为 pkey+uri+timestamp（无分隔符），
+// uri 须以 / 开头；t 为「签发时刻」Unix 秒（十进制），过期由控制台「鉴权 URL 有效时长」决定。
 const CDN_TOKEN_TIME_HEX = !/^(0|false|no|off)$/i.test(
   String(
     process.env.CDN_TOKEN_AUTH_TIME_HEX ??
       process.env.CDN_AUTH_TIME_HEX ??
-      "1"
+      "0"
   ).trim()
 );
 
@@ -1287,16 +1289,15 @@ function buildCdnTokenAuthUrl(baseUrl, objectPath, expiresSec) {
   if (!CDN_TOKEN_AUTH_ENABLED || !CDN_TOKEN_PRIMARY_KEY) return null;
   if (!baseUrl || !/^https?:\/\//i.test(baseUrl)) return null;
   const nowSec = Math.floor(Date.now() / 1000);
-  const expSec = nowSec + Math.max(60, Number(expiresSec) || CDN_TOKEN_EXPIRES_SEC);
   const tokenTime = CDN_TOKEN_TIME_HEX
-    ? expSec.toString(16).toUpperCase()
-    : String(expSec);
+    ? nowSec.toString(16).toUpperCase()
+    : String(nowSec);
   const pathForSign =
     typeof objectPath === "string" && objectPath.startsWith("/")
       ? objectPath
       : `/${String(objectPath || "").replace(/^\/+/, "")}`;
   const token = createHash("md5")
-    .update(`${CDN_TOKEN_PRIMARY_KEY}${tokenTime}${pathForSign}`)
+    .update(`${CDN_TOKEN_PRIMARY_KEY}${pathForSign}${tokenTime}`)
     .digest("hex");
   let u;
   try {
