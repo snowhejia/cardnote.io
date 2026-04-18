@@ -11,6 +11,8 @@ export type ScatteredUiChrome = {
   uiNoteInlineMediaLoadingVideo: string;
   /** 正文内联音频解析地址前 */
   uiNoteInlineMediaLoadingAudio: string;
+  /** 正文内联图片左右手柄：无障碍说明 */
+  uiNoteBodyImageResizeHandleAria: string;
   uiMoreActions: string;
   /** 时间线卡片角标：打开中等高度「卡片预览」覆盖层 */
   uiViewDetail: string;
@@ -153,6 +155,7 @@ const zh: ScatteredUiChrome = {
   uiNoteInlineMediaLoadingImage: "正在加载图片…",
   uiNoteInlineMediaLoadingVideo: "正在加载视频…",
   uiNoteInlineMediaLoadingAudio: "正在加载音频…",
+  uiNoteBodyImageResizeHandleAria: "拖动调整图片显示宽度",
   uiMoreActions: "更多操作",
   uiViewDetail: "卡片预览",
   uiCardNoteDetailFullPage: "笔记详情",
@@ -297,6 +300,7 @@ const en: ScatteredUiChrome = {
   uiNoteInlineMediaLoadingImage: "Loading image…",
   uiNoteInlineMediaLoadingVideo: "Loading video…",
   uiNoteInlineMediaLoadingAudio: "Loading audio…",
+  uiNoteBodyImageResizeHandleAria: "Drag to resize image width",
   uiMoreActions: "More actions",
   uiViewDetail: "Card preview",
   uiCardNoteDetailFullPage: "Note detail",

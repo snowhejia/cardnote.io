@@ -5196,10 +5196,13 @@ div.card__text--readonly:not(.card__text--preview) {
 /* Tiptap / ProseMirror：与横格 .card__text 行高一致 */
 .card__text-editor {
   width: 100%;
+  /* flex 子项默认 min-width:auto 会按「最宽内容」撑开，大图会带出横向滚动条 */
+  min-width: 0;
 }
 
 .card__text-editor > div {
   width: 100%;
+  min-width: 0;
 }
 
 /* 有格式工具栏时：工具栏留在编辑区顶部，正文仅在 ProseMirror 内滚动 */
@@ -5220,6 +5223,7 @@ div.card__text--readonly:not(.card__text--preview) {
 .card__text-editor:has(> .note-toolbar-wrap) > div:not(.note-toolbar-wrap):not(.ProseMirror) {
   flex: 1 1 auto;
   min-height: 0;
+  min-width: 0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -5230,6 +5234,7 @@ div.card__text--readonly:not(.card__text--preview) {
   .ProseMirror {
   flex: 1 1 auto;
   min-height: 0;
+  min-width: 0;
   overflow-y: auto;
 }
 
@@ -5237,6 +5242,7 @@ div.card__text--readonly:not(.card__text--preview) {
 .card__text-editor:has(> .note-toolbar-wrap) > .ProseMirror {
   flex: 1 1 auto;
   min-height: 0;
+  min-width: 0;
   overflow-y: auto;
 }
 
@@ -5246,6 +5252,60 @@ div.card__text--readonly:not(.card__text--preview) {
   /* 与 .card__text 一致，避免继承链上字号/行高偏差 */
   font-size: 15px;
   line-height: var(--note-line-height);
+}
+
+/* 正文图片不超过内容列宽（含 NodeView 外层 span），避免撑出横向滚动条 */
+.card__text.ProseMirror .note-body-img-nodeview {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: middle;
+  box-sizing: border-box;
+}
+
+/* 正文内联图：左右悬浮手柄调整显示宽度（仅可编辑且选中/悬停时由 React 渲染） */
+.note-body-img-nodeview--handles .note-body-img-resize-handle {
+  position: absolute;
+  top: 50%;
+  z-index: 3;
+  width: 6px;
+  height: 44px;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  border-radius: 4px;
+  background: rgba(55, 53, 47, 0.42);
+  border: 1px solid rgba(255, 255, 255, 0.88);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+  cursor: ew-resize;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.note-body-img-nodeview--handles .note-body-img-resize-handle:hover {
+  background: rgba(55, 53, 47, 0.58);
+}
+
+.note-body-img-nodeview--handles .note-body-img-resize-handle:focus-visible {
+  outline: 2px solid rgba(46, 125, 233, 0.65);
+  outline-offset: 1px;
+}
+
+.note-body-img-resize-handle--left {
+  left: 0;
+  transform: translate(-58%, -50%);
+}
+
+.note-body-img-resize-handle--right {
+  right: 0;
+  transform: translate(58%, -50%);
+}
+
+.card__text.ProseMirror img {
+  max-width: 100%;
+  height: auto;
+  vertical-align: middle;
 }
 
 .card__text-editor--readonly .ProseMirror {
@@ -8278,6 +8338,7 @@ div.card__text--readonly:not(.card__text--preview) {
 .card--detail-modal--has-gallery .card__text-editor {
   flex: 1 1 auto;
   min-height: 0;
+  min-width: 0;
 }
 
 /* 详情正方形：去掉底部内边距；正文在 ProseMirror 内滚动 */
@@ -8315,11 +8376,13 @@ div.card__text--readonly:not(.card__text--preview) {
   flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
+  min-width: 0;
 }
 
 .card-detail-wrap--square .card__paper .card__text-editor > div {
   flex: 1 1 auto;
   min-height: 0;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -8329,6 +8392,7 @@ div.card__text--readonly:not(.card__text--preview) {
   box-sizing: border-box;
   flex: 1 1 auto;
   min-height: 0;
+  min-width: 0;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
@@ -8490,6 +8554,7 @@ div.card__text--readonly:not(.card__text--preview) {
   .card__text-editor {
   flex: 1 1 auto;
   min-height: 0;
+  min-width: 0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -8501,6 +8566,7 @@ div.card__text--readonly:not(.card__text--preview) {
   > div {
   flex: 1 1 auto;
   min-height: 0;
+  min-width: 0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -8512,6 +8578,7 @@ div.card__text--readonly:not(.card__text--preview) {
   .ProseMirror {
   flex: 1 1 auto;
   min-height: 0;
+  min-width: 0;
   overflow-y: auto;
 }
 
@@ -9227,6 +9294,7 @@ body.app--related-panel-open .app.app--tablet-split-nav .main {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  min-width: 0;
 }
 
 .card-page__editor-area .note-toolbar-wrap {
@@ -9248,6 +9316,7 @@ body.app--related-panel-open .app.app--tablet-split-nav .main {
   flex: 1 1 auto;
   overflow-y: auto;
   min-height: 0;
+  min-width: 0;
   padding: 20px 32px 48px;
   font-size: 1rem;
   line-height: 1.65;
