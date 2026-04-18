@@ -6407,6 +6407,7 @@ export default function App() {
             collections,
             addToCollectionTarget.cardId
           )}
+          hideCollectionDots={hideSidebarCollectionDots}
           onClose={() => setAddToCollectionTarget(null)}
           onPick={async (targetColId) => {
             const { colId, cardId } = addToCollectionTarget;

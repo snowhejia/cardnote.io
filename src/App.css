@@ -3798,6 +3798,12 @@ textarea.main__hint-editor:focus {
   background: rgba(55, 53, 47, 0.06);
 }
 
+/* 与侧栏隐藏圆点一致：略收紧行首留白 */
+.add-to-col-modal__row--no-dot {
+  padding-left: 0.5rem;
+  gap: 0;
+}
+
 .add-to-col-modal__dot {
   flex-shrink: 0;
   width: 0.55rem;

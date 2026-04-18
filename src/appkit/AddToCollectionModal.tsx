@@ -8,6 +8,7 @@ export function AddToCollectionModal({
   open,
   collections,
   occupiedCollectionIds,
+  hideCollectionDots = false,
   onClose,
   onPick,
 }: {
@@ -15,6 +16,8 @@ export function AddToCollectionModal({
   collections: Collection[];
   /** 已包含该笔记的合集，不可再选 */
   occupiedCollectionIds: Set<string>;
+  /** 与侧栏 / 笔记设置「隐藏合集圆点」一致 */
+  hideCollectionDots?: boolean;
   onClose: () => void;
   onPick: (targetCollectionId: string) => void;
 }) {
@@ -64,15 +67,20 @@ export function AddToCollectionModal({
               <li key={col.id} className="add-to-col-modal__item">
                 <button
                   type="button"
-                  className="add-to-col-modal__row"
+                  className={
+                    "add-to-col-modal__row" +
+                    (hideCollectionDots ? " add-to-col-modal__row--no-dot" : "")
+                  }
                   role="option"
                   onClick={() => onPick(col.id)}
                 >
-                  <span
-                    className="add-to-col-modal__dot"
-                    style={{ backgroundColor: col.dotColor }}
-                    aria-hidden
-                  />
+                  {!hideCollectionDots ? (
+                    <span
+                      className="add-to-col-modal__dot"
+                      style={{ backgroundColor: col.dotColor }}
+                      aria-hidden
+                    />
+                  ) : null}
                   <span className="add-to-col-modal__path" title={path}>
                     {path}
                   </span>
