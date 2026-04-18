@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
+  type ReactNode,
 } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { createPortal } from "react-dom";
@@ -40,9 +41,12 @@ import {
   MediaLightboxPdf,
   MediaLightboxVideo,
   MediaOpenLink,
+  MediaThumbImage,
+  MediaThumbVideo,
   useMediaDisplaySrc,
 } from "./mediaDisplay";
 import { isPdfAttachment } from "./noteMediaPdf";
+import { NOTE_MEDIA_ITEM_DRAG_MIME } from "./noteEditor/noteMediaDragMime";
 import { parseHeadingsFromStoredNote } from "./noteEditor/plainHtml";
 
 const PROP_TYPE_LABELS: Record<CardPropertyType, string> = {
@@ -94,6 +98,7 @@ function CardPageAttachmentImage({
       className={className}
       loading="lazy"
       decoding="async"
+      draggable={false}
     />
   );
 }
@@ -125,6 +130,80 @@ function FileDocIcon({ className }: { className?: string }) {
   );
 }
 
+function AudioGlyphIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.65"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M9 18V5l12-2v13" />
+      <circle cx="6" cy="18" r="3" />
+      <circle cx="18" cy="16" r="3" />
+    </svg>
+  );
+}
+
+/** 右侧附件栏：各类型均展示缩略图（与 CardGallery 同一套媒体解析） */
+function CardPageAttachmentThumb({
+  item,
+  fileFallback,
+}: {
+  item: NoteMediaItem;
+  fileFallback: string;
+}) {
+  const thumbClass = "card-page__attachment-thumb";
+  const caption =
+    item.name?.trim() || fileLabelFromUrl(item.url, fileFallback);
+
+  let thumb: ReactNode;
+  if (item.kind === "image") {
+    thumb = <CardPageAttachmentImage item={item} className={thumbClass} />;
+  } else if (item.kind === "video") {
+    thumb = (
+      <MediaThumbVideo
+        url={item.url}
+        thumbnailUrl={item.thumbnailUrl}
+        coverUrl={item.coverUrl}
+        className={`${thumbClass} card__gallery-thumb card__gallery-thumb--video`}
+        playBadge
+        videoPreload="metadata"
+        thumbImagePriority={false}
+      />
+    );
+  } else if (item.kind === "audio") {
+    const cover = (item.coverUrl ?? item.thumbnailUrl)?.trim();
+    thumb = cover ? (
+      <MediaThumbImage url={cover} className={thumbClass} alt="" />
+    ) : (
+      <div className="card-page__attachment-thumb-fallback">
+        <AudioGlyphIcon className="card-page__attachment-kind-icon" />
+      </div>
+    );
+  } else {
+    const t = item.thumbnailUrl?.trim();
+    thumb = t ? (
+      <MediaThumbImage url={t} className={thumbClass} alt="" />
+    ) : (
+      <div className="card-page__attachment-thumb-fallback">
+        <FileDocIcon className="card-page__attachment-kind-icon" />
+      </div>
+    );
+  }
+
+  return (
+    <>
+      {thumb}
+      <span className="card-page__attachment-label">{caption}</span>
+    </>
+  );
+}
+
 export interface CardPageViewProps {
   card: NoteCard;
   colId: string;
@@ -144,7 +223,7 @@ export interface CardPageViewProps {
     colId: string,
     cardId: string,
     files: File[]
-  ) => void | Promise<void>;
+  ) => Promise<NoteMediaItem[]>;
   removeCardMediaItem: (
     colId: string,
     cardId: string,
@@ -1044,74 +1123,6 @@ export function CardPageView({
             </div>
           </div>
 
-          {/* 附件 */}
-          <div className="card-page__prop-row card-page__prop-row--attachments">
-            <span className="card-page__prop-label">附件</span>
-            <div className="card-page__prop-content card-page__prop-content--attachments">
-              {media.map((item, idx) => (
-                <div key={item.url} className="card-page__attachment">
-                  <button
-                    type="button"
-                    className="card-page__attachment-trigger"
-                    title={previewTitle(item.kind)}
-                    aria-label={previewTitle(item.kind)}
-                    onClick={() => setLightbox({ index: idx })}
-                    onContextMenu={(e) => openAttachmentMenu(e, item)}
-                  >
-                    {item.kind === "image" ? (
-                      <CardPageAttachmentImage
-                        item={item}
-                        className="card-page__attachment-thumb"
-                      />
-                    ) : (
-                      <span className="card-page__attachment-name">
-                        {item.name ?? item.url.split("/").pop()}
-                      </span>
-                    )}
-                  </button>
-                  {canEdit && (
-                    <button
-                      type="button"
-                      className="card-page__attachment-remove"
-                      onClick={() =>
-                        removeCardMediaItem(colId, card.id, item)
-                      }
-                      title="移除"
-                    >
-                      ×
-                    </button>
-                  )}
-                </div>
-              ))}
-              {canAttachMedia && (
-                <>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    multiple
-                    hidden
-                    onChange={(e) => {
-                      const files = Array.from(e.target.files ?? []);
-                      if (files.length)
-                        void uploadFilesToCard(colId, card.id, files);
-                      e.target.value = "";
-                    }}
-                  />
-                  <button
-                    type="button"
-                    className="card-page__prop-link card-page__prop-link--add"
-                    onClick={() => fileInputRef.current?.click()}
-                  >
-                    + 上传附件
-                  </button>
-                </>
-              )}
-              {media.length === 0 && !canAttachMedia && (
-                <span className="card-page__prop-empty">—</span>
-              )}
-            </div>
-          </div>
-
           {/* 自定义属性 */}
           {customProps.map((prop) => (
             <div
@@ -1273,14 +1284,121 @@ export function CardPageView({
           onPointerUp={onDividerPointerUp}
         />
 
-        <div className="card-page__editor-area" ref={editorAreaRef}>
-          <NoteCardTiptap
-            id={card.id}
-            value={card.text}
-            onChange={(text) => setCardText(colId, card.id, text)}
-            canEdit={canEdit}
-            showToolbar={canEdit}
-          />
+        <div className="card-page__center">
+          <div className="card-page__editor-area" ref={editorAreaRef}>
+            <NoteCardTiptap
+              id={card.id}
+              value={card.text}
+              onChange={(text) => setCardText(colId, card.id, text)}
+              canEdit={canEdit}
+              showToolbar={canEdit}
+              insertUploadedImagesAtCursor={Boolean(
+                canAttachMedia && canEdit
+              )}
+              onPasteFiles={
+                canAttachMedia && canEdit
+                  ? (files) => uploadFilesToCard(colId, card.id, files)
+                  : undefined
+              }
+            />
+          </div>
+          {media.length > 0 || canAttachMedia ? (
+            <aside
+              className="card-page__attachments-rail"
+              aria-label="附件"
+            >
+              <div className="card-page__attachments-rail-scroll">
+                <div className="card-page__attachments-rail-head-row">
+                  <div className="card-page__attachments-rail-head">附件</div>
+                  {canAttachMedia ? (
+                    <button
+                      type="button"
+                      className="card-page__attachments-rail-add"
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      添加附件
+                    </button>
+                  ) : null}
+                </div>
+                {canAttachMedia ? (
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    hidden
+                    onChange={(e) => {
+                      const files = Array.from(e.target.files ?? []);
+                      if (files.length)
+                        void uploadFilesToCard(colId, card.id, files);
+                      e.target.value = "";
+                    }}
+                  />
+                ) : null}
+                <div className="card-page__attachments-rail-list">
+                {media.map((item, idx) => (
+                  <div
+                    key={item.url}
+                    className={
+                      canEdit
+                        ? "card-page__attachment card-page__attachment--draggable"
+                        : "card-page__attachment"
+                    }
+                    draggable={canEdit}
+                    onDragStart={(e) => {
+                      if (!canEdit) return;
+                      if (
+                        (e.target as HTMLElement).closest(
+                          ".card-page__attachment-remove"
+                        )
+                      ) {
+                        e.preventDefault();
+                        return;
+                      }
+                      e.dataTransfer?.setData(
+                        NOTE_MEDIA_ITEM_DRAG_MIME,
+                        JSON.stringify({
+                          url: item.url,
+                          kind: item.kind,
+                          name: item.name,
+                        })
+                      );
+                      if (e.dataTransfer) {
+                        e.dataTransfer.effectAllowed = "copy";
+                      }
+                    }}
+                  >
+                    <button
+                      type="button"
+                      draggable={false}
+                      className="card-page__attachment-trigger"
+                      title={previewTitle(item.kind)}
+                      aria-label={previewTitle(item.kind)}
+                      onClick={() => setLightbox({ index: idx })}
+                      onContextMenu={(e) => openAttachmentMenu(e, item)}
+                    >
+                      <CardPageAttachmentThumb
+                        item={item}
+                        fileFallback={ui.uiFileFallback}
+                      />
+                    </button>
+                    {canEdit && (
+                      <button
+                        type="button"
+                        className="card-page__attachment-remove"
+                        onClick={() =>
+                          removeCardMediaItem(colId, card.id, item)
+                        }
+                        title="移除"
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
+                ))}
+                </div>
+              </div>
+            </aside>
+          ) : null}
         </div>
       </div>
       {lightboxPortal}

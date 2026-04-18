@@ -5272,6 +5272,13 @@ div.card__text--readonly:not(.card__text--preview) {
   color: inherit;
 }
 
+/* 时间线卡片：正文内嵌媒体不展示（附件由 CardGallery 单独展示，避免重复） */
+.card__text-editor--timeline-body-headings .ProseMirror img,
+.card__text-editor--timeline-body-headings .ProseMirror video,
+.card__text-editor--timeline-body-headings .ProseMirror audio {
+  display: none;
+}
+
 /* 段间距会破坏 30px 横线周期，笔记里换行多为单格一行，段与段之间不加额外 margin */
 .card__text.ProseMirror p + p {
   margin-top: 0;
@@ -5312,6 +5319,21 @@ div.card__text--readonly:not(.card__text--preview) {
   margin: 0;
   border: none;
   border-top: 1px solid var(--note-line-color);
+}
+
+.card__text.ProseMirror video.note-inline-video {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin: 0.35em 0;
+  border-radius: 6px;
+}
+
+.card__text.ProseMirror audio.note-inline-audio {
+  width: 100%;
+  max-width: 560px;
+  display: block;
+  margin: 0.35em 0;
 }
 
 .card__text.ProseMirror a {
@@ -8978,6 +9000,18 @@ body.app--related-panel-open .app.app--tablet-split-nav .main {
   background: rgba(60, 60, 67, 0.22);
 }
 
+/* 中间：正文 + 右侧附件栏 */
+
+.card-page__center {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
 /* 右侧编辑区 */
 
 .card-page__editor-area {
@@ -8986,6 +9020,124 @@ body.app--related-panel-open .app.app--tablet-split-nav .main {
   flex-direction: column;
   overflow: hidden;
   min-width: 0;
+}
+
+/* 笔记详情页：附件在正文右侧 */
+
+.card-page__attachments-rail {
+  flex: 0 0 220px;
+  width: 220px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 14px 24px 16px;
+  border-left: 1px solid rgba(60, 60, 67, 0.1);
+  background: rgba(250, 250, 252, 0.96);
+  overflow: hidden;
+  min-height: 0;
+}
+
+.card-page__attachments-rail-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.card-page__attachments-rail-head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-shrink: 0;
+  min-width: 0;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  margin: -2px -2px 0;
+  padding: 2px 2px 8px;
+  background: rgba(250, 250, 252, 0.96);
+  box-shadow: 0 1px 0 rgba(55, 53, 47, 0.06);
+}
+
+.card-page__attachments-rail-head {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(55, 53, 47, 0.42);
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.card-page__attachments-rail-add {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 2px 6px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: rgba(55, 53, 47, 0.45);
+  white-space: nowrap;
+  transition: background 0.12s, color 0.12s;
+}
+
+.card-page__attachments-rail-add:hover {
+  background: rgba(55, 53, 47, 0.06);
+  color: rgba(55, 53, 47, 0.72);
+}
+
+.card-page__attachments-rail-add:focus-visible {
+  outline: 2px solid rgba(55, 53, 47, 0.25);
+  outline-offset: 2px;
+}
+
+.card-page__attachments-rail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: stretch;
+  min-height: 0;
+}
+
+.card-page__attachments-rail .card-page__attachment {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+@media (max-width: 720px) {
+  .card-page__center {
+    flex-direction: column;
+  }
+
+  .card-page__attachments-rail {
+    flex: 0 1 auto;
+    width: 100%;
+    max-height: min(42vh, 320px);
+    border-left: none;
+    border-top: 1px solid rgba(60, 60, 67, 0.1);
+    padding: 12px 16px 16px;
+  }
+
+  .card-page__attachments-rail-list {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-content: flex-start;
+  }
+
+  .card-page__attachments-rail .card-page__attachment {
+    width: auto;
+    max-width: min(100%, 200px);
+  }
 }
 
 /* 工具栏贴顶，内容区独立滚动 */
@@ -9140,10 +9292,6 @@ body.app--related-panel-open .app.app--tablet-split-nav .main {
 
 .card-page__prop-row:hover {
   background: rgba(55, 53, 47, 0.03);
-}
-
-.card-page__prop-row--attachments {
-  align-items: flex-start;
 }
 
 /* 自定义属性：整行垂直居中，左右与删除按钮基线对齐 */
@@ -9434,16 +9582,6 @@ body.app--related-panel-open .app.app--tablet-split-nav .main {
   width: 100%;
 }
 
-.card-page__prop-content--attachments {
-  flex-direction: row;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  justify-content: flex-start;
-  gap: 8px;
-  padding-top: 4px;
-  width: 100%;
-}
-
 .card-page__prop-val-text {
   font-size: 0.875rem;
   color: rgba(55, 53, 47, 0.85);
@@ -9505,10 +9643,7 @@ body.app--related-panel-open .app.app--tablet-split-nav .main {
 }
 
 /* 单列值区：链接与占位条左缘与标签输入对齐；合集行等多列不加满宽 */
-.card-page__prop-content:not(.card-page__prop-content--row):not(
-    .card-page__prop-content--attachments
-  )
-  > .card-page__prop-link {
+.card-page__prop-content:not(.card-page__prop-content--row) > .card-page__prop-link {
   align-self: stretch;
   width: 100%;
   box-sizing: border-box;
@@ -9565,9 +9700,18 @@ body.app--related-panel-open .app.app--tablet-split-nav .main {
   box-sizing: border-box;
 }
 
+.card-page__attachment--draggable {
+  cursor: grab;
+}
+
+.card-page__attachment--draggable:active {
+  cursor: grabbing;
+}
+
 .card-page__attachment-trigger {
   display: inline-flex;
-  align-items: flex-start;
+  flex-direction: column;
+  align-items: stretch;
   gap: 6px;
   flex: 1 1 auto;
   min-width: 0;
@@ -9597,6 +9741,70 @@ body.app--related-panel-open .app.app--tablet-split-nav .main {
   object-fit: cover;
   border-radius: 4px;
   display: block;
+  -webkit-user-drag: none;
+}
+
+.card-page__attachments-rail .card-page__attachment-thumb {
+  width: 100%;
+  max-width: 168px;
+  height: auto;
+  aspect-ratio: 1;
+  max-height: 168px;
+}
+
+.card-page__attachments-rail .card__gallery-thumb-wrap {
+  position: relative;
+  inset: auto;
+  width: 100%;
+  max-width: 168px;
+  aspect-ratio: 1;
+  max-height: 168px;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 4px;
+}
+
+.card-page__attachments-rail .card__gallery-thumb-wrap .card-page__attachment-thumb,
+.card-page__attachments-rail .card__gallery-thumb-wrap .card__gallery-thumb,
+.card-page__attachments-rail .card__gallery-thumb-wrap video {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  aspect-ratio: unset;
+  object-fit: cover;
+}
+
+.card-page__attachments-rail .card-page__attachment-thumb-fallback {
+  width: 100%;
+  max-width: 168px;
+  aspect-ratio: 1;
+  max-height: 168px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: rgba(55, 53, 47, 0.08);
+  border-radius: 4px;
+  color: rgba(55, 53, 47, 0.4);
+  box-sizing: border-box;
+}
+
+.card-page__attachment-kind-icon {
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+}
+
+.card-page__attachment-label {
+  display: block;
+  max-width: 168px;
+  font-size: 0.6875rem;
+  line-height: 1.25;
+  color: rgba(55, 53, 47, 0.58);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .card-page__attachment-thumb--pending {

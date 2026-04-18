@@ -70,7 +70,7 @@ export type NoteTimelineCardProps = {
     colId: string,
     cardId: string,
     files: File[]
-  ) => void | Promise<void>;
+  ) => Promise<NoteMediaItem[]>;
   removeCardMediaItem: (
     colId: string,
     cardId: string,

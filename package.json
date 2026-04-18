@@ -37,6 +37,7 @@
     "@tauri-apps/api": "^2.10.1",
     "@tauri-apps/plugin-fs": "^2.4.5",
     "@tiptap/extension-highlight": "^3.22.1",
+    "@tiptap/extension-image": "^3.22.1",
     "@tiptap/extension-link": "^3.22.1",
     "@tiptap/extension-subscript": "^3.22.3",
     "@tiptap/extension-superscript": "^3.22.3",

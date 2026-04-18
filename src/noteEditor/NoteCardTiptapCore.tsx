@@ -1,4 +1,5 @@
 import Highlight from "@tiptap/extension-highlight";
+import Image from "@tiptap/extension-image";
 import Underline from "@tiptap/extension-underline";
 import TextAlign from "@tiptap/extension-text-align";
 import Superscript from "@tiptap/extension-superscript";
@@ -8,9 +9,20 @@ import type { Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { useEffect, useMemo, useRef } from "react";
 import { useAppChrome } from "../i18n/useAppChrome";
+import type { NoteMediaItem } from "../types";
 import { filesFromDataTransfer } from "../filesFromDataTransfer";
 import { NOTE_HIGHLIGHT_COLORS } from "./highlightPalette";
+import { NoteBodyAudio } from "./noteBodyAudioExtension";
+import { NoteBodyVideo } from "./noteBodyVideoExtension";
+import {
+  hasNoteMediaDragPayload,
+  parseNoteMediaDragPayload,
+} from "./noteMediaDragMime";
 import { noteBodyToHtml } from "./plainHtml";
+
+function isImageFile(f: File): boolean {
+  return f.type.startsWith("image/");
+}
 
 export type NoteCardTiptapProps = {
   id: string;
@@ -18,7 +30,16 @@ export type NoteCardTiptapProps = {
   onChange: (next: string) => void;
   canEdit: boolean;
   ariaLabel?: string;
-  onPasteFiles?: (files: File[]) => void;
+  /**
+   * 粘贴/拖入文件时回调；若同时开启 `insertUploadedImagesAtCursor`，
+   * 需返回 `Promise<NoteMediaItem[]>`（与上传结果一致），以便将其中图片插入正文。
+   */
+  onPasteFiles?: (files: File[]) => void | Promise<NoteMediaItem[]>;
+  /**
+   * 笔记全页等：图片粘贴/拖入先写入附件，再把返回结果中的图片插入光标/落点。
+   * 卡片详情弹层等不传，仅上传附件、不自动插入正文。
+   */
+  insertUploadedImagesAtCursor?: boolean;
   /** 在编辑器上方显示固定格式工具栏 */
   showToolbar?: boolean;
   /**
@@ -321,6 +342,7 @@ export function NoteCardTiptapCore({
   onPasteFiles,
   showToolbar = false,
   timelineBodyHeadings = false,
+  insertUploadedImagesAtCursor = false,
 }: NoteCardTiptapProps) {
   const c = useAppChrome();
   const ariaLabel = ariaLabelProp ?? c.uiNoteBodyAria;
@@ -328,6 +350,9 @@ export function NoteCardTiptapCore({
   onChangeRef.current = onChange;
   const onPasteFilesRef = useRef(onPasteFiles);
   onPasteFilesRef.current = onPasteFiles;
+  const insertImagesRef = useRef(insertUploadedImagesAtCursor);
+  insertImagesRef.current = insertUploadedImagesAtCursor;
+  const editorRef = useRef<Editor | null>(null);
 
   const extensions = useMemo(
     () => [
@@ -344,6 +369,13 @@ export function NoteCardTiptapCore({
           },
         },
       }),
+      Image.configure({
+        inline: true,
+        allowBase64: true,
+        HTMLAttributes: { class: "note-inline-img" },
+      }),
+      NoteBodyVideo,
+      NoteBodyAudio,
       Highlight.configure({ multicolor: true }),
       Underline,
       TextAlign.configure({ types: ["heading", "paragraph"] }),
@@ -357,6 +389,12 @@ export function NoteCardTiptapCore({
     extensions,
     content: noteBodyToHtml(value),
     editable: canEdit,
+    onCreate({ editor: ed }) {
+      editorRef.current = ed;
+    },
+    onDestroy() {
+      editorRef.current = null;
+    },
     editorProps: {
       attributes: {
         id,
@@ -366,13 +404,151 @@ export function NoteCardTiptapCore({
         "aria-multiline": "true",
         ...(canEdit ? { role: "textbox" as const } : {}),
       },
-      handlePaste(_view, event) {
+      handleDOMEvents: {
+        dragover(_view, event) {
+          if (hasNoteMediaDragPayload(event.dataTransfer)) {
+            event.preventDefault();
+            if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+            return true;
+          }
+          if (
+            insertImagesRef.current &&
+            event.dataTransfer?.types?.length &&
+            Array.from(event.dataTransfer.types).includes("Files")
+          ) {
+            event.preventDefault();
+            if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+            return true;
+          }
+          return false;
+        },
+      },
+      handlePaste(view, event) {
         const fn = onPasteFilesRef.current;
         if (!fn) return false;
         const files = filesFromDataTransfer(event.clipboardData);
         if (files.length === 0) return false;
         event.preventDefault();
-        fn(files);
+        const insertImg = insertImagesRef.current;
+        if (insertImg) {
+          const insertPos = view.state.selection.from;
+          void Promise.resolve(fn(files)).then((maybeItems) => {
+            const list = Array.isArray(maybeItems) ? maybeItems : [];
+            const imageItems = list.filter((m) => m.kind === "image");
+            if (imageItems.length === 0) return;
+            const ed = editorRef.current;
+            if (!ed?.isEditable) return;
+            const nodes = imageItems.map((m) => ({
+              type: "image" as const,
+              attrs: {
+                src: m.url,
+                alt: m.name ?? "",
+                title: m.name ?? null,
+              },
+            }));
+            ed.chain().focus().insertContentAt(insertPos, nodes).run();
+          });
+          return true;
+        }
+        void Promise.resolve(fn(files));
+        return true;
+      },
+      handleDrop(view, event, _slice, moved) {
+        if (moved) return false;
+        const payload = parseNoteMediaDragPayload(event.dataTransfer);
+        if (!payload) {
+          const insertImg = insertImagesRef.current;
+          const fn = onPasteFilesRef.current;
+          const ed = editorRef.current;
+          if (!insertImg || !fn || !ed?.isEditable) return false;
+          const files = filesFromDataTransfer(event.dataTransfer);
+          const imageFiles = files.filter(isImageFile);
+          if (imageFiles.length === 0) return false;
+          const coords = view.posAtCoords({
+            left: event.clientX,
+            top: event.clientY,
+          });
+          if (coords == null) return false;
+          event.preventDefault();
+          const pos = coords.pos;
+          void Promise.resolve(fn(files)).then((maybeItems) => {
+            const list = Array.isArray(maybeItems) ? maybeItems : [];
+            const imageItems = list.filter((m) => m.kind === "image");
+            if (imageItems.length === 0) return;
+            const ed2 = editorRef.current;
+            if (!ed2?.isEditable) return;
+            const nodes = imageItems.map((m) => ({
+              type: "image" as const,
+              attrs: {
+                src: m.url,
+                alt: m.name ?? "",
+                title: m.name ?? null,
+              },
+            }));
+            ed2.chain().focus().insertContentAt(pos, nodes).run();
+          });
+          return true;
+        }
+        const ed = editorRef.current;
+        if (!ed?.isEditable) return false;
+        const coords = view.posAtCoords({
+          left: event.clientX,
+          top: event.clientY,
+        });
+        if (coords == null) return false;
+        event.preventDefault();
+        const pos = coords.pos;
+        if (payload.kind === "image") {
+          ed.chain()
+            .focus()
+            .insertContentAt(pos, {
+              type: "image",
+              attrs: {
+                src: payload.url,
+                alt: payload.name ?? "",
+                title: payload.name,
+              },
+            })
+            .run();
+        } else if (payload.kind === "video") {
+          ed.chain()
+            .focus()
+            .insertContentAt(pos, {
+              type: "noteBodyVideo",
+              attrs: {
+                src: payload.url,
+                title: payload.name ?? null,
+              },
+            })
+            .run();
+        } else if (payload.kind === "audio") {
+          ed.chain()
+            .focus()
+            .insertContentAt(pos, {
+              type: "noteBodyAudio",
+              attrs: {
+                src: payload.url,
+                title: payload.name ?? null,
+              },
+            })
+            .run();
+        } else {
+          const label = payload.name?.trim() || "文件";
+          const safe = (s: string) =>
+            s
+              .replace(/&/g, "&amp;")
+              .replace(/</g, "&lt;")
+              .replace(/>/g, "&gt;")
+              .replace(/"/g, "&quot;");
+          const href = encodeURI(payload.url);
+          ed.chain()
+            .focus()
+            .insertContentAt(
+              pos,
+              `<p><a href="${href}" rel="noopener noreferrer" target="_blank">${safe(label)}</a></p>`
+            )
+            .run();
+        }
         return true;
       },
     },

@@ -2621,8 +2621,13 @@ export default function App() {
   );
 
   const uploadFilesToCard = useCallback(
-    async (colId: string, cardId: string, files: File[]) => {
-      if (files.length === 0) return;
+    async (
+      colId: string,
+      cardId: string,
+      files: File[]
+    ): Promise<NoteMediaItem[]> => {
+      const out: NoteMediaItem[] = [];
+      if (files.length === 0) return out;
       setUploadBusyCardId(cardId);
       setUploadCardProgress(null);
       try {
@@ -2631,11 +2636,9 @@ export default function App() {
             for (const file of files) {
               try {
                 const r = await saveLocalMediaToAppFolder(file);
-                addMediaItemToCard(
-                  colId,
-                  cardId,
-                  mediaItemFromUploadResult(r)
-                );
+                const item = mediaItemFromUploadResult(r);
+                addMediaItemToCard(colId, cardId, item);
+                out.push(item);
               } catch (err) {
                 window.alert(
                   err instanceof Error ? err.message : c.errLocalFolder
@@ -2646,11 +2649,9 @@ export default function App() {
             for (const file of files) {
               try {
                 const r = await saveLocalMediaInlineInBrowser(file);
-                addMediaItemToCard(
-                  colId,
-                  cardId,
-                  mediaItemFromUploadResult(r)
-                );
+                const item = mediaItemFromUploadResult(r);
+                addMediaItemToCard(colId, cardId, item);
+                out.push(item);
               } catch (err) {
                 window.alert(
                   err instanceof Error ? err.message : c.errBrowserBlob
@@ -2658,7 +2659,7 @@ export default function App() {
               }
             }
           }
-          return;
+          return out;
         }
         setUploadCardProgress(0);
         const n = files.length;
@@ -2670,16 +2671,16 @@ export default function App() {
                 Math.round(((i + p / 100) / n) * 100)
               ),
           });
-          addMediaItemToCard(
-            colId,
-            cardId,
-            mediaItemFromUploadResult(r)
-          );
+          const item = mediaItemFromUploadResult(r);
+          addMediaItemToCard(colId, cardId, item);
+          out.push(item);
         }
+        return out;
       } catch (err) {
         window.alert(
           err instanceof Error ? err.message : c.errUpload
         );
+        return out;
       } finally {
         setUploadBusyCardId(null);
         setUploadCardProgress(null);
