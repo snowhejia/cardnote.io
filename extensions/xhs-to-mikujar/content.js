@@ -90,6 +90,23 @@ function scrapeAuthorNickname() {
       const idx = t.indexOf(noteId);
       if (idx === -1) continue;
       const chunk = t.slice(Math.max(0, idx - 2000), Math.min(t.length, idx + 12000));
+      let anchor = chunk.indexOf(`"noteId":"${noteId}"`);
+      if (anchor === -1) anchor = chunk.indexOf(`"id":"${noteId}"`);
+      if (anchor === -1) anchor = chunk.indexOf(noteId);
+      const tail = anchor === -1 ? chunk : chunk.slice(anchor, Math.min(chunk.length, anchor + 28000));
+      /** 锚在本条笔记之后，优先取 user 块内昵称，避免 chunk 里更早出现的他人 nickName */
+      const anchoredNick = tail.match(
+        /"user"\s*:\s*\{[\s\S]{0,12000}?"nickName"\s*:\s*"((?:[^"\\]|\\.)*)"/i
+      );
+      const anchoredNickname = tail.match(
+        /"user"\s*:\s*\{[\s\S]{0,12000}?"nickname"\s*:\s*"((?:[^"\\]|\\.)*)"/i
+      );
+      for (const m0 of [anchoredNick, anchoredNickname]) {
+        if (m0?.[1]) {
+          const raw = m0[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+          if (raw.length > 0 && raw.length <= 64 && !bad.test(raw)) return raw;
+        }
+      }
       const m = chunk.match(/"nickName"\s*:\s*"((?:[^"\\]|\\.)*)"/);
       if (m && m[1]) {
         const raw = m[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\");

@@ -310,6 +310,26 @@ async function presignAndUploadMultipart(apiBase, token, userId, blob, pj) {
   }
 }
 
+/** 有 Content-Length 时校验 body 是否被截断（偶发 CDN 200 但少字节 → 画面卡一帧、体积极小） */
+function parseContentLengthInt(headerVal) {
+  if (headerVal == null) return null;
+  const s = String(headerVal).trim();
+  if (!s) return null;
+  const n = Number(s);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return n;
+}
+
+function assertBufferMatchesContentLength(byteLength, contentLengthHeader) {
+  const expected = parseContentLengthInt(contentLengthHeader);
+  if (expected == null) return;
+  if (byteLength !== expected) {
+    throw new Error(
+      `CDN 响应不完整（声明 ${expected} 字节，实际 ${byteLength} 字节）`
+    );
+  }
+}
+
 /** bilivideo/bilicdn/szbdyd 等对 DASH 片常校验 Cookie + Referer；扩展 SW 直拉易 403 */
 function shouldSendBilibiliStreamCookies(url) {
   try {
@@ -358,9 +378,10 @@ async function fetchAsBlobViaBiliVideoTab(tabId, mediaUrl) {
           });
           const status = res.status;
           if (!res.ok) return { ok: false, status, err: "" };
+          const contentLength = res.headers.get("content-length");
           const buf = await res.arrayBuffer();
           const contentType = res.headers.get("content-type") || "";
-          return { ok: true, status, buf, contentType };
+          return { ok: true, status, buf, contentType, contentLength };
         } catch (err) {
           return {
             ok: false,
@@ -387,6 +408,7 @@ async function fetchAsBlobViaBiliVideoTab(tabId, mediaUrl) {
   if (!(buf instanceof ArrayBuffer) || buf.byteLength < 1) {
     throw new Error("页面内下载结果为空");
   }
+  assertBufferMatchesContentLength(buf.byteLength, raw.contentLength);
   const ct =
     typeof raw.contentType === "string" && raw.contentType.trim()
       ? raw.contentType.trim()
@@ -435,6 +457,13 @@ async function fetchAsBlob(imageUrl, referer = REFERER_XHS) {
     throw new Error(explainNetworkError(e));
   }
   if (!r.ok) throw new Error(explainHttpStatus(r.status));
+  if (shouldSendBilibiliStreamCookies(imageUrl)) {
+    const cl = r.headers.get("content-length");
+    const ab = await r.arrayBuffer();
+    assertBufferMatchesContentLength(ab.byteLength, cl);
+    const ct = r.headers.get("content-type") || "";
+    return new Blob([ab], { type: ct || "application/octet-stream" });
+  }
   return await r.blob();
 }
 
@@ -445,7 +474,43 @@ function biliNormalizeDashMediaUrl(raw) {
   return s;
 }
 
-/** 与 content-bilibili 一致：优先 AVC，否则最高带宽 */
+/** DASH 同档：主链 + backup_url 镜像，去重保序 */
+function dedupeOrderedDashUrls(urls) {
+  const seen = new Set();
+  const out = [];
+  for (const raw of urls) {
+    const u = biliNormalizeDashMediaUrl(String(raw || "").trim());
+    if (!u || seen.has(u)) continue;
+    seen.add(u);
+    out.push(u);
+  }
+  return out;
+}
+
+function collectBiliDashStreamUrlsFromRepresentation(rep) {
+  if (!rep || typeof rep !== "object") return [];
+  const ordered = [];
+  const prim = rep.baseUrl || rep.base_url;
+  if (typeof prim === "string" && prim.trim()) ordered.push(prim);
+  const bu = rep.backup_url || rep.backupUrl;
+  if (Array.isArray(bu)) {
+    for (const x of bu) {
+      if (typeof x === "string" && x.trim()) ordered.push(x);
+    }
+  }
+  return dedupeOrderedDashUrls(ordered);
+}
+
+/** 将 scrape 得到的单链收成与 playurl 一致的结构 */
+function normalizeDashUrlsShape(d) {
+  if (!d || !d.videoUrl) return null;
+  const v = dedupeOrderedDashUrls([d.videoUrl]);
+  if (!v.length) return null;
+  const a = d.audioUrl ? dedupeOrderedDashUrls([d.audioUrl]) : [];
+  return { videoUrlsToTry: v, audioUrlsToTry: a };
+}
+
+/** 与 content-bilibili 一致：优先 AVC，否则最高带宽；含 backup 镜像 */
 function pickBestDashUrlsFromDashObject(dash) {
   if (!dash || !Array.isArray(dash.video) || dash.video.length === 0)
     return null;
@@ -456,11 +521,9 @@ function pickBestDashUrlsFromDashObject(dash) {
   for (const cur of pool) {
     if (Number(cur.bandwidth || 0) > Number(bestV.bandwidth || 0)) bestV = cur;
   }
-  const videoUrl = biliNormalizeDashMediaUrl(
-    bestV.baseUrl || bestV.base_url || ""
-  );
-  if (!videoUrl) return null;
-  let audioUrl = null;
+  const videoUrlsToTry = collectBiliDashStreamUrlsFromRepresentation(bestV);
+  if (!videoUrlsToTry.length) return null;
+  let audioUrlsToTry = [];
   const a = dash.audio;
   if (Array.isArray(a) && a.length) {
     let bestA = a[0];
@@ -468,11 +531,9 @@ function pickBestDashUrlsFromDashObject(dash) {
       if (Number(cur.bandwidth || 0) > Number(bestA.bandwidth || 0))
         bestA = cur;
     }
-    audioUrl =
-      biliNormalizeDashMediaUrl(bestA.baseUrl || bestA.base_url || "") ||
-      null;
+    audioUrlsToTry = collectBiliDashStreamUrlsFromRepresentation(bestA);
   }
-  return { videoUrl, audioUrl };
+  return { videoUrlsToTry, audioUrlsToTry };
 }
 
 /**
@@ -482,16 +543,40 @@ function pickBestDashUrlsFromDashObject(dash) {
  */
 async function fetchBiliDashTrackWithPlayinfoRefresh(
   tabId,
-  initialUrl,
+  primaryUrl,
   referer,
   kind,
-  clipMeta
+  clipMeta,
+  mirrorUrls = []
 ) {
+  const initialOrder = dedupeOrderedDashUrls([
+    primaryUrl,
+    ...(mirrorUrls || []),
+  ]);
+
+  async function attemptOrdered(urls) {
+    let lastErr = null;
+    for (const u of urls) {
+      try {
+        return await fetchBiliCdnBlobDualContext(tabId, u, referer);
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+  }
+
+  function dashFetchRecoverable(msg) {
+    return /403|服务器拒绝访问|不完整|Content-Length|字节|页面内下载结果为空/i.test(
+      msg
+    );
+  }
+
   try {
-    return await fetchBiliCdnBlobDualContext(tabId, initialUrl, referer);
+    return await attemptOrdered(initialOrder);
   } catch (e) {
     const msg = String(e?.message || e);
-    if (!/403|服务器拒绝访问/.test(msg) || tabId == null) throw e;
+    if (!dashFetchRecoverable(msg) || tabId == null) throw e;
     const bv = String(clipMeta?.bvid || "").trim();
     const cidN = Number(clipMeta?.cid);
     if (bv && Number.isFinite(cidN) && cidN > 0) {
@@ -500,24 +585,28 @@ async function fetchBiliDashTrackWithPlayinfoRefresh(
         tabId,
         buildBilibiliPlayurl(bv, cidN)
       );
-      if (fresh?.ok) {
-        const next =
-          kind === "video" ? fresh.videoUrl : fresh.audioUrl;
-        if (next && next !== initialUrl) {
+      if (fresh?.ok && fresh.videoUrlsToTry?.length) {
+        const nextList =
+          kind === "video"
+            ? fresh.videoUrlsToTry
+            : fresh.audioUrlsToTry?.length
+              ? fresh.audioUrlsToTry
+              : [];
+        if (nextList.length) {
           try {
-            return await fetchBiliCdnBlobDualContext(tabId, next, referer);
+            return await attemptOrdered(nextList);
           } catch {
-            /* 再试 playinfo */
+            /* 再试 __playinfo__ */
           }
         }
       }
     }
     const snap = await collectBiliMainWorldPlaySnapshot(tabId);
     const picked = pickBestDashUrlsFromDashObject(snap?.dash);
-    const next2 =
-      kind === "video" ? picked?.videoUrl : picked?.audioUrl;
-    if (!next2 || next2 === initialUrl) throw e;
-    return await fetchBiliCdnBlobDualContext(tabId, next2, referer);
+    const fb =
+      kind === "video" ? picked?.videoUrlsToTry : picked?.audioUrlsToTry;
+    if (!fb?.length) throw e;
+    return await attemptOrdered(fb);
   }
 }
 
@@ -547,6 +636,35 @@ async function refreshDashUrlsViaPlayurlInTab(tabId, playUrl) {
       args: [playUrl],
       func: async (playU) => {
         try {
+          function normalizeU(s) {
+            const t = String(s || "").trim();
+            if (!t) return "";
+            return t.startsWith("//") ? `https:${t}` : t;
+          }
+          function dedupeMain(urls) {
+            const seen = new Set();
+            const out = [];
+            for (const raw of urls) {
+              const u = normalizeU(raw);
+              if (!u || seen.has(u)) continue;
+              seen.add(u);
+              out.push(u);
+            }
+            return out;
+          }
+          function collectUrls(rep) {
+            if (!rep) return [];
+            const ordered = [];
+            const prim = rep.baseUrl || rep.base_url;
+            if (typeof prim === "string" && prim.trim()) ordered.push(prim);
+            const bu = rep.backup_url || rep.backupUrl;
+            if (Array.isArray(bu)) {
+              for (const x of bu) {
+                if (typeof x === "string" && x.trim()) ordered.push(x);
+              }
+            }
+            return dedupeMain(ordered);
+          }
           const res = await fetch(playU, { credentials: "include" });
           if (!res.ok) return { ok: false, status: res.status };
           const j = await res.json();
@@ -560,10 +678,10 @@ async function refreshDashUrlsViaPlayurlInTab(tabId, playUrl) {
             if (Number(cur.bandwidth || 0) > Number(bestV.bandwidth || 0))
               bestV = cur;
           }
-          const vu = String(bestV.baseUrl || bestV.base_url || "").trim();
-          const videoUrl = vu.startsWith("//") ? `https:${vu}` : vu;
-          if (!videoUrl) return { ok: false, reason: "no_video_url" };
-          let audioUrl = null;
+          const videoUrlsToTry = collectUrls(bestV);
+          if (!videoUrlsToTry.length)
+            return { ok: false, reason: "no_video_url" };
+          let audioUrlsToTry = [];
           const a = dash.audio;
           if (Array.isArray(a) && a.length) {
             let bestA = a[0];
@@ -571,10 +689,9 @@ async function refreshDashUrlsViaPlayurlInTab(tabId, playUrl) {
               if (Number(cur.bandwidth || 0) > Number(bestA.bandwidth || 0))
                 bestA = cur;
             }
-            const au = String(bestA.baseUrl || bestA.base_url || "").trim();
-            audioUrl = au.startsWith("//") ? `https:${au}` : au;
+            audioUrlsToTry = collectUrls(bestA);
           }
-          return { ok: true, videoUrl, audioUrl };
+          return { ok: true, videoUrlsToTry, audioUrlsToTry };
         } catch (err) {
           return { ok: false, reason: String(err?.message || err) };
         }
@@ -1050,21 +1167,24 @@ async function runSave(tabId, emit) {
   const imgs = imageUrls || [];
   const vids = videoUrls || [];
   /** 在视频页 MAIN 里用 Cookie 重新拉 playurl，换带新签名的 CDN 直链（缓解扩展 SW 拉流 403） */
-  let effectiveDashUrls = dashUrls;
-  if (isBili && clipBvid && clipCid > 0 && dashUrls?.videoUrl) {
+  let effectiveDashUrls = normalizeDashUrlsShape(dashUrls);
+  if (isBili && clipBvid && clipCid > 0 && effectiveDashUrls?.videoUrlsToTry?.length) {
     const playU = buildBilibiliPlayurl(clipBvid, clipCid);
     const fresh = await refreshDashUrlsViaPlayurlInTab(tabId, playU);
-    if (fresh?.ok && fresh.videoUrl) {
+    if (fresh?.ok && fresh.videoUrlsToTry?.length) {
       effectiveDashUrls = {
-        videoUrl: fresh.videoUrl,
-        audioUrl: fresh.audioUrl || dashUrls.audioUrl || null,
+        videoUrlsToTry: fresh.videoUrlsToTry,
+        audioUrlsToTry:
+          fresh.audioUrlsToTry?.length > 0
+            ? fresh.audioUrlsToTry
+            : effectiveDashUrls.audioUrlsToTry,
       };
     }
   }
 
   const dashSlots =
-    isBili && effectiveDashUrls?.videoUrl
-      ? effectiveDashUrls.audioUrl
+    isBili && effectiveDashUrls?.videoUrlsToTry?.length
+      ? effectiveDashUrls.audioUrlsToTry?.length
         ? 2
         : 1
       : 0;
@@ -1138,7 +1258,7 @@ async function runSave(tabId, emit) {
     }
   }
 
-  if (isBili && effectiveDashUrls?.videoUrl) {
+  if (isBili && effectiveDashUrls?.videoUrlsToTry?.length) {
     const dStep0 = imgs.length;
     emitStepProgress(dStep0, "B 站 DASH：下载画面轨…");
     /** @type {Blob | null} */
@@ -1146,12 +1266,14 @@ async function runSave(tabId, emit) {
     /** @type {Blob | null} */
     let dashAudioBlob = null;
     try {
+      const vTry = effectiveDashUrls.videoUrlsToTry;
       dashVideoBlob = await fetchBiliDashTrackWithPlayinfoRefresh(
         tabId,
-        effectiveDashUrls.videoUrl,
+        vTry[0],
         referer,
         "video",
-        { bvid: clipBvid, cid: clipCid }
+        { bvid: clipBvid, cid: clipCid },
+        vTry.slice(1)
       );
       if (dashVideoBlob.size < 2048) {
         errors.push(
@@ -1171,7 +1293,7 @@ async function runSave(tabId, emit) {
       errors.push(`DASH 画面轨：${e?.message || e}`);
     }
 
-    if (effectiveDashUrls.audioUrl && dashVideoBlob) {
+    if (effectiveDashUrls.audioUrlsToTry?.length && dashVideoBlob) {
       emitStepProgress(dStep0 + 1, "B 站 DASH：下载音轨…");
       /** 画面轨下载耗时较长时，音轨直链签名易过期；下载前再拉一次 playurl */
       if (clipBvid && clipCid > 0) {
@@ -1181,18 +1303,26 @@ async function runSave(tabId, emit) {
         );
         if (freshA?.ok) {
           effectiveDashUrls = {
-            videoUrl: freshA.videoUrl || effectiveDashUrls.videoUrl,
-            audioUrl: freshA.audioUrl || effectiveDashUrls.audioUrl,
+            videoUrlsToTry:
+              freshA.videoUrlsToTry?.length > 0
+                ? freshA.videoUrlsToTry
+                : effectiveDashUrls.videoUrlsToTry,
+            audioUrlsToTry:
+              freshA.audioUrlsToTry?.length > 0
+                ? freshA.audioUrlsToTry
+                : effectiveDashUrls.audioUrlsToTry,
           };
         }
       }
       try {
+        const aTry = effectiveDashUrls.audioUrlsToTry;
         dashAudioBlob = await fetchBiliDashTrackWithPlayinfoRefresh(
           tabId,
-          effectiveDashUrls.audioUrl,
+          aTry[0],
           referer,
           "audio",
-          { bvid: clipBvid, cid: clipCid }
+          { bvid: clipBvid, cid: clipCid },
+          aTry.slice(1)
         );
         if (dashAudioBlob.size < 500) {
           errors.push(

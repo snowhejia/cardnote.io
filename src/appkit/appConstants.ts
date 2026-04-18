@@ -15,13 +15,14 @@ export function matchesMobileChromeMedia(): boolean {
 }
 
 /**
- * 时间线卡片：桌面、大屏触控平板 1 列、或视口 ≤900px 且 1 列时，左右分栏下左侧「纸张」总高度达到或超过此值则改为上下布局。
- * 与 {@link CardRowInner} 中测量 `.card__paper` 的 `offsetHeight` 一致。
+ * 时间线卡片（非手机强制上下时）：按「左右分栏」下列宽**模拟**测量 `.card__paper` 的 scrollHeight，
+ * 达到或超过此值则切为上下布局；不用上下栏下的实际高度，避免纸变宽→变矮→又切回左右的振荡闪屏。
+ * 见 {@link CardRowInner}。
  */
 export const DESKTOP_TIMELINE_GALLERY_STACK_PAPER_MIN_HEIGHT_PX = 360;
 
 /**
- * 滞回下沿：已为上下布局时，纸张高度低于此值才恢复左右分栏，避免切换后高度变化在阈值附近来回抖、闪屏。
+ * 滞回下沿：已为上下布局时，**仍按左右分栏列宽模拟**的 scrollHeight 低于此值才恢复左右分栏。
  * 必须小于 {@link DESKTOP_TIMELINE_GALLERY_STACK_PAPER_MIN_HEIGHT_PX}。
  */
 export const DESKTOP_TIMELINE_GALLERY_STACK_PAPER_EXIT_HEIGHT_PX = 280;

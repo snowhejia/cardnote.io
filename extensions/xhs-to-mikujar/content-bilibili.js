@@ -279,7 +279,17 @@ function scrapeFromInlineVideoJson() {
     const ownerIdx = chunk.indexOf('"owner"');
     if (ownerIdx !== -1) {
       const ownerChunk = chunk.slice(ownerIdx, ownerIdx + 8000);
-      const mOwner = ownerChunk.match(/"name"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+      /** 只认 owner 内典型字段序，避免块里其它子对象的 "name" 被当成 UP 昵称 */
+      let mOwner =
+        ownerChunk.match(
+          /"owner"\s*:\s*\{\s*"mid"\s*:\s*\d+\s*,\s*"name"\s*:\s*"((?:[^"\\]|\\.)*)"/
+        ) ||
+        ownerChunk.match(
+          /"owner"\s*:\s*\{\s*"name"\s*:\s*"((?:[^"\\]|\\.)*)"\s*,\s*"face"/
+        );
+      if (!mOwner) {
+        mOwner = ownerChunk.match(/"name"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+      }
       if (mOwner?.[1]) {
         author = mOwner[1]
           .replace(/\\"/g, '"')
@@ -321,18 +331,22 @@ function scrapeFromInlineVideoJson() {
 }
 
 function scrapeAuthorDom() {
+  /** 限定在 UP 信息区，避免全页第一个 .username（弹幕/评论/侧栏） */
   const sels = [
+    "#v_upinfo .up-name",
+    ".up-info .up-name",
+    ".up-info--left .up-name",
+    "[class*='up-info'] .up-name",
+    ".video-info-detail .up-name",
+    ".video-info-meta .name",
     ".up-name",
     "a.up-name",
-    ".username",
     '[class*="up-name"]',
-    "a[name]",
-    ".video-info-meta .name",
   ];
   for (const sel of sels) {
     const el = document.querySelector(sel);
     const t = textOf(el);
-    if (t && t.length <= 64) return t;
+    if (t && t.length >= 1 && t.length <= 64) return t;
   }
   return "";
 }
@@ -636,6 +650,8 @@ async function scrapeBilibiliVideoPageAsync(mainWorldPlay) {
   let viewApiPicRaw = "";
   let viewApiTitleRaw = "";
   let viewApiDescRaw = "";
+  /** 与当前 BV 一致，比内联 JSON / 全页 DOM 更稳，避免偶发错 UP */
+  let viewApiOwnerNameRaw = "";
   if (bvid) {
     try {
       const r = await fetch(
@@ -652,6 +668,13 @@ async function scrapeBilibiliVideoPageAsync(mainWorldPlay) {
             typeof j.data.desc === "string" ? j.data.desc : "",
             bilibiliDecodeDescV2(j.data.desc_v2)
           );
+          const on =
+            j.data.owner &&
+            typeof j.data.owner === "object" &&
+            typeof j.data.owner.name === "string"
+              ? j.data.owner.name.trim()
+              : "";
+          if (on) viewApiOwnerNameRaw = on;
         }
       }
     } catch {
@@ -716,7 +739,11 @@ async function scrapeBilibiliVideoPageAsync(mainWorldPlay) {
   const descClean = sanitizeBilibiliDescription(descRaw);
 
   const author =
-    fromJson.author || scrapeAuthorDom() || metaName("author") || "";
+    viewApiOwnerNameRaw ||
+    fromJson.author ||
+    scrapeAuthorDom() ||
+    metaName("author") ||
+    "";
 
   const clipCid = (() => {
     const a = Number(fromJson.cid);
