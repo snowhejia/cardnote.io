@@ -250,6 +250,36 @@ function attachmentDisplayName(originalname) {
 }
 
 /**
+ * B 站合并成片：把投稿标题收成安全的展示用 originalname（仅 mp4）。
+ * @param {string} raw
+ * @param {string} [fallback]
+ */
+export function sanitizeClipOriginalFilenameForMerge(
+  raw,
+  fallback = "bilibili-clip.mp4"
+) {
+  const fb =
+    typeof fallback === "string" && fallback.trim()
+      ? basename(fallback.trim())
+      : "bilibili-clip.mp4";
+  let s = String(raw ?? "")
+    .trim()
+    .replace(/\r|\n|\t/g, " ")
+    .replace(/[/\\?%*:|"<>]/g, "-")
+    .replace(/\s+/g, " ")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .trim();
+  if (!s) return fb;
+  s = basename(s.replace(/^\.+/, ""));
+  if (!s || s === "." || s === "..") return fb;
+  s = s.replace(/\.(mp4|m4v|mov|webm|mkv)$/gi, "").trim() || fb.replace(/\.mp4$/i, "");
+  if (!s) return fb;
+  const out = `${s}.mp4`;
+  return out.slice(0, 160);
+}
+
+/**
  * 从 MP3/FLAC/M4A 等标签中取出第一张内嵌图，供封面展示。
  * @returns {{ buffer: Buffer; mimeType: string; ext: string } | null}
  */

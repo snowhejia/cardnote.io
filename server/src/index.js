@@ -17,6 +17,7 @@ import {
   getMediaUploadMode,
   mergeBiliDashVideoAudioToMp4,
   planMediaCosDirectUpload,
+  sanitizeClipOriginalFilenameForMerge,
   saveUploadedMedia,
   UPLOAD_MAX_BYTES,
 } from "./mediaUpload.js";
@@ -1560,14 +1561,22 @@ app.post(
         limits: {
           files: 2,
           fileSize: MERGE_BILI_DASH_MAX_EACH_BYTES,
+          fieldSize: 8192,
         },
       });
     } catch {
       return res.status(400).json({ error: "无效的 multipart 请求" });
     }
     const files = { video: null, audio: null };
+    /** 扩展传入的投稿标题，用于附件展示名 */
+    let clipTitleField = "";
     let limitHit = false;
     let parseError = null;
+    bb.on("field", (name, val) => {
+      if (name === "clipTitle" && typeof val === "string") {
+        clipTitleField = val.trim();
+      }
+    });
     bb.on("file", (name, file, _info) => {
       const field = name === "video" || name === "audio" ? name : null;
       if (!field) {
@@ -1640,11 +1649,15 @@ app.post(
             consumed = true;
           }
           try {
+            const mergedOriginalName = sanitizeClipOriginalFilenameForMerge(
+              clipTitleField,
+              "bilibili-clip.mp4"
+            );
             const out = await saveUploadedMedia(
               {
                 buffer: merged,
                 mimetype: "video/mp4",
-                originalname: "bilibili-clip.mp4",
+                originalname: mergedOriginalName,
               },
               { publicUploadsDir, userId }
             );

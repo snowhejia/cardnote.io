@@ -308,20 +308,106 @@ async function presignAndUploadMultipart(apiBase, token, userId, blob, pj) {
   }
 }
 
-/** bilivideo/bilicdn/szbdyd 等对 DASH 片常校验 Cookie + Referer */
+/** bilivideo/bilicdn/szbdyd 等对 DASH 片常校验 Cookie + Referer；扩展 SW 直拉易 403 */
 function shouldSendBilibiliStreamCookies(url) {
   try {
-    const h = new URL(String(url).trim()).hostname.toLowerCase();
-    return (
+    const raw = String(url || "").trim();
+    const h = new URL(raw).hostname.toLowerCase();
+    if (
       /(^|\.)bilivideo\.(com|cn)$/.test(h) ||
+      /\.bilivideo\.cn$/i.test(h) ||
       /(^|\.)bilicdn\.com$/i.test(h) ||
       /(^|\.)szbdyd\.com$/i.test(h) ||
       /(^|\.)mcdn\.bilivideo\.cn$/i.test(h) ||
-      /(^|\.)bstar-static\.com$/i.test(h)
-    );
+      /(^|\.)bstar-static\.com$/i.test(h) ||
+      /(^|\.)bytecdntp\.com$/i.test(h)
+    )
+      return true;
+    /** 部分 upos 走 akamai，路径/query 常带 bilivideo 等标识 */
+    if (/\.akamaized\.net$/i.test(h)) {
+      const low = raw.toLowerCase();
+      return /bilibili|bilivideo|bstar|upos|bvc|hdslb/.test(low);
+    }
+    return false;
   } catch {
     return false;
   }
+}
+
+/**
+ * 在**当前 B 站标签页 MAIN** 请求 CDN：与页内播放器同一客户端上下文，Cookie/Referer 由浏览器按文档规则附带，
+ * 比扩展 Service Worker 直拉更不易被 bilivideo 间歇 403。
+ */
+async function fetchAsBlobViaBiliVideoTab(tabId, mediaUrl) {
+  const u = String(mediaUrl || "").trim();
+  if (!u || tabId == null) throw new Error("缺少地址或标签页");
+  let execResult;
+  try {
+    execResult = await chrome.scripting.executeScript({
+      target: { tabId },
+      world: "MAIN",
+      args: [u],
+      func: async (mediaU) => {
+        try {
+          const res = await fetch(mediaU, {
+            credentials: "include",
+            cache: "no-store",
+            redirect: "follow",
+          });
+          const status = res.status;
+          if (!res.ok) return { ok: false, status, err: "" };
+          const buf = await res.arrayBuffer();
+          const contentType = res.headers.get("content-type") || "";
+          return { ok: true, status, buf, contentType };
+        } catch (err) {
+          return {
+            ok: false,
+            status: 0,
+            err: String(err?.message || err || "fetch failed"),
+          };
+        }
+      },
+    });
+  } catch (e) {
+    throw new Error(explainNetworkError(e));
+  }
+  const raw = execResult?.[0]?.result;
+  if (!raw || typeof raw !== "object") {
+    throw new Error("页面内下载无返回");
+  }
+  if (!raw.ok) {
+    if (Number(raw.status) > 0) {
+      throw new Error(explainHttpStatus(Number(raw.status)));
+    }
+    throw new Error(raw.err || "页面内下载失败");
+  }
+  const buf = raw.buf;
+  if (!(buf instanceof ArrayBuffer) || buf.byteLength < 1) {
+    throw new Error("页面内下载结果为空");
+  }
+  const ct =
+    typeof raw.contentType === "string" && raw.contentType.trim()
+      ? raw.contentType.trim()
+      : "application/octet-stream";
+  return new Blob([buf], { type: ct });
+}
+
+/** 音画 CDN：先页内 MAIN，失败再扩展 SW（双保险） */
+async function fetchBiliCdnBlobDualContext(tabId, url, referer) {
+  const media = String(url || "").trim();
+  if (!media) throw new Error("缺少下载地址");
+  if (tabId != null && shouldSendBilibiliStreamCookies(media)) {
+    try {
+      return await fetchAsBlobViaBiliVideoTab(tabId, media);
+    } catch (ePage) {
+      try {
+        return await fetchAsBlob(media, referer);
+      } catch {
+        throw ePage instanceof Error ? ePage : new Error(String(ePage));
+      }
+    }
+  }
+  return await fetchAsBlob(media, referer);
 }
 
 async function fetchAsBlob(imageUrl, referer = REFERER_XHS) {
@@ -400,13 +486,14 @@ async function fetchBiliDashTrackWithPlayinfoRefresh(
   clipMeta
 ) {
   try {
-    return await fetchAsBlob(initialUrl, referer);
+    return await fetchBiliCdnBlobDualContext(tabId, initialUrl, referer);
   } catch (e) {
     const msg = String(e?.message || e);
     if (!/403|服务器拒绝访问/.test(msg) || tabId == null) throw e;
     const bv = String(clipMeta?.bvid || "").trim();
     const cidN = Number(clipMeta?.cid);
     if (bv && Number.isFinite(cidN) && cidN > 0) {
+      await new Promise((r) => setTimeout(r, 280));
       const fresh = await refreshDashUrlsViaPlayurlInTab(
         tabId,
         buildBilibiliPlayurl(bv, cidN)
@@ -416,7 +503,7 @@ async function fetchBiliDashTrackWithPlayinfoRefresh(
           kind === "video" ? fresh.videoUrl : fresh.audioUrl;
         if (next && next !== initialUrl) {
           try {
-            return await fetchAsBlob(next, referer);
+            return await fetchBiliCdnBlobDualContext(tabId, next, referer);
           } catch {
             /* 再试 playinfo */
           }
@@ -428,7 +515,7 @@ async function fetchBiliDashTrackWithPlayinfoRefresh(
     const next2 =
       kind === "video" ? picked?.videoUrl : picked?.audioUrl;
     if (!next2 || next2 === initialUrl) throw e;
-    return await fetchAsBlob(next2, referer);
+    return await fetchBiliCdnBlobDualContext(tabId, next2, referer);
   }
 }
 
@@ -651,13 +738,58 @@ async function presignAndUpload(apiBase, token, userId, blob, filename, contentT
   };
 }
 
+/** 投稿标题 → 分轨上传时的安全文件名主干（不含扩展名） */
+function safeBiliClipStem(title) {
+  let s = String(title || "")
+    .trim()
+    .replace(/\r|\n|\t/g, " ")
+    .replace(/[/\\?%*:|"<>]/g, "-")
+    .replace(/\s+/g, " ")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .trim()
+    .replace(/\.(mp4|m4v|m4a|mov|webm|mkv)$/gi, "")
+    .trim()
+    .slice(0, 100);
+  return s || "bili-dash";
+}
+
+/** B 站封面图上传文件名：`{标题}-cover.jpg|webp|png`（与视频附件同一标题主干） */
+function biliCoverUploadFilename(title, urlHint) {
+  const stem = safeBiliClipStem(title);
+  let ext = "jpg";
+  try {
+    const u = new URL(String(urlHint || "").trim());
+    const base = (u.pathname.split("/").pop() || "").split("?")[0];
+    const m = /\.(jpe?g|png|gif|webp)$/i.exec(base);
+    if (m) {
+      let e = m[1].toLowerCase();
+      if (e === "jpeg") e = "jpg";
+      if (e === "jpg" || e === "png" || e === "gif" || e === "webp") ext = e;
+    }
+  } catch {
+    /* ignore */
+  }
+  return `${stem}-cover.${ext}`.slice(0, 180);
+}
+
 /**
  * B 站 DASH 音画二轨 → 服务端 ffmpeg 无损 mux 为单 MP4（需 API 已部署 /api/upload/merge-bili-dash）。
+ * @param {string} [clipTitle] 投稿标题，用于合并后附件展示名
  */
-async function mergeBiliDashOnServer(apiBase, token, userId, videoBlob, audioBlob) {
+async function mergeBiliDashOnServer(
+  apiBase,
+  token,
+  userId,
+  videoBlob,
+  audioBlob,
+  clipTitle
+) {
   const fd = new FormData();
   fd.append("video", videoBlob, "bili-dash-video.mp4");
   fd.append("audio", audioBlob, "bili-dash-audio.m4a");
+  const t = String(clipTitle || "").trim();
+  if (t) fd.append("clipTitle", t);
   const r = await fetch(
     appendUserId(`${apiBase}/api/upload/merge-bili-dash`, userId),
     {
@@ -948,7 +1080,10 @@ async function runSave(tabId, emit) {
         );
         continue;
       }
-      const filename = guessFilename(pickedUrl, i, isBili ? "bili" : "xhs");
+      const filename =
+        isBili && i === 0
+          ? biliCoverUploadFilename(title, pickedUrl)
+          : guessFilename(pickedUrl, i, isBili ? "bili" : "xhs");
       const contentType = guessContentType(blob, filename);
       const up = await presignAndUpload(
         settings.apiBase,
@@ -1005,6 +1140,19 @@ async function runSave(tabId, emit) {
 
     if (effectiveDashUrls.audioUrl && dashVideoBlob) {
       emitStepProgress(dStep0 + 1, "B 站 DASH：下载音轨…");
+      /** 画面轨下载耗时较长时，音轨直链签名易过期；下载前再拉一次 playurl */
+      if (clipBvid && clipCid > 0) {
+        const freshA = await refreshDashUrlsViaPlayurlInTab(
+          tabId,
+          buildBilibiliPlayurl(clipBvid, clipCid)
+        );
+        if (freshA?.ok) {
+          effectiveDashUrls = {
+            videoUrl: freshA.videoUrl || effectiveDashUrls.videoUrl,
+            audioUrl: freshA.audioUrl || effectiveDashUrls.audioUrl,
+          };
+        }
+      }
       try {
         dashAudioBlob = await fetchBiliDashTrackWithPlayinfoRefresh(
           tabId,
@@ -1042,7 +1190,8 @@ async function runSave(tabId, emit) {
             settings.bearerToken,
             settings.userId,
             dashVideoBlob,
-            dashAudioBlob
+            dashAudioBlob,
+            title
           );
           media.push({
             url: upM.url,
@@ -1060,7 +1209,8 @@ async function runSave(tabId, emit) {
       }
       if (!dashHandled) {
         try {
-          const vfn = "bili-dash-video.mp4";
+          const stem = safeBiliClipStem(title);
+          const vfn = `${stem}-video.mp4`;
           const upV = await presignAndUpload(
             settings.apiBase,
             settings.bearerToken,
@@ -1081,7 +1231,8 @@ async function runSave(tabId, emit) {
         }
         if (dashAudioBlob) {
           try {
-            const afn = "bili-dash-audio.m4a";
+            const stem = safeBiliClipStem(title);
+            const afn = `${stem}-audio.m4a`;
             const act = guessBiliDashAudioContentType(dashAudioBlob, afn);
             const upA = await presignAndUpload(
               settings.apiBase,
@@ -1165,7 +1316,7 @@ async function runSave(tabId, emit) {
     text: buildCardHtml({ title, body }),
     minutesOfDay,
     addedOn: todayYMD(),
-    tags: [],
+    tags: isBili ? ["bilibili"] : ["小红书"],
     customProps: buildClipCustomProps(pageUrl, authorNickname, intro),
     media,
     insertAtStart: settings.insertNewNotesAtTop,
