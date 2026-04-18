@@ -9088,6 +9088,15 @@ body.app--related-panel-open .app.app--tablet-split-nav .main {
   align-items: flex-start;
 }
 
+/* 自定义属性：值区统一左内边距，勾选与 date/text 等控件左缘对齐 */
+.card-page__prop-row--custom .card-page__prop-content {
+  padding-left: 6px;
+}
+
+.card-page__prop-row--custom .card-page__prop-input {
+  padding-left: 0;
+}
+
 .card-page__prop-label {
   flex: 0 0 110px;
   font-size: 0.8125rem;

@@ -431,6 +431,10 @@ CREATE TRIGGER trg_cards_sync_attachments
   FOR EACH ROW EXECUTE PROCEDURE sync_card_attachments_from_cards_media();
 `,
   },
+  {
+    label: "cards.custom_props（笔记自定义属性）",
+    sql: `ALTER TABLE cards ADD COLUMN IF NOT EXISTS custom_props JSONB NOT NULL DEFAULT '[]'::jsonb`,
+  },
 ];
 
 async function main() {

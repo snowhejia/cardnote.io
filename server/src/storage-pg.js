@@ -32,6 +32,9 @@ function rowToCard(row) {
     tags: row.tags ?? [],
     relatedRefs: row.related_refs ?? [],
     media: row.media ?? [],
+    ...(Array.isArray(row.custom_props) && row.custom_props.length > 0
+      ? { customProps: row.custom_props }
+      : {}),
   };
 }
 
@@ -146,6 +149,7 @@ function flattenTree(userId, tree) {
             tags: card.tags ?? [],
             related_refs: card.relatedRefs ?? [],
             media: card.media ?? [],
+            custom_props: card.customProps ?? [],
           });
         }
         placements.push({
@@ -202,7 +206,7 @@ export async function getCollectionsTree(userId) {
   const orphanRes = await query(
     `SELECT c.id, c.text, c.minutes_of_day, c.added_on, c.reminder_on,
             c.reminder_time, c.reminder_note, c.reminder_completed_at, c.reminder_completed_note,
-            c.tags, c.related_refs, c.media
+            c.tags, c.related_refs, c.media, c.custom_props
      FROM cards c
      WHERE (${cUidSql})
        AND c.trashed_at IS NULL
@@ -232,7 +236,7 @@ export async function getCollectionsTree(userId) {
   const cardRes = await query(
     `SELECT c.id, c.text, c.minutes_of_day, c.added_on, c.reminder_on,
             c.reminder_time, c.reminder_note, c.reminder_completed_at, c.reminder_completed_note,
-            c.tags, c.related_refs, c.media,
+            c.tags, c.related_refs, c.media, c.custom_props,
             p.collection_id, p.pinned, p.sort_order
      FROM card_placements p
      INNER JOIN cards c ON c.id = p.card_id AND c.trashed_at IS NULL
@@ -317,9 +321,9 @@ export async function replaceCollectionsTree(userId, collectionsArray) {
       const vals = cards
         .map(
           (_, i) =>
-            `($${i * 13 + 1}, $${i * 13 + 2}, $${i * 13 + 3}, $${i * 13 + 4}, $${i * 13 + 5}, ` +
-            `$${i * 13 + 6}, $${i * 13 + 7}, $${i * 13 + 8}, $${i * 13 + 9}, $${i * 13 + 10}, ` +
-            `$${i * 13 + 11}, $${i * 13 + 12}, $${i * 13 + 13})`
+            `($${i * 14 + 1}, $${i * 14 + 2}, $${i * 14 + 3}, $${i * 14 + 4}, $${i * 14 + 5}, ` +
+            `$${i * 14 + 6}, $${i * 14 + 7}, $${i * 14 + 8}, $${i * 14 + 9}, $${i * 14 + 10}, ` +
+            `$${i * 14 + 11}, $${i * 14 + 12}, $${i * 14 + 13}, $${i * 14 + 14})`
         )
         .join(",");
       const flat = cards.flatMap((c) => [
@@ -336,12 +340,13 @@ export async function replaceCollectionsTree(userId, collectionsArray) {
         c.tags,
         JSON.stringify(c.related_refs),
         JSON.stringify(c.media),
+        JSON.stringify(c.custom_props ?? []),
       ]);
       await client.query(
         `INSERT INTO cards
            (id, user_id, text, minutes_of_day, added_on, reminder_on,
             reminder_time, reminder_note, reminder_completed_at, reminder_completed_note,
-            tags, related_refs, media)
+            tags, related_refs, media, custom_props)
          VALUES ${vals}`,
         flat
       );
@@ -520,6 +525,7 @@ export async function createCard(userId, collectionId, card) {
     tags = [],
     relatedRefs = [],
     media = [],
+    customProps = [],
     insertAtStart = false,
   } = card;
 
@@ -562,7 +568,7 @@ export async function createCard(userId, collectionId, card) {
     const row = await query(
       `SELECT c.id, c.text, c.minutes_of_day, c.added_on, c.reminder_on,
               c.reminder_time, c.reminder_note, c.reminder_completed_at, c.reminder_completed_note,
-              c.tags, c.related_refs, c.media, p.pinned
+              c.tags, c.related_refs, c.media, c.custom_props, p.pinned
        FROM cards c
        JOIN card_placements p ON p.card_id = c.id AND p.collection_id = $2
        WHERE c.id = $1`,
@@ -575,8 +581,8 @@ export async function createCard(userId, collectionId, card) {
   await query(
     `INSERT INTO cards
        (id, user_id, text, minutes_of_day, added_on, reminder_on,
-        reminder_time, reminder_note, reminder_completed_at, reminder_completed_note, tags, related_refs, media)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+        reminder_time, reminder_note, reminder_completed_at, reminder_completed_note, tags, related_refs, media, custom_props)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
     [
       id,
       userId ?? null,
@@ -591,6 +597,7 @@ export async function createCard(userId, collectionId, card) {
       tags,
       JSON.stringify(relatedRefs),
       JSON.stringify(media),
+      JSON.stringify(customProps),
     ]
   );
 
@@ -614,6 +621,9 @@ export async function createCard(userId, collectionId, card) {
     tags,
     relatedRefs,
     media,
+    ...(Array.isArray(customProps) && customProps.length > 0
+      ? { customProps }
+      : {}),
   };
 }
 
@@ -680,6 +690,10 @@ export async function updateCard(userId, cardId, patch) {
   if (Array.isArray(patch.relatedRefs)) {
     cardCols.push(`related_refs = $${i++}`);
     cardParams.push(JSON.stringify(patch.relatedRefs));
+  }
+  if (Array.isArray(patch.customProps)) {
+    cardCols.push(`custom_props = $${i++}`);
+    cardParams.push(JSON.stringify(patch.customProps));
   }
   if (typeof patch.minutesOfDay === "number") {
     cardCols.push(`minutes_of_day = $${i++}`);
@@ -912,7 +926,7 @@ export async function listTrashedNotes(ownerKey) {
   const res = await query(
     `SELECT c.id, c.text, c.minutes_of_day, c.added_on, c.reminder_on,
             c.reminder_time, c.reminder_note, c.reminder_completed_at, c.reminder_completed_note,
-            c.tags, c.related_refs, c.media,
+            c.tags, c.related_refs, c.media, c.custom_props,
             c.trashed_at, c.trash_col_id, c.trash_col_path_label
      FROM cards c
      WHERE (${uidSql}) AND c.trashed_at IS NOT NULL
@@ -1056,7 +1070,7 @@ export async function restoreTrashedCard(
   const row = await query(
     `SELECT c.id, c.text, c.minutes_of_day, c.added_on, c.reminder_on,
             c.reminder_time, c.reminder_note, c.reminder_completed_at, c.reminder_completed_note,
-            c.tags, c.related_refs, c.media, p.pinned
+            c.tags, c.related_refs, c.media, c.custom_props, p.pinned
      FROM cards c
      JOIN card_placements p ON p.card_id = c.id AND p.collection_id = $2
      WHERE c.id = $1`,

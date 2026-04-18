@@ -316,3 +316,6 @@ DROP TRIGGER IF EXISTS trg_cards_sync_attachments ON cards;
 CREATE TRIGGER trg_cards_sync_attachments
   AFTER INSERT OR UPDATE ON cards
   FOR EACH ROW EXECUTE PROCEDURE sync_card_attachments_from_cards_media();
+
+-- cards.custom_props（笔记自定义属性 CardProperty[]）
+ALTER TABLE cards ADD COLUMN IF NOT EXISTS custom_props JSONB NOT NULL DEFAULT '[]'::jsonb;

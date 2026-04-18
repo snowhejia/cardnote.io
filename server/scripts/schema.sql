@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS cards (
   tags            TEXT[] NOT NULL DEFAULT '{}',
   related_refs    JSONB NOT NULL DEFAULT '[]',
   media           JSONB NOT NULL DEFAULT '[]',
+  custom_props    JSONB NOT NULL DEFAULT '[]',
   trashed_at      TIMESTAMPTZ NULL,
   trash_col_id    TEXT NULL,
   trash_col_path_label TEXT NOT NULL DEFAULT '',
