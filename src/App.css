@@ -8900,12 +8900,19 @@ body.app--related-panel-open .app.app--tablet-split-nav .main {
   overflow: hidden;
 }
 
+.card-page__editor-area .note-toolbar-wrap {
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+}
+
 .card-page__editor-area .note-toolbar {
-  margin-bottom: 0;
   border-radius: 0;
-  border-bottom: 1px solid rgba(55, 53, 47, 0.09);
-  background: #f7f7f5;
-  padding: 3px 8px;
+  border-top: none;
+  background: #fafafa;
+  padding: 4px 12px;
+}
+
+.card-page__editor-area .note-toolbar__link-bar {
+  background: #fafafa;
 }
 
 .card-page__editor-area .ProseMirror {
@@ -8971,14 +8978,17 @@ body.app--related-panel-open .app.app--tablet-split-nav .main {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  min-width: 22px;
-  flex: 0 0 22px;
-  font-size: 0.75rem;
+  width: 24px;
+  min-width: 24px;
+  flex: 0 0 24px;
+  font-size: 0.9375rem;
+  font-weight: 700;
   line-height: 1;
-  color: rgba(55, 53, 47, 0.4);
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  letter-spacing: -0.02em;
+  color: rgba(55, 53, 47, 0.58);
+  font-family: system-ui, -apple-system, "Segoe UI", ui-sans-serif, sans-serif;
   text-align: center;
+  -webkit-font-smoothing: antialiased;
 }
 
 .card-page__prop-name-input {
@@ -9274,18 +9284,26 @@ body.app--related-panel-open .app.app--tablet-split-nav .main {
 
 /* ——— 笔记编辑器格式工具栏 ——— */
 
+.note-toolbar-wrap {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+}
+
 .note-toolbar {
   display: flex;
   align-items: center;
   gap: 1px;
-  padding: 3px 6px;
-  margin-bottom: 10px;
-  background: #f7f7f5;
-  border-bottom: 1px solid rgba(55, 53, 47, 0.09);
+  padding: 4px 10px;
+  margin-bottom: 0;
+  background: #ffffff;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
   flex-wrap: nowrap;
   overflow-x: auto;
   scrollbar-width: none;
   flex: 0 0 auto;
+  user-select: none;
 }
 
 .note-toolbar::-webkit-scrollbar {
@@ -9296,57 +9314,126 @@ body.app--related-panel-open .app.app--tablet-split-nav .main {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   border: none;
   background: none;
-  border-radius: 4px;
+  border-radius: 5px;
   cursor: pointer;
-  color: rgba(55, 53, 47, 0.55);
-  transition: background 0.1s, color 0.1s;
+  color: rgba(20, 20, 20, 0.6);
+  transition: background 0.12s, color 0.12s;
   padding: 0;
   flex: 0 0 auto;
 }
 
 .note-toolbar__btn:hover {
-  background: rgba(55, 53, 47, 0.07);
-  color: rgba(55, 53, 47, 0.9);
+  background: rgba(0, 0, 0, 0.07);
+  color: rgba(20, 20, 20, 0.88);
 }
 
 .note-toolbar__btn--active {
-  background: rgba(55, 53, 47, 0.1);
-  color: rgba(55, 53, 47, 0.95);
+  background: rgba(59, 130, 246, 0.12);
+  color: rgb(37, 99, 235);
+}
+
+.note-toolbar__btn--active:hover {
+  background: rgba(59, 130, 246, 0.18);
+  color: rgb(29, 78, 216);
 }
 
 .note-toolbar__sep {
   width: 1px;
-  height: 16px;
-  background: rgba(55, 53, 47, 0.14);
-  margin: 0 4px;
+  height: 18px;
+  background: rgba(0, 0, 0, 0.1);
+  margin: 0 5px;
   flex: 0 0 auto;
+  border-radius: 1px;
 }
 
 /* 荧光笔色块 */
 
 .note-toolbar__color {
-  width: 14px;
-  height: 14px;
+  position: relative;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
-  border: 1.5px solid transparent;
+  border: none;
   background-color: var(--hl-color);
   cursor: pointer;
   padding: 0;
-  margin: 0 1px;
-  transition: transform 0.1s, border-color 0.1s;
+  margin: 0 2px;
+  transition: transform 0.12s, box-shadow 0.12s;
   flex: 0 0 auto;
+  outline: 2px solid transparent;
+  outline-offset: 1px;
 }
 
 .note-toolbar__color:hover {
-  transform: scale(1.25);
-  border-color: rgba(55, 53, 47, 0.3);
+  transform: scale(1.2);
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.15);
 }
 
 .note-toolbar__color--active {
-  border-color: rgba(55, 53, 47, 0.6);
-  transform: scale(1.2);
+  transform: scale(1.15);
+  outline-color: rgba(20, 20, 20, 0.5);
+  box-shadow: none;
+}
+
+/* 链接输入栏 */
+
+.note-toolbar__link-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: #fff;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.note-toolbar__link-input {
+  flex: 1 1 auto;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  border-radius: 5px;
+  font-size: 13px;
+  outline: none;
+  background: #fff;
+  color: inherit;
+  transition: border-color 0.15s;
+}
+
+.note-toolbar__link-input:focus {
+  border-color: rgb(37, 99, 235);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.18);
+}
+
+.note-toolbar__link-confirm,
+.note-toolbar__link-cancel {
+  height: 28px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 5px;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s;
+}
+
+.note-toolbar__link-confirm {
+  background: rgb(37, 99, 235);
+  color: #fff;
+}
+
+.note-toolbar__link-confirm:hover {
+  background: rgb(29, 78, 216);
+}
+
+.note-toolbar__link-cancel {
+  background: rgba(0, 0, 0, 0.06);
+  color: rgba(20, 20, 20, 0.7);
+}
+
+.note-toolbar__link-cancel:hover {
+  background: rgba(0, 0, 0, 0.1);
 }

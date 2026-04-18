@@ -65,19 +65,23 @@ function NoteEditorToolbar({ editor }: { editor: Editor }) {
     editor.isActive("heading", { level: l })
   );
 
+
   return (
+    <div className="note-toolbar-wrap">
     <div className="note-toolbar" aria-label="格式工具栏">
       {/* 撤销 / 重做 */}
       <TBtn title="撤销 (Ctrl+Z)" onAction={() => editor.chain().focus().undo().run()}>
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-          <path d="M2 6.5h7a3 3 0 0 1 0 6H5" />
-          <polyline points="2,4 2,7 5,7" />
+        <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          {/* 左弯箭头 */}
+          <path d="M3 8.5a5 5 0 1 1 1.5 3.5" />
+          <polyline points="1,5.5 3,8.5 5.5,6.5" />
         </svg>
       </TBtn>
       <TBtn title="重做 (Ctrl+Y)" onAction={() => editor.chain().focus().redo().run()}>
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-          <path d="M12 6.5H5a3 3 0 0 0 0 6h4" />
-          <polyline points="12,4 12,7 9,7" />
+        <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          {/* 右弯箭头 */}
+          <path d="M12 8.5a5 5 0 1 0-1.5 3.5" />
+          <polyline points="14,5.5 12,8.5 9.5,6.5" />
         </svg>
       </TBtn>
 
@@ -93,23 +97,25 @@ function NoteEditorToolbar({ editor }: { editor: Editor }) {
             editor.chain().focus().toggleHeading({ level }).run()
           }
         >
-          <span style={{ fontWeight: 700, fontSize: 11 }}>H{level}</span>
+          <span style={{ fontWeight: 700, fontSize: 12, letterSpacing: "-0.3px" }}>H{level}</span>
         </TBtn>
       ))}
 
       <Sep />
 
-      {/* 无序 / 有序列表 / 引用 / 分割线 */}
+      {/* 无序 / 有序列表 / 引用 */}
       <TBtn
         active={editor.isActive("bulletList")}
         title="无序列表"
         onAction={() => editor.chain().focus().toggleBulletList().run()}
       >
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden>
-          <circle cx="2.5" cy="3.5" r="1" /><circle cx="2.5" cy="7" r="1" /><circle cx="2.5" cy="10.5" r="1" />
-          <rect x="5" y="2.75" width="7" height="1.5" rx=".5" />
-          <rect x="5" y="6.25" width="7" height="1.5" rx=".5" />
-          <rect x="5" y="9.75" width="7" height="1.5" rx=".5" />
+        <svg width="15" height="15" viewBox="0 0 15 15" fill="currentColor" aria-hidden>
+          <circle cx="2.5" cy="3.75" r="1.1" />
+          <circle cx="2.5" cy="7.5" r="1.1" />
+          <circle cx="2.5" cy="11.25" r="1.1" />
+          <rect x="5" y="3" width="8" height="1.5" rx=".6" />
+          <rect x="5" y="6.75" width="8" height="1.5" rx=".6" />
+          <rect x="5" y="10.5" width="8" height="1.5" rx=".6" />
         </svg>
       </TBtn>
       <TBtn
@@ -117,13 +123,13 @@ function NoteEditorToolbar({ editor }: { editor: Editor }) {
         title="有序列表"
         onAction={() => editor.chain().focus().toggleOrderedList().run()}
       >
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden>
-          <text x="1" y="5" fontSize="4.5" fontFamily="monospace" fontWeight="bold">1.</text>
-          <text x="1" y="8.5" fontSize="4.5" fontFamily="monospace" fontWeight="bold">2.</text>
-          <text x="1" y="12" fontSize="4.5" fontFamily="monospace" fontWeight="bold">3.</text>
-          <rect x="6" y="2.75" width="6" height="1.5" rx=".5" />
-          <rect x="6" y="6.25" width="6" height="1.5" rx=".5" />
-          <rect x="6" y="9.75" width="6" height="1.5" rx=".5" />
+        <svg width="15" height="15" viewBox="0 0 15 15" fill="currentColor" aria-hidden>
+          <text x="1" y="5.5" fontSize="4.5" fontFamily="monospace" fontWeight="bold">1.</text>
+          <text x="1" y="9.5" fontSize="4.5" fontFamily="monospace" fontWeight="bold">2.</text>
+          <text x="1" y="13.5" fontSize="4.5" fontFamily="monospace" fontWeight="bold">3.</text>
+          <rect x="6.5" y="3" width="7" height="1.5" rx=".6" />
+          <rect x="6.5" y="7" width="7" height="1.5" rx=".6" />
+          <rect x="6.5" y="11" width="7" height="1.5" rx=".6" />
         </svg>
       </TBtn>
       <TBtn
@@ -131,8 +137,12 @@ function NoteEditorToolbar({ editor }: { editor: Editor }) {
         title="引用"
         onAction={() => editor.chain().focus().toggleBlockquote().run()}
       >
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden>
-          <path d="M2 3.5A1.5 1.5 0 0 1 3.5 2h.5a.5.5 0 0 1 0 1h-.5a.5.5 0 0 0-.5.5v1h1a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V3.5Zm7 0A1.5 1.5 0 0 1 10.5 2h.5a.5.5 0 0 1 0 1h-.5a.5.5 0 0 0-.5.5v1h1a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V3.5Z" />
+        {/* 左侧竖条 + 两行文字，最直观的引用图标 */}
+        <svg width="15" height="15" viewBox="0 0 15 15" fill="currentColor" aria-hidden>
+          <rect x="2" y="2.5" width="2" height="10" rx="1" />
+          <rect x="5.5" y="4" width="7.5" height="1.5" rx=".6" />
+          <rect x="5.5" y="7" width="6" height="1.5" rx=".6" />
+          <rect x="5.5" y="10" width="7" height="1.5" rx=".6" />
         </svg>
       </TBtn>
 
@@ -144,8 +154,8 @@ function NoteEditorToolbar({ editor }: { editor: Editor }) {
         title="粗体 (Ctrl+B)"
         onAction={() => editor.chain().focus().toggleBold().run()}
       >
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden>
-          <path d="M3.5 2h3.75a3 3 0 0 1 2.1 5.1A3.25 3.25 0 0 1 7.5 13H3.5a.5.5 0 0 1-.5-.5v-10a.5.5 0 0 1 .5-.5ZM4 6.5h3.25a2 2 0 0 0 0-4H4v4Zm0 1v4h3.5a2.25 2.25 0 0 0 0-4.5H4Z" />
+        <svg width="15" height="15" viewBox="0 0 15 15" aria-hidden>
+          <text x="7.5" y="12" textAnchor="middle" fontSize="13" fontFamily="system-ui,-apple-system,sans-serif" fontWeight="800" fill="currentColor">B</text>
         </svg>
       </TBtn>
       <TBtn
@@ -153,19 +163,18 @@ function NoteEditorToolbar({ editor }: { editor: Editor }) {
         title="斜体 (Ctrl+I)"
         onAction={() => editor.chain().focus().toggleItalic().run()}
       >
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden>
-          <path d="M5 2.5a.5.5 0 0 1 .5-.5h4a.5.5 0 0 1 0 1H7.72L5.72 11H7.5a.5.5 0 0 1 0 1h-4a.5.5 0 0 1 0-1h1.78l2-8H4.5a.5.5 0 0 1-.5-.5Z" />
+        <svg width="15" height="15" viewBox="0 0 15 15" aria-hidden>
+          <text x="7.5" y="12" textAnchor="middle" fontSize="13" fontFamily="system-ui,-apple-system,sans-serif" fontStyle="italic" fontWeight="500" fill="currentColor">I</text>
         </svg>
       </TBtn>
       <TBtn
         active={editor.isActive("strike")}
-        title="删除线 (Ctrl+Shift+S)"
+        title="删除线"
         onAction={() => editor.chain().focus().toggleStrike().run()}
       >
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" aria-hidden>
-          <line x1="2" y1="7" x2="12" y2="7" />
-          <path d="M4.5 4.5c0-1.1 1.1-2 2.5-2s2.5.9 2.5 2" />
-          <path d="M4.5 10c0 1.1 1.1 2 2.5 2s2.5-.9 2.5-2" />
+        <svg width="15" height="15" viewBox="0 0 15 15" aria-hidden>
+          <text x="7.5" y="12" textAnchor="middle" fontSize="13" fontFamily="system-ui,-apple-system,sans-serif" fontWeight="500" fill="currentColor">S</text>
+          <line x1="2" y1="7.5" x2="13" y2="7.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
         </svg>
       </TBtn>
       <TBtn
@@ -173,9 +182,9 @@ function NoteEditorToolbar({ editor }: { editor: Editor }) {
         title="行内代码 (Ctrl+E)"
         onAction={() => editor.chain().focus().toggleCode().run()}
       >
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-          <polyline points="4.5,3.5 1.5,7 4.5,10.5" />
-          <polyline points="9.5,3.5 12.5,7 9.5,10.5" />
+        <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <polyline points="5.5,4 2.5,7.5 5.5,11" />
+          <polyline points="9.5,4 12.5,7.5 9.5,11" />
         </svg>
       </TBtn>
       <TBtn
@@ -183,8 +192,9 @@ function NoteEditorToolbar({ editor }: { editor: Editor }) {
         title="下划线 (Ctrl+U)"
         onAction={() => editor.chain().focus().toggleUnderline().run()}
       >
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden>
-          <path d="M3 2.5a.5.5 0 0 1 1 0v4a3 3 0 0 0 6 0v-4a.5.5 0 0 1 1 0v4a4 4 0 0 1-8 0v-4ZM2 12h10v1H2z" />
+        <svg width="15" height="15" viewBox="0 0 15 15" aria-hidden>
+          <text x="7.5" y="11" textAnchor="middle" fontSize="13" fontFamily="system-ui,-apple-system,sans-serif" fontWeight="500" fill="currentColor">U</text>
+          <line x1="3" y1="13.5" x2="12" y2="13.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
         </svg>
       </TBtn>
 
@@ -210,24 +220,6 @@ function NoteEditorToolbar({ editor }: { editor: Editor }) {
         );
       })}
 
-      {/* 链接 */}
-      <TBtn
-        active={editor.isActive("link")}
-        title="插入链接"
-        onAction={() => {
-          if (editor.isActive("link")) {
-            editor.chain().focus().unsetLink().run();
-          } else {
-            const url = window.prompt("链接地址");
-            if (url) editor.chain().focus().setLink({ href: url }).run();
-          }
-        }}
-      >
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-          <path d="M5.5 8.5a3.5 3.5 0 0 0 4.95 0l1.77-1.77a3.5 3.5 0 0 0-4.95-4.95L6 3" />
-          <path d="M8.5 5.5a3.5 3.5 0 0 0-4.95 0L1.78 7.27a3.5 3.5 0 0 0 4.95 4.95L8 11" />
-        </svg>
-      </TBtn>
 
       <Sep />
 
@@ -237,9 +229,11 @@ function NoteEditorToolbar({ editor }: { editor: Editor }) {
         title="上标"
         onAction={() => editor.chain().focus().toggleSuperscript().run()}
       >
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden>
-          <text x="1" y="11" fontSize="8" fontFamily="serif" fontStyle="italic">x</text>
-          <text x="8" y="6" fontSize="5" fontFamily="serif">2</text>
+        {/* x 在下方，² 在右上 */}
+        <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden>
+          <line x1="1.5" y1="7.5" x2="7.5" y2="13.5" />
+          <line x1="7.5" y1="7.5" x2="1.5" y2="13.5" />
+          <text x="8.5" y="6.5" fontSize="5.5" fontFamily="system-ui, sans-serif" fontWeight="700" fill="currentColor" stroke="none">2</text>
         </svg>
       </TBtn>
       <TBtn
@@ -247,9 +241,11 @@ function NoteEditorToolbar({ editor }: { editor: Editor }) {
         title="下标"
         onAction={() => editor.chain().focus().toggleSubscript().run()}
       >
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden>
-          <text x="1" y="9" fontSize="8" fontFamily="serif" fontStyle="italic">x</text>
-          <text x="8" y="13" fontSize="5" fontFamily="serif">2</text>
+        {/* x 在上方，₂ 在右下 */}
+        <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden>
+          <line x1="1.5" y1="1.5" x2="7.5" y2="7.5" />
+          <line x1="7.5" y1="1.5" x2="1.5" y2="7.5" />
+          <text x="8.5" y="14" fontSize="5.5" fontFamily="system-ui, sans-serif" fontWeight="700" fill="currentColor" stroke="none">2</text>
         </svg>
       </TBtn>
 
@@ -259,35 +255,35 @@ function NoteEditorToolbar({ editor }: { editor: Editor }) {
       {(["left", "center", "right", "justify"] as const).map((align) => {
         const icons: Record<string, React.ReactNode> = {
           left: (
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden>
-              <rect x="1" y="2.5" width="12" height="1.5" rx=".5" />
-              <rect x="1" y="5.5" width="8" height="1.5" rx=".5" />
-              <rect x="1" y="8.5" width="12" height="1.5" rx=".5" />
-              <rect x="1" y="11.5" width="6" height="1.5" rx=".5" />
+            <svg width="15" height="15" viewBox="0 0 15 15" fill="currentColor" aria-hidden>
+              <rect x="1" y="2.5" width="13" height="1.5" rx=".6" />
+              <rect x="1" y="5.75" width="9" height="1.5" rx=".6" />
+              <rect x="1" y="9" width="13" height="1.5" rx=".6" />
+              <rect x="1" y="12.25" width="7" height="1.5" rx=".6" />
             </svg>
           ),
           center: (
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden>
-              <rect x="1" y="2.5" width="12" height="1.5" rx=".5" />
-              <rect x="3" y="5.5" width="8" height="1.5" rx=".5" />
-              <rect x="1" y="8.5" width="12" height="1.5" rx=".5" />
-              <rect x="4" y="11.5" width="6" height="1.5" rx=".5" />
+            <svg width="15" height="15" viewBox="0 0 15 15" fill="currentColor" aria-hidden>
+              <rect x="1" y="2.5" width="13" height="1.5" rx=".6" />
+              <rect x="3" y="5.75" width="9" height="1.5" rx=".6" />
+              <rect x="1" y="9" width="13" height="1.5" rx=".6" />
+              <rect x="4" y="12.25" width="7" height="1.5" rx=".6" />
             </svg>
           ),
           right: (
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden>
-              <rect x="1" y="2.5" width="12" height="1.5" rx=".5" />
-              <rect x="5" y="5.5" width="8" height="1.5" rx=".5" />
-              <rect x="1" y="8.5" width="12" height="1.5" rx=".5" />
-              <rect x="7" y="11.5" width="6" height="1.5" rx=".5" />
+            <svg width="15" height="15" viewBox="0 0 15 15" fill="currentColor" aria-hidden>
+              <rect x="1" y="2.5" width="13" height="1.5" rx=".6" />
+              <rect x="5" y="5.75" width="9" height="1.5" rx=".6" />
+              <rect x="1" y="9" width="13" height="1.5" rx=".6" />
+              <rect x="7" y="12.25" width="7" height="1.5" rx=".6" />
             </svg>
           ),
           justify: (
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden>
-              <rect x="1" y="2.5" width="12" height="1.5" rx=".5" />
-              <rect x="1" y="5.5" width="12" height="1.5" rx=".5" />
-              <rect x="1" y="8.5" width="12" height="1.5" rx=".5" />
-              <rect x="1" y="11.5" width="12" height="1.5" rx=".5" />
+            <svg width="15" height="15" viewBox="0 0 15 15" fill="currentColor" aria-hidden>
+              <rect x="1" y="2.5" width="13" height="1.5" rx=".6" />
+              <rect x="1" y="5.75" width="13" height="1.5" rx=".6" />
+              <rect x="1" y="9" width="13" height="1.5" rx=".6" />
+              <rect x="1" y="12.25" width="13" height="1.5" rx=".6" />
             </svg>
           ),
         };
@@ -308,6 +304,7 @@ function NoteEditorToolbar({ editor }: { editor: Editor }) {
           </TBtn>
         );
       })}
+    </div>
     </div>
   );
 }
