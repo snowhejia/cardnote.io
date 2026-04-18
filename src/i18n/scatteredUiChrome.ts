@@ -6,7 +6,11 @@ export type ScatteredUiChrome = {
   uiBack: string;
   uiNoteBodyAria: string;
   uiMoreActions: string;
+  /** 时间线卡片角标：打开中等高度「卡片预览」覆盖层 */
   uiViewDetail: string;
+  /** 卡片「⋯」菜单：打开全屏「卡片详情」页 */
+  uiCardNoteDetailFullPage: string;
+  /** 「相关笔记」侧栏标题（双向关联管理） */
   uiRelatedNotes: string;
   uiUploading: string;
   uiAddAttachment: string;
@@ -141,7 +145,8 @@ const zh: ScatteredUiChrome = {
   uiBack: "返回",
   uiNoteBodyAria: "笔记正文",
   uiMoreActions: "更多操作",
-  uiViewDetail: "查看详情",
+  uiViewDetail: "卡片预览",
+  uiCardNoteDetailFullPage: "笔记详情",
   uiRelatedNotes: "相关笔记",
   uiUploading: "上传中…",
   uiAddAttachment: "添加附件",
@@ -281,7 +286,8 @@ const en: ScatteredUiChrome = {
   uiBack: "Back",
   uiNoteBodyAria: "Note body",
   uiMoreActions: "More actions",
-  uiViewDetail: "View details",
+  uiViewDetail: "Card preview",
+  uiCardNoteDetailFullPage: "Note detail",
   uiRelatedNotes: "Related notes",
   uiUploading: "Uploading…",
   uiAddAttachment: "Add attachment",

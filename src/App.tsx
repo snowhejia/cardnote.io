@@ -34,6 +34,10 @@ import {
 import { uploadCardMedia } from "./api/upload";
 import { useAppDataMode } from "./appDataMode";
 import { getAppDataMode } from "./appDataModeStorage";
+import {
+  readAttachmentsPreviewLayout,
+  writeAttachmentsPreviewLayout,
+} from "./allAttachmentsPreviewLayoutStorage";
 import { useAuth } from "./auth/AuthContext";
 import { useAppUiLang } from "./appUiLang";
 import { useAppChrome } from "./i18n/useAppChrome";
@@ -457,6 +461,8 @@ export default function App() {
   const [detailCard, setDetailCard] = useState<{
     card: NoteCard;
     colId: string;
+    /** `card.media` 下标：从「所有附件」等入口打开时定位轮播 */
+    openAtMediaIndex?: number;
   } | null>(null);
   const [cardPageCard, setCardPageCard] = useState<{
     cardId: string;
@@ -607,6 +613,9 @@ export default function App() {
   });
   const [attachmentsFilterKey, setAttachmentsFilterKey] =
     useState<AttachmentFilterKey>("all");
+  const [attachmentsPreviewLayout, setAttachmentsPreviewLayout] = useState<
+    "contain" | "square"
+  >(() => readAttachmentsPreviewLayout());
   /** 持久化主区时读取，避免 persist 的 useEffect 先于 layout 恢复「全部笔记」而用旧闭包把 sentinel 盖成合集 id */
   const allNotesViewForPersistRef = useRef(allNotesViewActive);
   const activeIdForPersistRef = useRef(activeId);
@@ -3866,7 +3875,13 @@ export default function App() {
     if (!detailCard) return null;
     const col = findCollectionById(collections, detailCard.colId);
     const c = col?.cards.find((x) => x.id === detailCard.card.id);
-    return c ? { colId: detailCard.colId, card: c } : null;
+    return c
+      ? {
+          colId: detailCard.colId,
+          card: c,
+          openAtMediaIndex: detailCard.openAtMediaIndex,
+        }
+      : null;
   }, [detailCard, collections]);
 
   useEffect(() => {
@@ -3917,8 +3932,7 @@ export default function App() {
         canAttachMedia={canAttachMedia}
         cardMenuId={cardMenuId}
         setCardMenuId={setCardMenuId}
-        relatedPanel={relatedPanel}
-        setRelatedPanel={setRelatedPanel}
+        cardPageCard={cardPageCard}
         uploadBusyCardId={uploadBusyCardId}
         uploadCardProgress={uploadCardProgress}
         cardDragOverId={cardDragOverId}
@@ -3943,7 +3957,10 @@ export default function App() {
         setCardText={setCardText}
         timelineColumnCount={timelineColumnCount}
         openAddToCollectionPicker={openAddToCollectionPicker}
-        openCardPage={(cId, cardId) => setCardPageCard({ colId: cId, cardId })}
+        openCardPage={(cId, cardId) => {
+          setDetailCard(null);
+          setCardPageCard({ colId: cId, cardId });
+        }}
       />
     );
   }
@@ -5048,6 +5065,67 @@ export default function App() {
                   </svg>
                 </button>
               ) : null}
+              {attachmentsViewActive ? (
+                <button
+                  type="button"
+                  className={
+                    "main__header-icon-btn" +
+                    (attachmentsPreviewLayout === "square"
+                      ? " main__header-icon-btn--active"
+                      : "")
+                  }
+                  aria-label={
+                    attachmentsPreviewLayout === "square"
+                      ? c.allAttachmentsPreviewToggleToOriginalAria
+                      : c.allAttachmentsPreviewToggleToSquareAria
+                  }
+                  aria-pressed={attachmentsPreviewLayout === "square"}
+                  title={
+                    attachmentsPreviewLayout === "square"
+                      ? c.allAttachmentsPreviewToggleToOriginalTitle
+                      : c.allAttachmentsPreviewToggleToSquareTitle
+                  }
+                  onClick={() => {
+                    setAttachmentsPreviewLayout((cur) => {
+                      const next = cur === "square" ? "contain" : "square";
+                      writeAttachmentsPreviewLayout(next);
+                      return next;
+                    });
+                  }}
+                >
+                  {attachmentsPreviewLayout === "square" ? (
+                    <svg
+                      className="main__header-icon-btn__svg"
+                      width="20"
+                      height="20"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden
+                    >
+                      <rect x="3" y="8" width="18" height="8" rx="1.5" />
+                    </svg>
+                  ) : (
+                    <svg
+                      className="main__header-icon-btn__svg"
+                      width="20"
+                      height="20"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden
+                    >
+                      <rect x="5" y="5" width="14" height="14" rx="1.5" />
+                    </svg>
+                  )}
+                </button>
+              ) : null}
               {!remindersViewActive && !attachmentsViewActive ? (
                 columnStepList.length === 2 ? (
                   <button
@@ -5559,11 +5637,16 @@ export default function App() {
                 dataMode={dataMode}
                 entries={allMediaAttachmentEntries}
                 filterKey={attachmentsFilterKey}
+                previewLayout={attachmentsPreviewLayout}
                 remoteListRefreshNonce={attachmentsRemoteListNonce}
-                onOpenCard={(colId, cardId) => {
+                onOpenCard={(colId, cardId, mediaIndex) => {
                   const hit = findCardInTree(collections, colId, cardId);
                   if (hit) {
-                    setDetailCard({ card: hit.card, colId });
+                    setDetailCard({
+                      card: hit.card,
+                      colId,
+                      openAtMediaIndex: mediaIndex,
+                    });
                   }
                 }}
               />
@@ -6295,15 +6378,16 @@ export default function App() {
         <Suspense fallback={null}>
           <CardDetail
           card={detailCardLive.card}
+          openAtMediaIndex={detailCardLive.openAtMediaIndex}
           onClose={() => {
             setDetailCard(null);
             setCardMenuId(null);
           }}
           canEdit={canEdit}
           canAttachMedia={canAttachMedia}
-          relatedPanelOpen={
-            relatedPanel?.colId === detailCardLive.colId &&
-            relatedPanel?.cardId === detailCardLive.card.id
+          cardPageActive={
+            cardPageCard?.colId === detailCardLive.colId &&
+            cardPageCard?.cardId === detailCardLive.card.id
           }
           uploadBusy={uploadBusyCardId === detailCardLive.card.id}
           uploadProgress={
@@ -6313,17 +6397,14 @@ export default function App() {
           }
           cardMenuId={cardMenuId}
           setCardMenuId={setCardMenuId}
-          onToggleRelatedPanel={() =>
-            setRelatedPanel((p) =>
-              p?.colId === detailCardLive.colId &&
-              p?.cardId === detailCardLive.card.id
-                ? null
-                : {
-                    colId: detailCardLive.colId,
-                    cardId: detailCardLive.card.id,
-                  }
-            )
-          }
+          onOpenNoteDetailPage={() => {
+            setDetailCard(null);
+            setCardPageCard({
+              colId: detailCardLive.colId,
+              cardId: detailCardLive.card.id,
+            });
+            setCardMenuId(null);
+          }}
           onBeginMediaUpload={() =>
             beginCardMediaUpload(
               detailCardLive.colId,

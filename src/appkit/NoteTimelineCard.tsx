@@ -36,10 +36,8 @@ export type NoteTimelineCardProps = {
   canAttachMedia: boolean;
   cardMenuId: string | null;
   setCardMenuId: Dispatch<SetStateAction<string | null>>;
-  relatedPanel: { colId: string; cardId: string } | null;
-  setRelatedPanel: Dispatch<
-    SetStateAction<{ colId: string; cardId: string } | null>
-  >;
+  /** 全屏「卡片详情」页打开目标，用于 ⋯ 首项高亮 */
+  cardPageCard: { colId: string; cardId: string } | null;
   uploadBusyCardId: string | null;
   /** 当前 busy 卡片的上传进度 0–100，无上传或非本卡为 null */
   uploadCardProgress: number | null;
@@ -107,8 +105,7 @@ export function NoteTimelineCard(p: NoteTimelineCardProps) {
     canAttachMedia,
     cardMenuId,
     setCardMenuId,
-    relatedPanel,
-    setRelatedPanel,
+    cardPageCard,
     uploadBusyCardId,
     uploadCardProgress,
     cardDragOverId,
@@ -136,6 +133,9 @@ export function NoteTimelineCard(p: NoteTimelineCardProps) {
     timelineColumnCount,
     "data-masonry-slot": dataMasonrySlot,
   } = p;
+
+  const noteDetailPageActive =
+    cardPageCard?.colId === colId && cardPageCard?.cardId === card.id;
 
   const { lang } = useAppUiLang();
   const c = useAppChrome();
@@ -393,22 +393,15 @@ export function NoteTimelineCard(p: NoteTimelineCardProps) {
                       type="button"
                       className={
                         "card__menu-item" +
-                        (relatedPanel?.colId === colId &&
-                        relatedPanel?.cardId === card.id
-                          ? " is-active"
-                          : "")
+                        (noteDetailPageActive ? " is-active" : "")
                       }
                       role="menuitem"
                       onClick={() => {
-                        setRelatedPanel((rp) =>
-                          rp?.colId === colId && rp?.cardId === card.id
-                            ? null
-                            : { colId, cardId: card.id }
-                        );
+                        openCardPage(colId, card.id);
                         setCardMenuId(null);
                       }}
                     >
-                      {c.uiRelatedNotes}
+                      {c.uiCardNoteDetailFullPage}
                     </button>
                     {canEdit ? (
                       <button

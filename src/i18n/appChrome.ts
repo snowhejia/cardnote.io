@@ -75,6 +75,11 @@ export type AppChrome = {
     totalPages: number
   ) => string;
   allAttachmentsPaginationNavAria: string;
+  /** 所有附件顶栏：缩略图在「原比例」与「正方形裁剪」之间切换 */
+  allAttachmentsPreviewToggleToSquareAria: string;
+  allAttachmentsPreviewToggleToOriginalAria: string;
+  allAttachmentsPreviewToggleToSquareTitle: string;
+  allAttachmentsPreviewToggleToOriginalTitle: string;
   cardMenuAddToCollection: string;
   cardAddToCollectionTitle: string;
   cardAddToCollectionHint: string;
@@ -329,7 +334,7 @@ const zh: AppChrome = {
   connectionsEntry: "笔记探索",
   titleConnections: "笔记探索",
   connectionsEmpty:
-    "还没有可探索的笔记关联～在卡片「⋯」里点「相关笔记」即可建立。",
+    "还没有可探索的笔记关联～在卡片「⋯」里点「笔记详情」打开全页，在「相关笔记」中即可建立。",
   connectionsIntro: "关联成对展示（A↔B 双向只计 1 条）。",
   connectionsOpenTarget: "打开目标笔记",
   connectionsBoardHint:
@@ -351,13 +356,17 @@ const zh: AppChrome = {
   allAttachmentsPaginationPageOf: (page, totalPages) =>
     `第 ${page} / ${totalPages} 页`,
   allAttachmentsPaginationNavAria: "附件列表分页",
+  allAttachmentsPreviewToggleToSquareAria: "切换到正方形裁剪预览",
+  allAttachmentsPreviewToggleToOriginalAria: "切换到原比例预览",
+  allAttachmentsPreviewToggleToSquareTitle: "缩略图改为正方形裁剪显示（点击切换）",
+  allAttachmentsPreviewToggleToOriginalTitle: "缩略图改为原比例完整显示（点击切换）",
   cardMenuAddToCollection: "添加至合集",
   cardAddToCollectionTitle: "添加至合集",
   cardAddToCollectionHint: "选择要加入的合集；同一张笔记会在多个合集中显示，内容会同步。",
   cardAddToCollectionEmpty: "没有可选的合集（已在所有合集中）。",
   cardAddToCollectionCancel: "取消",
   cardAddToCollectionRemoteBlocked:
-    "云端数据模式下暂不支持将同一张笔记加入多个合集（需服务端结构升级）。请使用本地数据模式，或改用「相关笔记」关联。",
+    "云端数据模式下暂不支持将同一张笔记加入多个合集（需服务端结构升级）。请使用本地数据模式，或在「笔记详情」页的「相关笔记」中建立关联。",
   cardAddToCollectionAlreadyThere: "该合集里已经有这条笔记了。",
   connectionsLinkRailAria: "从此处拖动连线到另一张笔记",
   cardAskAiTitle: "问 AI",
@@ -606,7 +615,7 @@ const en: AppChrome = {
   connectionsEntry: "Explore",
   titleConnections: "Explore notes",
   connectionsEmpty:
-    "Nothing to explore yet — use “⋯” on a card, then Related notes to link.",
+    "Nothing to explore yet — use “⋯” on a card, choose Note detail, then add links under Related notes.",
   connectionsIntro: "Linked pairs (A↔B counts as one link).",
   connectionsOpenTarget: "Open target",
   connectionsBoardHint:
@@ -629,6 +638,10 @@ const en: AppChrome = {
   allAttachmentsPaginationPageOf: (page, totalPages) =>
     `Page ${page} of ${totalPages}`,
   allAttachmentsPaginationNavAria: "Attachments pagination",
+  allAttachmentsPreviewToggleToSquareAria: "Switch to square-cropped previews",
+  allAttachmentsPreviewToggleToOriginalAria: "Switch to original-aspect previews",
+  allAttachmentsPreviewToggleToSquareTitle: "Crop previews to a square (tap)",
+  allAttachmentsPreviewToggleToOriginalTitle: "Show previews at original aspect (tap)",
   cardMenuAddToCollection: "Add to collection",
   cardAddToCollectionTitle: "Add to collection",
   cardAddToCollectionHint:
@@ -636,7 +649,7 @@ const en: AppChrome = {
   cardAddToCollectionEmpty: "No collections left to pick (it’s already in all of them).",
   cardAddToCollectionCancel: "Cancel",
   cardAddToCollectionRemoteBlocked:
-    "Adding the same note to multiple collections isn’t supported in cloud mode yet. Use local data mode, or link notes with Related notes.",
+    "Adding the same note to multiple collections isn’t supported in cloud mode yet. Use local data mode, or open Note detail and link under Related notes.",
   cardAddToCollectionAlreadyThere: "This note is already in that collection.",
   connectionsLinkRailAria: "Drag a line from here to another note",
   cardAskAiTitle: "Ask AI",

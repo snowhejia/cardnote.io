@@ -206,7 +206,7 @@ function AttachmentGridCell({
   cardId: string;
   mediaIndex: number;
   item: NoteMediaItem;
-  onOpenCard: (colId: string, cardId: string) => void;
+  onOpenCard: (colId: string, cardId: string, mediaIndex: number) => void;
 }) {
   const c = useAppChrome();
   const name = attachmentDisplayName(item);
@@ -219,7 +219,7 @@ function AttachmentGridCell({
       <button
         type="button"
         className="all-attachments-page__cell"
-        onClick={() => onOpenCard(colId, cardId)}
+        onClick={() => onOpenCard(colId, cardId, mediaIndex)}
       >
         <div className="all-attachments-page__preview-box">
           <AttachmentPreview item={item} />
@@ -240,15 +240,18 @@ export function AllAttachmentsView({
   dataMode,
   entries,
   filterKey,
+  previewLayout = "contain",
   remoteListRefreshNonce = 0,
   onOpenCard,
 }: {
   dataMode: "local" | "remote";
   entries: MediaAttachmentListEntry[];
   filterKey: AttachmentFilterKey;
+  /** 缩略图：原比例完整显示 vs 正方形裁剪填满 */
+  previewLayout?: "contain" | "square";
   /** 远程模式下附件变更时递增，用于重新拉取当前页 */
   remoteListRefreshNonce?: number;
-  onOpenCard: (colId: string, cardId: string) => void;
+  onOpenCard: (colId: string, cardId: string, mediaIndex: number) => void;
 }) {
   const c = useAppChrome();
   const pageRootRef = useRef<HTMLDivElement>(null);
@@ -372,7 +375,15 @@ export function AllAttachmentsView({
     dataMode === "local" && entries.length > 0 && filtered.length === 0;
 
   return (
-    <div className="all-attachments-page" ref={pageRootRef}>
+    <div
+      className={
+        "all-attachments-page" +
+        (previewLayout === "square"
+          ? " all-attachments-page--preview-square"
+          : "")
+      }
+      ref={pageRootRef}
+    >
       {showFilteredEmptyLocal ? (
         <div className="timeline__empty all-attachments-page__empty">
           {c.allAttachmentsEmptyFiltered}

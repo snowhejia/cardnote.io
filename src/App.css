@@ -500,7 +500,7 @@
   letter-spacing: -0.02em;
 }
 
-/* 主区「所有附件」：类型筛选 + 网格 · 预览原比例 · 文件名 / 大小 / 时长（全宽占满时间线） */
+/* 主区「所有附件」：类型筛选 + 网格 · 预览原比例或正方形裁剪 · 文件名 / 大小 / 时长 */
 .all-attachments-page {
   box-sizing: border-box;
   width: 100%;
@@ -571,6 +571,35 @@
   vertical-align: middle;
   pointer-events: none;
   user-select: none;
+}
+
+.all-attachments-page--preview-square .all-attachments-page__preview-box {
+  aspect-ratio: 1 / 1;
+  min-height: 0;
+  max-height: none;
+  padding: 0;
+  overflow: hidden;
+  align-items: stretch;
+  justify-content: stretch;
+}
+
+.all-attachments-page--preview-square .all-attachments-page__preview-img,
+.all-attachments-page--preview-square .all-attachments-page__preview-video {
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  object-fit: cover;
+}
+
+.all-attachments-page--preview-square .all-attachments-page__preview-ph {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 0;
 }
 
 .all-attachments-page__preview-ph {

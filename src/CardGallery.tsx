@@ -143,6 +143,7 @@ export function CardGallery({
   playback = "default",
   uploadPending = false,
   uploadProgress = null,
+  initialSlideIndex = 0,
 }: {
   items: NoteMediaItem[];
   onRemoveItem?: (item: NoteMediaItem) => void;
@@ -153,11 +154,20 @@ export function CardGallery({
   uploadPending?: boolean;
   /** 云端直传 0–100；未就绪时为 null（显示转圈文案） */
   uploadProgress?: number | null;
+  /** 与 `items` 对齐的初始下标（父级可用 `key` 在每次打开意图时重置） */
+  initialSlideIndex?: number;
 }) {
   const ui = useAppChrome();
   const labelFromUrl = (url: string) =>
     fileLabelFromUrl(url, ui.uiFileFallback);
-  const [i, setI] = useState(0);
+  const [i, setI] = useState(() => {
+    const n0 = items.length;
+    if (n0 <= 0) return 0;
+    const want = Number.isFinite(initialSlideIndex)
+      ? Math.trunc(initialSlideIndex)
+      : 0;
+    return Math.max(0, Math.min(n0 - 1, want));
+  });
   const viewportRef = useRef<HTMLDivElement>(null);
   /** 水平滑动切图后短时间内屏蔽误触发的 click（含视频上的幽灵点击） */
   const suppressClicksUntilRef = useRef(0);

@@ -20,6 +20,23 @@ const detailMenuId = (cardId: string) => `__detail__${cardId}`;
 
 const CARD_DETAIL_LAYOUT_KEY = "mikujar-card-detail-layout";
 
+/** `card.media` 下标 → 详情轮播 `items`（仅含有效 url）下标 */
+function galleryFilteredIndexFromRawMediaIndex(
+  card: NoteCard,
+  rawMediaIndex: number | undefined
+): number {
+  if (rawMediaIndex == null) return 0;
+  const rawList = card.media ?? [];
+  let filteredIndex = 0;
+  for (let j = 0; j < rawList.length; j++) {
+    const m = rawList[j];
+    if (!m.url?.trim()) continue;
+    if (j === rawMediaIndex) return filteredIndex;
+    filteredIndex++;
+  }
+  return Math.max(0, filteredIndex - 1);
+}
+
 /** 与时间线 CardRowInner 一致：窄屏或大屏触控平板 */
 
 /** 左右分栏：方框 + 正中竖线 */
@@ -100,16 +117,20 @@ function readInitialDetailLayoutStack(): boolean {
 
 export interface CardDetailProps {
   card: NoteCard;
+  /** `card.media` 下标；从「所有附件」等打开时定位轮播当前项 */
+  openAtMediaIndex?: number;
   onClose: () => void;
   canEdit: boolean;
   canAttachMedia: boolean;
-  relatedPanelOpen: boolean;
+  /** 全屏「卡片详情」是否正打开本笔记（⋯ 首项高亮） */
+  cardPageActive: boolean;
   uploadBusy: boolean;
   /** 云端附件上传进度 0–100；非上传中为 null */
   uploadProgress?: number | null;
   cardMenuId: string | null;
   setCardMenuId: (id: string | null) => void;
-  onToggleRelatedPanel: () => void;
+  /** 打开全屏「卡片详情」并关闭本预览层 */
+  onOpenNoteDetailPage: () => void;
   onBeginMediaUpload: () => void;
   onClearMedia: () => void;
   onTogglePin: () => void;
@@ -128,15 +149,16 @@ export interface CardDetailProps {
 /** 详情覆层：与主时间线相同的 card / card__paper / 轮播结构；音视频在侧栏内直接播放 */
 export function CardDetail({
   card,
+  openAtMediaIndex,
   onClose,
   canEdit,
   canAttachMedia,
-  relatedPanelOpen,
+  cardPageActive,
   uploadBusy,
   uploadProgress = null,
   cardMenuId,
   setCardMenuId,
-  onToggleRelatedPanel,
+  onOpenNoteDetailPage,
   onBeginMediaUpload,
   onClearMedia,
   onTogglePin,
@@ -266,6 +288,10 @@ export function CardDetail({
 
   const media = (card.media ?? []).filter((m) => m.url?.trim());
   const hasGallery = media.length > 0 || uploadBusy;
+  const galleryInitialIdx = galleryFilteredIndexFromRawMediaIndex(
+    card,
+    openAtMediaIndex
+  );
 
   const panel = (
     <div className="card-detail-overlay" onMouseDown={onClose}>
@@ -366,15 +392,15 @@ export function CardDetail({
                           type="button"
                           className={
                             "card__menu-item" +
-                            (relatedPanelOpen ? " is-active" : "")
+                            (cardPageActive ? " is-active" : "")
                           }
                           role="menuitem"
                           onClick={() => {
-                            onToggleRelatedPanel();
+                            onOpenNoteDetailPage();
                             setCardMenuId(null);
                           }}
                         >
-                          {c.uiRelatedNotes}
+                          {c.uiCardNoteDetailFullPage}
                         </button>
                         {canEdit && onOpenAddToCollection ? (
                           <button
@@ -461,7 +487,9 @@ export function CardDetail({
             </div>
             {hasGallery ? (
               <CardGallery
+                key={`${card.id}:${openAtMediaIndex ?? ""}`}
                 items={media}
+                initialSlideIndex={galleryInitialIdx}
                 playback="inlineAv"
                 onRemoveItem={onRemoveGalleryItem}
                 onSetCoverItem={onSetGalleryCoverItem}
