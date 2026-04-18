@@ -609,6 +609,24 @@ export function collectionIdsContainingCardId(
 }
 
 /**
+ * 全页笔记视图用：在仍包含该 `cardId` 的合集中选一个 `colId`。
+ * 多合集时优先保留 URL 里的 `preferredColId`；否则优先非「未归类」，最后 `__loose_notes`。
+ */
+export function pickPlacementColIdForCard(
+  cols: Collection[],
+  cardId: string,
+  preferredColId: string | null | undefined
+): string | null {
+  const ids = [...collectionIdsContainingCardId(cols, cardId)];
+  if (ids.length === 0) return null;
+  const pref = String(preferredColId || "").trim();
+  if (pref && ids.includes(pref)) return pref;
+  const nonLoose = ids.filter((id) => id !== LOOSE_NOTES_COLLECTION_ID);
+  if (nonLoose.length > 0) return nonLoose[0];
+  return ids[0];
+}
+
+/**
  * 从某一合集中去掉该笔记的一条出现（多合集镜像）。
  * 若去掉后不再出现在任何合集，则放入「未归类」合集（不存在则创建），与侧栏语义一致。
  */

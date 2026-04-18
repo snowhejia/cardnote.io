@@ -205,6 +205,7 @@ import {
   AddToCollectionModal,
   appendCardCopyToCollection,
   collectionIdsContainingCardId,
+  pickPlacementColIdForCard,
   patchNoteCardByIdInTree,
   removeCardIdFromAllCollections,
   stripRelatedRefsToCardId,
@@ -4025,14 +4026,27 @@ export default function App() {
   }, [cardPageCard]);
 
   useEffect(() => {
-    if (!cardPageCard || cardPageCardLive) return;
+    if (!cardPageCard) return;
+    if (cardPageCardLive) return;
     if (!authReady) return;
     /* 云端首包未到时 card 尚不在树里，勿误判为已删 */
     if (dataMode === "remote" && !remoteLoaded) return;
+    const nextCol = pickPlacementColIdForCard(
+      collections,
+      cardPageCard.cardId,
+      cardPageCard.colId
+    );
+    if (nextCol) {
+      if (nextCol !== cardPageCard.colId) {
+        setCardPageCard({ colId: nextCol, cardId: cardPageCard.cardId });
+      }
+      return;
+    }
     setCardPageCard(null);
   }, [
     cardPageCard,
     cardPageCardLive,
+    collections,
     authReady,
     dataMode,
     remoteLoaded,
