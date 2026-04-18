@@ -1,5 +1,4 @@
 import Highlight from "@tiptap/extension-highlight";
-import Image from "@tiptap/extension-image";
 import Underline from "@tiptap/extension-underline";
 import TextAlign from "@tiptap/extension-text-align";
 import Superscript from "@tiptap/extension-superscript";
@@ -12,16 +11,56 @@ import { useAppChrome } from "../i18n/useAppChrome";
 import type { NoteMediaItem } from "../types";
 import { filesFromDataTransfer } from "../filesFromDataTransfer";
 import { NOTE_HIGHLIGHT_COLORS } from "./highlightPalette";
-import { NoteBodyAudio } from "./noteBodyAudioExtension";
-import { NoteBodyVideo } from "./noteBodyVideoExtension";
+import {
+  NoteBodyAudio,
+  NoteBodyImage,
+  NoteBodyVideo,
+} from "./noteBodyMediaNodes";
 import {
   hasNoteMediaDragPayload,
   parseNoteMediaDragPayload,
 } from "./noteMediaDragMime";
 import { noteBodyToHtml } from "./plainHtml";
 
-function isImageFile(f: File): boolean {
-  return f.type.startsWith("image/");
+/** 上传返回的媒体项 → 插入正文（与附件栏拖放结构一致） */
+function editorInsertPayloadFromMediaItems(items: NoteMediaItem[]): unknown {
+  const chunks: unknown[] = [];
+  for (const m of items) {
+    if (m.kind === "image") {
+      chunks.push({
+        type: "image",
+        attrs: {
+          src: m.url,
+          alt: m.name ?? "",
+          title: m.name ?? null,
+        },
+      });
+    } else if (m.kind === "video") {
+      chunks.push({
+        type: "noteBodyVideo",
+        attrs: { src: m.url, title: m.name ?? null },
+      });
+    } else if (m.kind === "audio") {
+      chunks.push({
+        type: "noteBodyAudio",
+        attrs: { src: m.url, title: m.name ?? null },
+      });
+    } else {
+      const label = m.name?.trim() || "文件";
+      const href = encodeURI(m.url);
+      const safe = (s: string) =>
+        s
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
+      chunks.push(
+        `<p><a href="${href}" rel="noopener noreferrer" target="_blank">${safe(label)}</a></p>`
+      );
+    }
+  }
+  if (chunks.length === 0) return null;
+  return chunks.length === 1 ? chunks[0] : chunks;
 }
 
 export type NoteCardTiptapProps = {
@@ -369,11 +408,7 @@ export function NoteCardTiptapCore({
           },
         },
       }),
-      Image.configure({
-        inline: true,
-        allowBase64: true,
-        HTMLAttributes: { class: "note-inline-img" },
-      }),
+      NoteBodyImage,
       NoteBodyVideo,
       NoteBodyAudio,
       Highlight.configure({ multicolor: true }),
@@ -434,19 +469,11 @@ export function NoteCardTiptapCore({
           const insertPos = view.state.selection.from;
           void Promise.resolve(fn(files)).then((maybeItems) => {
             const list = Array.isArray(maybeItems) ? maybeItems : [];
-            const imageItems = list.filter((m) => m.kind === "image");
-            if (imageItems.length === 0) return;
+            const payload = editorInsertPayloadFromMediaItems(list);
+            if (payload == null) return;
             const ed = editorRef.current;
             if (!ed?.isEditable) return;
-            const nodes = imageItems.map((m) => ({
-              type: "image" as const,
-              attrs: {
-                src: m.url,
-                alt: m.name ?? "",
-                title: m.name ?? null,
-              },
-            }));
-            ed.chain().focus().insertContentAt(insertPos, nodes).run();
+            ed.chain().focus().insertContentAt(insertPos, payload).run();
           });
           return true;
         }
@@ -462,8 +489,7 @@ export function NoteCardTiptapCore({
           const ed = editorRef.current;
           if (!insertImg || !fn || !ed?.isEditable) return false;
           const files = filesFromDataTransfer(event.dataTransfer);
-          const imageFiles = files.filter(isImageFile);
-          if (imageFiles.length === 0) return false;
+          if (files.length === 0) return false;
           const coords = view.posAtCoords({
             left: event.clientX,
             top: event.clientY,
@@ -473,19 +499,11 @@ export function NoteCardTiptapCore({
           const pos = coords.pos;
           void Promise.resolve(fn(files)).then((maybeItems) => {
             const list = Array.isArray(maybeItems) ? maybeItems : [];
-            const imageItems = list.filter((m) => m.kind === "image");
-            if (imageItems.length === 0) return;
+            const payload = editorInsertPayloadFromMediaItems(list);
+            if (payload == null) return;
             const ed2 = editorRef.current;
             if (!ed2?.isEditable) return;
-            const nodes = imageItems.map((m) => ({
-              type: "image" as const,
-              attrs: {
-                src: m.url,
-                alt: m.name ?? "",
-                title: m.name ?? null,
-              },
-            }));
-            ed2.chain().focus().insertContentAt(pos, nodes).run();
+            ed2.chain().focus().insertContentAt(pos, payload).run();
           });
           return true;
         }
