@@ -372,14 +372,19 @@ function runFfmpegScreenshot(ffmpeg, inputPath, outputPath, ss) {
 
 /**
  * 从视频缓冲截取一帧为 JPEG（上传时或 finalize 时各调用一次）。
- * 依赖 ffmpeg-static；失败返回 null（前端仍可用整段视频作预览）。
+ * 使用 resolveFfmpegBinaryPath（MIKUJAR_FFMPEG / PATH / ffmpeg-static）；失败返回 null。
  * @param {Buffer} buffer
  * @param {string} mimetype
  * @returns {Promise<{ buffer: Buffer; mimeType: string; ext: string } | null>}
  */
 export async function tryExtractVideoThumbnail(buffer, mimetype) {
-  const ffmpeg = ffmpegStatic;
-  if (typeof ffmpeg !== "string" || !ffmpeg) return null;
+  const ffmpeg = resolveFfmpegBinaryPath();
+  if (typeof ffmpeg !== "string" || !ffmpeg) {
+    console.warn(
+      "[media] video thumbnail: no ffmpeg (set MIKUJAR_FFMPEG or install ffmpeg in PATH)"
+    );
+    return null;
+  }
   if (!buffer || buffer.length < 64) return null;
   if (kindFromMime(mimetype) !== "video") return null;
 
@@ -412,8 +417,12 @@ export async function tryExtractVideoThumbnail(buffer, mimetype) {
         /* 换下一时间点 */
       }
     }
+    console.warn(
+      "[media] video thumbnail: ffmpeg produced no frame (codec/container?)"
+    );
     return null;
-  } catch {
+  } catch (e) {
+    console.warn("[media] video thumbnail:", e?.message || e);
     return null;
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => {});
@@ -1354,6 +1363,12 @@ export async function finalizeVideoThumbnailAfterCosUpload(objectKey, userId) {
     const thumbKey = `${cosSub}/${thumbFilename}`;
     await putCosObject(thumbKey, thumb.buffer, thumb.mimeType);
     out.thumbnailUrl = buildObjectPublicUrl(thumbKey);
+  } else {
+    console.warn(
+      "[media] finalize-video: no thumbnail",
+      k,
+      `buffer=${buffer?.length ?? 0}b`
+    );
   }
   if (durationSec != null) out.durationSec = durationSec;
   return out;

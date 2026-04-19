@@ -169,14 +169,27 @@ async function finalizeAfterUpload(
       const fj = (await fin.json().catch(() => ({}))) as {
         thumbnailUrl?: unknown;
         durationSec?: unknown;
+        error?: unknown;
       };
-      if (fin.ok && typeof fj.thumbnailUrl === "string" && fj.thumbnailUrl.trim()) {
+      if (!fin.ok) {
+        const msg =
+          typeof fj.error === "string" ? fj.error : `HTTP ${fin.status}`;
+        console.warn("[upload] finalize-video failed:", msg, { key });
+      } else if (
+        typeof fj.thumbnailUrl !== "string" ||
+        !fj.thumbnailUrl.trim()
+      ) {
+        console.warn(
+          "[upload] finalize-video: no thumbnailUrl (服务端需 ffmpeg 截帧，见服务器日志)",
+          { key }
+        );
+      } else {
         thumbnailUrl = fj.thumbnailUrl.trim();
       }
       const d = pickDurationSecFromFinalizeJson(fj);
       if (d !== undefined) durationSec = d;
-    } catch {
-      /* 忽略 */
+    } catch (e) {
+      console.warn("[upload] finalize-video request error", e);
     }
   }
 
