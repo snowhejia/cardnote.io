@@ -20,6 +20,7 @@ import {
   addCardPlacementApi,
   updateCardApi,
   fetchCollectionsFromApi,
+  createFileCardForNoteMediaApi,
   removeCardFromCollectionApi,
 } from "./api/collections";
 import { noteBodyToHtml } from "./noteEditor/plainHtml";
@@ -241,6 +242,7 @@ import {
   walkCollectionsWithPath,
 } from "./appkit";
 import { collectConnectionEdges } from "./appkit/connectionEdges";
+import { noteHasLinkedFileCardForMedia } from "./appkit/noteAttachmentFileCard";
 import {
   findCollectionPathFromRoot,
   mergeServerTreeWithLocalExtraCards,
@@ -1723,6 +1725,28 @@ export default function App() {
     });
     setAttachmentsRemoteListNonce((x) => x + 1);
   }, [dataMode, remoteLoaded, currentUser?.id]);
+
+  const createFileCardFromNoteAttachment = useCallback(
+    async (colId: string, cardId: string, item: NoteMediaItem) => {
+      if (dataMode !== "remote") return;
+      const res = await createFileCardForNoteMediaApi(cardId, {
+        placementCollectionId: colId,
+        media: item,
+      });
+      if (!res) {
+        window.alert(c.errCreateFileCard);
+        return;
+      }
+      await resyncRemoteCollectionsTree();
+      notifyRemoteAttachmentsChanged();
+    },
+    [
+      dataMode,
+      c.errCreateFileCard,
+      resyncRemoteCollectionsTree,
+      notifyRemoteAttachmentsChanged,
+    ]
+  );
 
   const connectionEdges = useMemo(
     () => (connectionsPrimed ? collectConnectionEdges(collections) : []),
@@ -4296,6 +4320,21 @@ export default function App() {
           setCardPageCard({ colId: cId, cardId });
         }}
         foldBodyMaxLines={timelineFoldBodyThreeLines ? 3 : undefined}
+        onCreateFileCardFromAttachment={
+          dataMode === "remote" &&
+          (card.objectKind ?? "note") === "note"
+            ? (item) => {
+                void createFileCardFromNoteAttachment(
+                  colId,
+                  card.id,
+                  item
+                );
+              }
+            : undefined
+        }
+        attachmentHasLinkedFileCard={(item) =>
+          noteHasLinkedFileCardForMedia(card, item, collections)
+        }
       />
     );
   }
@@ -5773,6 +5812,25 @@ export default function App() {
                   targetColId
                 )
               }
+              onCreateFileCardFromAttachment={
+                dataMode === "remote" &&
+                (cardPageCardLive.card.objectKind ?? "note") === "note"
+                  ? (item) => {
+                      void createFileCardFromNoteAttachment(
+                        cardPageCardLive.colId,
+                        cardPageCardLive.card.id,
+                        item
+                      );
+                    }
+                  : undefined
+              }
+              attachmentHasLinkedFileCard={(item) =>
+                noteHasLinkedFileCardForMedia(
+                  cardPageCardLive.card,
+                  item,
+                  collections
+                )
+              }
             />
           </Suspense>
         ) : cardPageCard ? (
@@ -6855,6 +6913,25 @@ export default function App() {
                     item
                   )
               : undefined
+          }
+          onCreateFileCardFromAttachment={
+            dataMode === "remote" &&
+            (detailCardLive.card.objectKind ?? "note") === "note"
+              ? (item) => {
+                  void createFileCardFromNoteAttachment(
+                    detailCardLive.colId,
+                    detailCardLive.card.id,
+                    item
+                  );
+                }
+              : undefined
+          }
+          attachmentHasLinkedFileCard={(item) =>
+            noteHasLinkedFileCardForMedia(
+              detailCardLive.card,
+              item,
+              collections
+            )
           }
           onRemoveFromCollection={
             canEdit &&

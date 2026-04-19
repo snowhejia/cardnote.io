@@ -99,6 +99,10 @@ export type NoteTimelineCardProps = {
     cardId: string,
     item: NoteMediaItem
   ) => void;
+  /** 云端：附件右键创建文件卡；未提供时不显示 */
+  onCreateFileCardFromAttachment?: (item: NoteMediaItem) => void;
+  /** 若该附件已有对应文件卡，隐藏创建项 */
+  attachmentHasLinkedFileCard?: (item: NoteMediaItem) => boolean;
   setCardMediaCoverItem: (
     colId: string,
     cardId: string,
@@ -146,6 +150,8 @@ export function NoteTimelineCard(p: NoteTimelineCardProps) {
     clearCardMedia,
     uploadFilesToCard,
     removeCardMediaItem,
+    onCreateFileCardFromAttachment,
+    attachmentHasLinkedFileCard,
     setCardMediaCoverItem,
     togglePin,
     removeCardFromCollection,
@@ -590,6 +596,8 @@ export function NoteTimelineCard(p: NoteTimelineCardProps) {
                     setCardMediaCoverItem(colId, card.id, item)
                 : undefined
             }
+            onCreateFileCard={onCreateFileCardFromAttachment}
+            attachmentHasLinkedFileCard={attachmentHasLinkedFileCard}
             uploadPending={mediaUploadPending}
             uploadProgress={galleryUploadProgress}
           />

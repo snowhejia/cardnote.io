@@ -57,6 +57,8 @@ export type ScatteredUiChrome = {
   uiPagination: string;
   uiOpenInNewWindow: string;
   uiSetCover: string;
+  /** 附件右键：由当前附件创建独立「文件」对象卡并关联到本笔记 */
+  uiCreateFileCard: string;
   uiCopyImage: string;
   uiDownloadAttachment: string;
   uiDeleteAttachment: string;
@@ -208,6 +210,7 @@ const zh: ScatteredUiChrome = {
   uiPagination: "分页",
   uiOpenInNewWindow: "在新窗口打开",
   uiSetCover: "设为封面",
+  uiCreateFileCard: "创建文件卡",
   uiCopyImage: "复制图片",
   uiDownloadAttachment: "下载附件",
   uiDeleteAttachment: "删除附件",
@@ -366,6 +369,7 @@ const en: ScatteredUiChrome = {
   uiPagination: "Slides",
   uiOpenInNewWindow: "Open in new window",
   uiSetCover: "Set as cover",
+  uiCreateFileCard: "Create file card",
   uiCopyImage: "Copy image",
   uiDownloadAttachment: "Download attachment",
   uiDeleteAttachment: "Remove attachment",

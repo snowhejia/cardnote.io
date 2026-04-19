@@ -140,6 +140,8 @@ export function CardGallery({
   items,
   onRemoveItem,
   onSetCoverItem,
+  onCreateFileCard,
+  attachmentHasLinkedFileCard,
   playback = "default",
   uploadPending = false,
   uploadProgress = null,
@@ -149,6 +151,10 @@ export function CardGallery({
   onRemoveItem?: (item: NoteMediaItem) => void;
   /** 将该项移到 media 数组首位，作为默认首帧 */
   onSetCoverItem?: (item: NoteMediaItem) => void;
+  /** 云端：由附件创建独立「文件」对象卡 */
+  onCreateFileCard?: (item: NoteMediaItem) => void | Promise<void>;
+  /** 若该附件已有对应文件卡，隐藏「创建文件卡」 */
+  attachmentHasLinkedFileCard?: (item: NoteMediaItem) => boolean;
   playback?: CardGalleryPlayback;
   /** 正在上传附件：在轮播区显示占位与进度圈 */
   uploadPending?: boolean;
@@ -694,6 +700,22 @@ export function CardGallery({
         >
           {ui.uiDownloadAttachment}
         </button>
+        {onCreateFileCard &&
+        !attachmentHasLinkedFileCard?.(attachMenu.item) ? (
+          <button
+            type="button"
+            className="attachment-ctx-menu__item"
+            role="menuitem"
+            onClick={() => {
+              const it = attachMenu.item;
+              setAttachMenu(null);
+              setLightbox(null);
+              void Promise.resolve(onCreateFileCard(it));
+            }}
+          >
+            {ui.uiCreateFileCard}
+          </button>
+        ) : null}
         {onRemoveItem ? (
           <button
             type="button"
@@ -716,7 +738,9 @@ export function CardGallery({
     !inlineAv &&
     (current.kind === "audio" || current.kind === "video");
 
-  const thumbCtx = Boolean(onRemoveItem || onSetCoverItem);
+  const thumbCtx = Boolean(
+    onRemoveItem || onSetCoverItem || onCreateFileCard
+  );
   const galleryThumbTitle = (kind: NoteMediaItem["kind"]): string => {
     if (thumbCtx) {
       if (kind === "image") return ui.uiGalleryThumbTitleImageRich;

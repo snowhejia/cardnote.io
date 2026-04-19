@@ -138,6 +138,9 @@ export interface CardDetailProps {
   onRemoveGalleryItem?: (item: NoteMediaItem) => void;
   /** 将附件设为轮播首项（封面） */
   onSetGalleryCoverItem?: (item: NoteMediaItem) => void;
+  /** 云端：附件右键创建文件卡 */
+  onCreateFileCardFromAttachment?: (item: NoteMediaItem) => void;
+  attachmentHasLinkedFileCard?: (item: NoteMediaItem) => boolean;
 }
 
 /** 详情覆层：与主时间线相同的 card / card__paper / 轮播结构；音视频在侧栏内直接播放 */
@@ -160,6 +163,8 @@ export function CardDetail({
   onPasteFiles,
   onRemoveGalleryItem,
   onSetGalleryCoverItem,
+  onCreateFileCardFromAttachment,
+  attachmentHasLinkedFileCard,
 }: CardDetailProps) {
   const { lang } = useAppUiLang();
   const c = useAppChrome();
@@ -459,6 +464,8 @@ export function CardDetail({
                 playback="inlineAv"
                 onRemoveItem={onRemoveGalleryItem}
                 onSetCoverItem={onSetGalleryCoverItem}
+                onCreateFileCard={onCreateFileCardFromAttachment}
+                attachmentHasLinkedFileCard={attachmentHasLinkedFileCard}
                 uploadPending={uploadBusy}
                 uploadProgress={uploadBusy ? uploadProgress : null}
               />

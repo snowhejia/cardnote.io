@@ -292,6 +292,9 @@ export interface CardPageViewProps {
   hideCollectionDots?: boolean;
   /** 笔记详情：标签式「合集」栏添加归属（与 ⋯ 添加至合集逻辑一致） */
   onAddCardPlacement?: (targetColId: string) => void | Promise<void>;
+  /** 云端：附件右键创建文件卡 */
+  onCreateFileCardFromAttachment?: (item: NoteMediaItem) => void;
+  attachmentHasLinkedFileCard?: (item: NoteMediaItem) => boolean;
 }
 
 function PropValueEditor({
@@ -594,6 +597,8 @@ export function CardPageView({
   setCardMediaCoverItem,
   hideCollectionDots = false,
   onAddCardPlacement,
+  onCreateFileCardFromAttachment,
+  attachmentHasLinkedFileCard,
 }: CardPageViewProps) {
   const { lang } = useAppUiLang();
   const ui = useAppChrome();
@@ -1635,6 +1640,22 @@ export function CardPageView({
         >
           {ui.uiDownloadAttachment}
         </button>
+        {onCreateFileCardFromAttachment &&
+        !attachmentHasLinkedFileCard?.(attachMenu.item) ? (
+          <button
+            type="button"
+            className="attachment-ctx-menu__item"
+            role="menuitem"
+            onClick={() => {
+              const it = attachMenu.item;
+              setAttachMenu(null);
+              setLightbox(null);
+              onCreateFileCardFromAttachment(it);
+            }}
+          >
+            {ui.uiCreateFileCard}
+          </button>
+        ) : null}
         {canEdit ? (
           <button
             type="button"
