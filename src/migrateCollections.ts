@@ -1,4 +1,8 @@
-import type { Collection, NoteCard } from "./types";
+import type {
+  Collection,
+  CollectionCardSchema,
+  NoteCard,
+} from "./types";
 
 type LegacyBlock = {
   id?: string;
@@ -27,6 +31,9 @@ function ensureCardFields(
         ? card.minutesOfDay
         : minutesOfDay,
     addedOn: card.addedOn ?? addedOn,
+    ...(typeof card.objectKind === "string" && card.objectKind.trim()
+      ? { objectKind: card.objectKind.trim() }
+      : {}),
   };
 }
 
@@ -58,11 +65,25 @@ function migrateOneCollection(c: LegacyCollection): Collection {
     }
   }
 
+  const raw = c as LegacyCollection & {
+    isCategory?: boolean;
+    cardSchema?: CollectionCardSchema;
+    presetTypeId?: string;
+  };
   return {
     id: c.id,
     name: c.name,
     dotColor: c.dotColor,
     hint: c.hint,
+    ...(raw.isCategory === true ? { isCategory: true } : {}),
+    ...(raw.cardSchema &&
+    typeof raw.cardSchema === "object" &&
+    !Array.isArray(raw.cardSchema)
+      ? { cardSchema: raw.cardSchema as CollectionCardSchema }
+      : {}),
+    ...(typeof raw.presetTypeId === "string" && raw.presetTypeId.trim()
+      ? { presetTypeId: raw.presetTypeId.trim() }
+      : {}),
     cards,
     children: children.length > 0 ? children : undefined,
   };

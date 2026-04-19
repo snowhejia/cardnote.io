@@ -79,6 +79,7 @@ import {
   countCardAttachments,
   listCardAttachmentsPage,
   attachmentStorageBytesByUserId,
+  queryCardGraph,
 } from "./storage-pg.js";
 import {
   broadcastCollectionsChanged,
@@ -951,6 +952,37 @@ app.get(
     } catch (e) {
       console.error(e);
       res.status(500).json({ error: e.message || "Read failed" });
+    }
+  }
+);
+
+/** GET /api/cards/:id/graph — 基础图谱查询（深度、边类型） */
+app.get(
+  "/api/cards/:id/graph",
+  (req, res, next) => {
+    if (adminGateEnabled) return requireCollectionsReader(req, res, next);
+    next();
+  },
+  async (req, res) => {
+    try {
+      const userId = adminGateEnabled ? (req.collectionsUserId ?? null) : null;
+      const depth = req.query.depth;
+      const linkTypes =
+        typeof req.query.linkTypes === "string" && req.query.linkTypes.trim()
+          ? req.query.linkTypes
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean)
+          : undefined;
+      const out = await queryCardGraph(userId, req.params.id, {
+        depth,
+        linkTypes,
+      });
+      res.json(out);
+    } catch (e) {
+      console.error(e);
+      const status = e.message?.includes("不存在") ? 404 : 400;
+      res.status(status).json({ error: e.message || "Query failed" });
     }
   }
 );

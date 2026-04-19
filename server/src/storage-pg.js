@@ -14,6 +14,10 @@ import { query, getClient } from "./db.js";
  * 把数据库行（snake_case）转换为前端期望的卡片格式（camelCase）。
  */
 function rowToCard(row) {
+  const ok =
+    row.object_kind &&
+    typeof row.object_kind === "string" &&
+    row.object_kind !== "note";
   return {
     id: row.id,
     text: row.text,
@@ -30,8 +34,9 @@ function rowToCard(row) {
       : {}),
     pinned: row.pinned ?? false,
     tags: row.tags ?? [],
-    relatedRefs: row.related_refs ?? [],
+    relatedRefs: Array.isArray(row.related_refs) ? row.related_refs : [],
     media: row.media ?? [],
+    ...(ok ? { objectKind: row.object_kind } : {}),
     ...(Array.isArray(row.custom_props) && row.custom_props.length > 0
       ? { customProps: row.custom_props }
       : {}),
@@ -50,6 +55,12 @@ function hintFromRow(val) {
 }
 
 function rowToCollection(row) {
+  const schema = row.card_schema;
+  const hasSchema =
+    schema &&
+    typeof schema === "object" &&
+    !Array.isArray(schema) &&
+    Object.keys(schema).length > 0;
   return {
     id: row.id,
     name: row.name,
@@ -60,6 +71,249 @@ function rowToCollection(row) {
     })(),
     parentId: row.parent_id ?? undefined,
     sortOrder: row.sort_order,
+    ...(row.is_category === true ? { isCategory: true } : {}),
+    ...(hasSchema ? { cardSchema: schema } : {}),
+    ...(typeof row.preset_type_id === "string" && row.preset_type_id.trim()
+      ? { presetTypeId: row.preset_type_id.trim() }
+      : {}),
+  };
+}
+
+/**
+ * 从 card_links 批量解析 relatedRefs（含 to_card 的 placement colId）。
+ * @param {string|null} userId
+ * @param {string[]} cardIds
+ * @returns {Promise<Map<string, Array<{ colId: string, cardId: string }>>>}
+ */
+async function loadRelatedRefsMapFromLinks(userId, cardIds) {
+  const unique = [...new Set(cardIds.filter(Boolean))];
+  const out = new Map();
+  if (unique.length === 0) return out;
+  for (const id of unique) out.set(id, []);
+
+  let linksRes;
+  if (userId === null || userId === undefined) {
+    linksRes = await query(
+      `SELECT l.from_card_id, l.to_card_id
+       FROM card_links l
+       INNER JOIN cards fr ON fr.id = l.from_card_id AND fr.trashed_at IS NULL
+       WHERE l.from_card_id = ANY($1) AND l.link_type = 'related'
+         AND fr.user_id IS NULL`,
+      [unique]
+    );
+  } else {
+    linksRes = await query(
+      `SELECT l.from_card_id, l.to_card_id
+       FROM card_links l
+       INNER JOIN cards fr ON fr.id = l.from_card_id AND fr.trashed_at IS NULL
+       WHERE l.from_card_id = ANY($1) AND l.link_type = 'related'
+         AND (fr.user_id = $2 OR fr.user_id IS NULL)`,
+      [unique, userId]
+    );
+  }
+
+  const toIds = [...new Set(linksRes.rows.map((r) => r.to_card_id))];
+  /** @type {Map<string, string>} */
+  const placementMap = new Map();
+  if (toIds.length > 0) {
+    const plRes = await query(
+      `SELECT DISTINCT ON (card_id) card_id, collection_id
+       FROM card_placements WHERE card_id = ANY($1)
+       ORDER BY card_id, collection_id`,
+      [toIds]
+    );
+    for (const row of plRes.rows) {
+      placementMap.set(row.card_id, row.collection_id);
+    }
+  }
+
+  /** @type {Map<string, Array<{ from_card_id: string, to_card_id: string }>>} */
+  const byFrom = new Map();
+  for (const row of linksRes.rows) {
+    const arr = byFrom.get(row.from_card_id) ?? [];
+    arr.push(row);
+    byFrom.set(row.from_card_id, arr);
+  }
+  for (const id of unique) {
+    const rows = byFrom.get(id) ?? [];
+    const refs = [];
+    for (const r of rows) {
+      const colId = placementMap.get(r.to_card_id);
+      if (colId) refs.push({ colId, cardId: r.to_card_id });
+    }
+    out.set(id, refs);
+  }
+  return out;
+}
+
+/**
+ * @param {string|null} userId
+ * @param {unknown[]} roots
+ */
+async function applyRelatedRefsFromLinksToTree(userId, roots) {
+  const ids = [];
+  function collect(cols) {
+    for (const col of cols) {
+      for (const card of col.cards || []) ids.push(card.id);
+      if (col.children?.length) collect(col.children);
+    }
+  }
+  collect(roots);
+  const map = await loadRelatedRefsMapFromLinks(userId, ids);
+  function walk(cols) {
+    for (const col of cols) {
+      col.cards = (col.cards || []).map((card) => ({
+        ...card,
+        relatedRefs: map.get(card.id) ?? [],
+      }));
+      if (col.children?.length) walk(col.children);
+    }
+  }
+  walk(roots);
+}
+
+/**
+ * 同步「相关」关系到 card_links（双向边），并清空 cards.related_refs JSON 列。
+ * @param {import("pg").PoolClient} client
+ * @param {string|null} userId
+ * @param {string} cardId
+ * @param {Array<{ colId?: string, cardId: string }>} relatedRefs
+ */
+async function syncCardRelatedLinksWithClient(client, userId, cardId, relatedRefs) {
+  const { sql: cOwnSql, params: cOwnParams } = cardOwnershipCondition(userId, 2);
+  const own = await client.query(
+    `SELECT user_id FROM cards WHERE id = $1 AND (${cOwnSql}) AND trashed_at IS NULL`,
+    [cardId, ...cOwnParams]
+  );
+  if (own.rowCount === 0) throw new Error("卡片不存在或无权限");
+  const uid = own.rows[0].user_id;
+
+  await client.query(
+    `DELETE FROM card_links WHERE link_type = 'related' AND (from_card_id = $1 OR to_card_id = $1)`,
+    [cardId]
+  );
+
+  const seen = new Set();
+  for (const ref of relatedRefs) {
+    const toId =
+      ref && typeof ref.cardId === "string" ? ref.cardId.trim() : "";
+    if (!toId || toId === cardId) continue;
+    if (seen.has(toId)) continue;
+    seen.add(toId);
+
+    const { sql: tOwnSql, params: tOwnParams } = cardOwnershipCondition(
+      userId,
+      2
+    );
+    const t = await client.query(
+      `SELECT id FROM cards WHERE id = $1 AND (${tOwnSql}) AND trashed_at IS NULL`,
+      [toId, ...tOwnParams]
+    );
+    if (t.rowCount === 0) continue;
+
+    await client.query(
+      `INSERT INTO card_links (user_id, from_card_id, to_card_id, link_type)
+       VALUES ($1, $2, $3, 'related')
+       ON CONFLICT (from_card_id, to_card_id, link_type) DO NOTHING`,
+      [uid, cardId, toId]
+    );
+    await client.query(
+      `INSERT INTO card_links (user_id, from_card_id, to_card_id, link_type)
+       VALUES ($1, $2, $3, 'related')
+       ON CONFLICT (from_card_id, to_card_id, link_type) DO NOTHING`,
+      [uid, toId, cardId]
+    );
+  }
+  await client.query(
+    `UPDATE cards SET related_refs = '[]'::jsonb WHERE id = $1`,
+    [cardId]
+  );
+}
+
+/**
+ * 基础图谱查询：从 root 出发按层扩展，maxDepth=1 表示只含与 root 直接相连的边与端点。
+ * @param {string|null} userId
+ * @param {string} rootCardId
+ * @param {{ depth?: number, linkTypes?: string[] }} opts
+ */
+export async function queryCardGraph(userId, rootCardId, opts = {}) {
+  const maxDepth = Math.min(Math.max(parseInt(String(opts.depth ?? 1), 10) || 1, 1), 4);
+  const linkTypes =
+    Array.isArray(opts.linkTypes) && opts.linkTypes.length > 0
+      ? opts.linkTypes
+      : ["related"];
+
+  const { sql: uidSql, params: uidParams } = cardOwnershipCondition(userId, 2);
+  const rootOk = await query(
+    `SELECT id, object_kind FROM cards WHERE id = $1 AND (${uidSql}) AND trashed_at IS NULL`,
+    [rootCardId, ...uidParams]
+  );
+  if (rootOk.rowCount === 0) throw new Error("卡片不存在或无权限");
+
+  /** @type {Map<string, { id: string, objectKind: string }>} */
+  const nodes = new Map();
+  nodes.set(rootCardId, {
+    id: rootCardId,
+    objectKind: rootOk.rows[0].object_kind ?? "note",
+  });
+
+  const edges = [];
+  const seenEdge = new Set();
+
+  let frontier = [rootCardId];
+  const dist = new Map([[rootCardId, 0]]);
+
+  for (let level = 0; level < maxDepth; level++) {
+    const nextFrontier = [];
+    for (const nid of frontier) {
+      const lr = await query(
+        `SELECT l.from_card_id, l.to_card_id, l.link_type
+         FROM card_links l
+         WHERE (l.from_card_id = $1 OR l.to_card_id = $1) AND l.link_type = ANY($2::text[])`,
+        [nid, linkTypes]
+      );
+
+      for (const r of lr.rows) {
+        const a = r.from_card_id;
+        const b = r.to_card_id;
+        const ek =
+          a < b
+            ? `${a}|${b}|${r.link_type}`
+            : `${b}|${a}|${r.link_type}`;
+        if (!seenEdge.has(ek)) {
+          seenEdge.add(ek);
+          edges.push({ from: a, to: b, linkType: r.link_type });
+        }
+
+        const other = a === nid ? b : a;
+        const { sql: oSql, params: oParams } = cardOwnershipCondition(userId, 2);
+        const oc = await query(
+          `SELECT id, object_kind FROM cards WHERE id = $1 AND (${oSql}) AND trashed_at IS NULL`,
+          [other, ...oParams]
+        );
+        if (oc.rowCount === 0) continue;
+
+        if (!nodes.has(other)) {
+          nodes.set(other, {
+            id: other,
+            objectKind: oc.rows[0].object_kind ?? "note",
+          });
+        }
+        if (!dist.has(other)) {
+          dist.set(other, level + 1);
+          nextFrontier.push(other);
+        }
+      }
+    }
+    frontier = nextFrontier;
+  }
+
+  return {
+    root: rootCardId,
+    maxDepth,
+    linkTypes,
+    nodes: [...nodes.values()],
+    edges,
   };
 }
 
@@ -79,12 +333,9 @@ function buildTree(colRows, cardRows) {
   // 构建 collections Map，并挂上 cards
   const map = new Map();
   for (const row of colRows) {
-    const hint = hintFromRow(row.hint);
+    const base = rowToCollection(row);
     map.set(row.id, {
-      id: row.id,
-      name: row.name,
-      dotColor: row.dot_color,
-      ...(hint ? { hint } : {}),
+      ...base,
       children: [],
       cards: cardsByColId.get(row.id) ?? [],
     });
@@ -209,7 +460,8 @@ export async function getCollectionsTree(userId) {
   const { sql: uidSql, params: uidParams } = userIdCondition(userId, 1);
 
   const colRes = await query(
-    `SELECT id, user_id, parent_id, name, dot_color, sort_order, hint
+    `SELECT id, user_id, parent_id, name, dot_color, sort_order, hint,
+            is_category, card_schema, preset_type_id
      FROM collections
      WHERE ${uidSql}
      ORDER BY sort_order`,
@@ -220,7 +472,7 @@ export async function getCollectionsTree(userId) {
   const orphanRes = await query(
     `SELECT c.id, c.text, c.minutes_of_day, c.added_on, c.reminder_on,
             c.reminder_time, c.reminder_note, c.reminder_completed_at, c.reminder_completed_note,
-            c.tags, c.related_refs, c.media, c.custom_props
+            c.tags, c.related_refs, c.media, c.custom_props, c.object_kind
      FROM cards c
      WHERE (${cUidSql})
        AND c.trashed_at IS NULL
@@ -250,7 +502,7 @@ export async function getCollectionsTree(userId) {
   const cardRes = await query(
     `SELECT c.id, c.text, c.minutes_of_day, c.added_on, c.reminder_on,
             c.reminder_time, c.reminder_note, c.reminder_completed_at, c.reminder_completed_note,
-            c.tags, c.related_refs, c.media, c.custom_props,
+            c.tags, c.related_refs, c.media, c.custom_props, c.object_kind,
             p.collection_id, p.pinned, p.sort_order
      FROM card_placements p
      INNER JOIN cards c ON c.id = p.card_id AND c.trashed_at IS NULL
@@ -274,6 +526,7 @@ export async function getCollectionsTree(userId) {
     });
   }
 
+  await applyRelatedRefsFromLinksToTree(userId, roots);
   return roots;
 }
 
@@ -635,14 +888,16 @@ export async function createCard(userId, collectionId, card) {
     const row = await query(
       `SELECT c.id, c.text, c.minutes_of_day, c.added_on, c.reminder_on,
               c.reminder_time, c.reminder_note, c.reminder_completed_at, c.reminder_completed_note,
-              c.tags, c.related_refs, c.media, c.custom_props, p.pinned
+              c.tags, c.related_refs, c.media, c.custom_props, c.object_kind, p.pinned
        FROM cards c
        JOIN card_placements p ON p.card_id = c.id AND p.collection_id = $2
        WHERE c.id = $1`,
       [id, collectionId]
     );
     const r = row.rows[0];
-    return rowToCard(r);
+    const base = rowToCard(r);
+    const relMap = await loadRelatedRefsMapFromLinks(userId, [id]);
+    return { ...base, relatedRefs: relMap.get(id) ?? [] };
   }
 
   let sortOrder;
@@ -661,11 +916,16 @@ export async function createCard(userId, collectionId, card) {
     sortOrder = orderRes.rows[0].next;
   }
 
+  const objectKind =
+    typeof card.objectKind === "string" && card.objectKind.trim()
+      ? String(card.objectKind).trim().slice(0, 64)
+      : "note";
+
   await query(
     `INSERT INTO cards
        (id, user_id, text, minutes_of_day, added_on, reminder_on,
-        reminder_time, reminder_note, reminder_completed_at, reminder_completed_note, tags, related_refs, media, custom_props)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+        reminder_time, reminder_note, reminder_completed_at, reminder_completed_note, tags, related_refs, media, custom_props, object_kind)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
     [
       id,
       userId ?? null,
@@ -681,6 +941,7 @@ export async function createCard(userId, collectionId, card) {
       JSON.stringify(relatedRefs),
       JSON.stringify(media),
       JSON.stringify(customProps),
+      objectKind,
     ]
   );
 
@@ -704,6 +965,7 @@ export async function createCard(userId, collectionId, card) {
     tags,
     relatedRefs,
     media,
+    ...(objectKind !== "note" ? { objectKind } : {}),
     ...(Array.isArray(customProps) && customProps.length > 0
       ? { customProps }
       : {}),
@@ -754,6 +1016,8 @@ export async function updateCard(userId, cardId, patch) {
     }
   }
 
+  const hasRelatedSync = Array.isArray(patch.relatedRefs);
+
   const cardCols = [];
   const cardParams = [];
   let i = 1;
@@ -770,9 +1034,10 @@ export async function updateCard(userId, cardId, patch) {
     cardCols.push(`media = $${i++}`);
     cardParams.push(JSON.stringify(patch.media));
   }
-  if (Array.isArray(patch.relatedRefs)) {
-    cardCols.push(`related_refs = $${i++}`);
-    cardParams.push(JSON.stringify(patch.relatedRefs));
+  if (typeof patch.objectKind === "string") {
+    const ok = patch.objectKind.trim().slice(0, 64);
+    cardCols.push(`object_kind = $${i++}`);
+    cardParams.push(ok.length > 0 ? ok : "note");
   }
   if (Array.isArray(patch.customProps)) {
     cardCols.push(`custom_props = $${i++}`);
@@ -807,13 +1072,22 @@ export async function updateCard(userId, cardId, patch) {
     cardParams.push(patch.reminderCompletedNote ?? null);
   }
 
-  if (cardCols.length === 0 && !hasPlacementPatch) {
+  if (cardCols.length === 0 && !hasPlacementPatch && !hasRelatedSync) {
     throw new Error("未提供任何可更新字段");
   }
 
   const client = await getClient();
   try {
     await client.query("BEGIN");
+
+    if (hasRelatedSync) {
+      await syncCardRelatedLinksWithClient(
+        client,
+        userId,
+        cardId,
+        patch.relatedRefs
+      );
+    }
 
     if (cardCols.length > 0) {
       const { sql: cOwnSql, params: cOwnParams } = cardOwnershipCondition(
@@ -1143,14 +1417,14 @@ export async function listTrashedNotes(ownerKey) {
   const res = await query(
     `SELECT c.id, c.text, c.minutes_of_day, c.added_on, c.reminder_on,
             c.reminder_time, c.reminder_note, c.reminder_completed_at, c.reminder_completed_note,
-            c.tags, c.related_refs, c.media, c.custom_props,
+            c.tags, c.related_refs, c.media, c.custom_props, c.object_kind,
             c.trashed_at, c.trash_col_id, c.trash_col_path_label
      FROM cards c
      WHERE (${uidSql}) AND c.trashed_at IS NOT NULL
      ORDER BY c.trashed_at DESC`,
     uidParams
   );
-  return res.rows.map((r) => ({
+  const entries = res.rows.map((r) => ({
     trashId: r.id,
     colId: r.trash_col_id ?? "",
     colPathLabel: r.trash_col_path_label ?? "",
@@ -1159,6 +1433,12 @@ export async function listTrashedNotes(ownerKey) {
       r.trashed_at instanceof Date
         ? r.trashed_at.toISOString()
         : String(r.trashed_at),
+  }));
+  const ids = entries.map((e) => e.card.id);
+  const relMap = await loadRelatedRefsMapFromLinks(userId, ids);
+  return entries.map((e) => ({
+    ...e,
+    card: { ...e.card, relatedRefs: relMap.get(e.card.id) ?? [] },
   }));
 }
 
@@ -1287,14 +1567,17 @@ export async function restoreTrashedCard(
   const row = await query(
     `SELECT c.id, c.text, c.minutes_of_day, c.added_on, c.reminder_on,
             c.reminder_time, c.reminder_note, c.reminder_completed_at, c.reminder_completed_note,
-            c.tags, c.related_refs, c.media, c.custom_props, p.pinned
+            c.tags, c.related_refs, c.media, c.custom_props, c.object_kind, p.pinned
      FROM cards c
      JOIN card_placements p ON p.card_id = c.id AND p.collection_id = $2
      WHERE c.id = $1`,
     [cardId, targetCollectionId]
   );
   const r = row.rows[0];
-  return r ? rowToCard(r) : { id: cardId };
+  if (!r) return { id: cardId };
+  const card = rowToCard(r);
+  const relMap = await loadRelatedRefsMapFromLinks(userId, [cardId]);
+  return { ...card, relatedRefs: relMap.get(cardId) ?? [] };
 }
 
 /**

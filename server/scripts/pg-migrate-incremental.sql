@@ -319,3 +319,44 @@ CREATE TRIGGER trg_cards_sync_attachments
 
 -- cards.custom_props（笔记自定义属性 CardProperty[]）
 ALTER TABLE cards ADD COLUMN IF NOT EXISTS custom_props JSONB NOT NULL DEFAULT '[]'::jsonb;
+
+-- 与 pg-migrate-incremental.js 末步一致：类别合集、object_kind、card_links
+ALTER TABLE collections ADD COLUMN IF NOT EXISTS is_category BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE collections ADD COLUMN IF NOT EXISTS card_schema JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE collections ADD COLUMN IF NOT EXISTS preset_type_id TEXT NULL;
+ALTER TABLE cards ADD COLUMN IF NOT EXISTS object_kind TEXT NOT NULL DEFAULT 'note';
+CREATE TABLE IF NOT EXISTS card_links (
+  id BIGSERIAL PRIMARY KEY,
+  user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  from_card_id TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+  to_card_id TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+  link_type TEXT NOT NULL DEFAULT 'related',
+  meta JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT chk_card_links_no_self CHECK (from_card_id <> to_card_id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_card_links_from_to_type
+  ON card_links (from_card_id, to_card_id, link_type);
+CREATE INDEX IF NOT EXISTS idx_card_links_from ON card_links (from_card_id);
+CREATE INDEX IF NOT EXISTS idx_card_links_to ON card_links (to_card_id);
+CREATE INDEX IF NOT EXISTS idx_card_links_user ON card_links (user_id);
+
+INSERT INTO card_links (user_id, from_card_id, to_card_id, link_type)
+SELECT DISTINCT c.user_id, c.id, (r->>'cardId'), 'related'
+FROM cards c
+CROSS JOIN LATERAL jsonb_array_elements(COALESCE(c.related_refs, '[]'::jsonb)) AS r
+WHERE c.trashed_at IS NULL
+  AND COALESCE(trim(r->>'cardId'), '') <> ''
+  AND (r->>'cardId') <> c.id
+ON CONFLICT (from_card_id, to_card_id, link_type) DO NOTHING;
+
+INSERT INTO card_links (user_id, from_card_id, to_card_id, link_type)
+SELECT DISTINCT c.user_id, (r->>'cardId'), c.id, 'related'
+FROM cards c
+CROSS JOIN LATERAL jsonb_array_elements(COALESCE(c.related_refs, '[]'::jsonb)) AS r
+WHERE c.trashed_at IS NULL
+  AND COALESCE(trim(r->>'cardId'), '') <> ''
+  AND (r->>'cardId') <> c.id
+ON CONFLICT (from_card_id, to_card_id, link_type) DO NOTHING;
+
+UPDATE cards SET related_refs = '[]'::jsonb WHERE trashed_at IS NULL;

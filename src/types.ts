@@ -46,8 +46,13 @@ export type CardProperty = {
   options?: CardPropertyOption[];
 };
 
+/** 卡片对象类型：默认 note；file/link 等为后续对象化扩展预留 */
+export type NoteObjectKind = string;
+
 export type NoteCard = {
   id: string;
+  /** 对象类型（默认笔记）；与类别合集 schema 配合 */
+  objectKind?: NoteObjectKind;
   /** 一段或多行笔记正文，无标题 */
   text: string;
   /** 当天内分钟数，用于排序与角标 HH:mm */
@@ -76,6 +81,9 @@ export type NoteCard = {
   customProps?: CardProperty[];
 };
 
+/** 类别合集上的字段定义（JSON，服务端存储；子合集可继承并扩展） */
+export type CollectionCardSchema = Record<string, unknown>;
+
 export type Collection = {
   id: string;
   name: string;
@@ -83,6 +91,12 @@ export type Collection = {
   dotColor: string;
   /** 主区灰色说明文案（可双击编辑；未设置时用默认文案） */
   hint?: string;
+  /** 是否为「类别」合集（对象类型容器） */
+  isCategory?: boolean;
+  /** 该合集下卡片的 schema（字段模板） */
+  cardSchema?: CollectionCardSchema;
+  /** 预设类型标识（如 work/post 子类），可选 */
+  presetTypeId?: string;
   /** 小笔记列表（每张卡自带时刻与日期） */
   cards: NoteCard[];
   /** 子合集（侧栏树形折叠展示） */

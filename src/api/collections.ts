@@ -196,6 +196,44 @@ export async function createCardApi(
   }
 }
 
+/** GET /api/cards/:id/graph 响应 */
+export type CardGraphNode = { id: string; objectKind: string };
+export type CardGraphEdge = {
+  from: string;
+  to: string;
+  linkType: string;
+};
+
+export type CardGraphResult = {
+  root: string;
+  maxDepth: number;
+  linkTypes: string[];
+  nodes: CardGraphNode[];
+  edges: CardGraphEdge[];
+};
+
+/** 基础图谱查询（深度 ≤4、边类型默认可为 related） */
+export async function fetchCardGraphFromApi(
+  cardId: string,
+  opts?: { depth?: number; linkTypes?: string[] }
+): Promise<CardGraphResult | null> {
+  const base = apiBase();
+  try {
+    const sp = new URLSearchParams();
+    if (opts?.depth != null) sp.set("depth", String(opts.depth));
+    if (opts?.linkTypes?.length) sp.set("linkTypes", opts.linkTypes.join(","));
+    const qs = sp.toString();
+    const r = await fetch(
+      `${base}/api/cards/${encodeURIComponent(cardId)}/graph${qs ? `?${qs}` : ""}`,
+      apiFetchInit({ headers: buildHeadersGet() })
+    );
+    if (!r.ok) return null;
+    return (await r.json()) as CardGraphResult;
+  } catch {
+    return null;
+  }
+}
+
 /** 服务端 PATCH 卡片（含跨合集 collectionId、排序 sortOrder） */
 export type CardRemotePatch = Partial<
   Pick<
@@ -208,6 +246,7 @@ export type CardRemotePatch = Partial<
     | "minutesOfDay"
     | "addedOn"
     | "customProps"
+    | "objectKind"
   >
 > & {
   /** 传 null 表示清除提醒 */
