@@ -5509,6 +5509,26 @@ div.card__text--readonly:not(.card__text--preview) {
   flex: 0 0 auto;
 }
 
+/*
+ * 折叠卡为固定等高，整条链路上 overflow:hidden 会裁切顶栏 ⋯ 下拉（「删除卡片」等看不到）。
+ * 菜单打开时放开，与 .card--detail-modal.is-menu-open 同理。
+ */
+.card.card--timeline-fold-body.is-menu-open {
+  overflow: visible;
+}
+
+.card.card--timeline-fold-body.is-menu-open > .card__inner:not(.card__inner--split),
+.card.card--timeline-fold-body.is-menu-open
+  > .card__inner.card__inner--split:not(.card__inner--mobile-gallery-stack),
+.card.card--timeline-fold-body.is-menu-open
+  > .card__inner.card__inner--split.card__inner--mobile-gallery-stack {
+  overflow: visible;
+}
+
+.card.card--timeline-fold-body.is-menu-open .card__paper {
+  overflow: visible;
+}
+
 /* 段间距会破坏 30px 横线周期，笔记里换行多为单格一行，段与段之间不加额外 margin */
 .card__text.ProseMirror p + p {
   margin-top: 0;

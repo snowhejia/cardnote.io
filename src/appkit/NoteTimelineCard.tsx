@@ -22,7 +22,6 @@ import {
   dataTransferHasFiles,
   filesFromDataTransfer,
 } from "../filesFromDataTransfer";
-import type { ReminderPickerTarget } from "../ReminderPickerModal";
 import type { Collection, NoteCard, NoteMediaItem } from "../types";
 import {
   NOTE_CARD_DRAG_MIME,
@@ -61,8 +60,6 @@ export type NoteTimelineCardProps = {
   canAttachMedia: boolean;
   cardMenuId: string | null;
   setCardMenuId: Dispatch<SetStateAction<string | null>>;
-  /** 全屏「卡片详情」页打开目标，用于 ⋯ 首项高亮 */
-  cardPageCard: { colId: string; cardId: string } | null;
   uploadBusyCardId: string | null;
   /** 当前 busy 卡片的上传进度 0–100，无上传或非本卡为 null */
   uploadCardProgress: number | null;
@@ -106,9 +103,6 @@ export type NoteTimelineCardProps = {
     cardId: string,
     item: NoteMediaItem
   ) => void;
-  setReminderPicker: Dispatch<
-    SetStateAction<ReminderPickerTarget | null>
-  >;
   togglePin: (colId: string, cardId: string) => void;
   /** 仅从当前合集移除一条归属（与详情页 ⋯ 一致） */
   removeCardFromCollection: (colId: string, cardId: string) => void;
@@ -116,9 +110,7 @@ export type NoteTimelineCardProps = {
   showRemoveFromCollectionMenu: boolean;
   deleteCard: (colId: string, cardId: string) => void;
   setCardText: (colId: string, cardId: string, text: string) => void;
-  /** 打开「添加至合集」选择器（本地数据；远端模式内会提示不可用） */
-  openAddToCollectionPicker: (colId: string, cardId: string) => void;
-  /** 双击左侧条时打开全页属性编辑 */
+  /** 双击左侧条 / 折叠只读时打开全页或详情 */
   openCardPage: (colId: string, cardId: string) => void;
   /** 时间线列数（用于大屏触控平板 1 列时附件与正文左右分栏） */
   timelineColumnCount: number;
@@ -136,7 +128,6 @@ export function NoteTimelineCard(p: NoteTimelineCardProps) {
     canAttachMedia,
     cardMenuId,
     setCardMenuId,
-    cardPageCard,
     uploadBusyCardId,
     uploadCardProgress,
     cardDragOverId,
@@ -155,21 +146,16 @@ export function NoteTimelineCard(p: NoteTimelineCardProps) {
     uploadFilesToCard,
     removeCardMediaItem,
     setCardMediaCoverItem,
-    setReminderPicker,
     togglePin,
     removeCardFromCollection,
     showRemoveFromCollectionMenu,
     deleteCard,
     setCardText,
-    openAddToCollectionPicker,
     openCardPage,
     timelineColumnCount,
     foldBodyMaxLines,
     "data-masonry-slot": dataMasonrySlot,
   } = p;
-
-  const noteDetailPageActive =
-    cardPageCard?.colId === colId && cardPageCard?.cardId === card.id;
 
   const { lang } = useAppUiLang();
   const c = useAppChrome();
@@ -179,7 +165,7 @@ export function NoteTimelineCard(p: NoteTimelineCardProps) {
   const hasGallery = media.length > 0 || mediaUploadPending;
   const reminderBesideTime = formatCardReminderBesideTime(card, lang);
   const noteKey = `${colId}-${card.id}`;
-  /** 手机端暂时隐藏「⋯」内「笔记详情」；全页入口：双击正文或灰条双击 */
+  /** 手机端：双击正文打开全页；⋯ 在可登录编辑时即显示（内联改字仍受 canEditInTimeline 限制） */
   const mobileChromeUi = useSyncExternalStore(
     subscribeMobileChromeMedia,
     () => matchesMobileChromeMedia(),
@@ -199,9 +185,8 @@ export function NoteTimelineCard(p: NoteTimelineCardProps) {
     canEdit && !phoneNarrow && !foldTimelineReadOnly;
   /** 折叠/只读正文时仍允许：拖入上传、图库右键设封面与删附件（与内联改字分开） */
   const canDropFilesOnCard = Boolean(canEdit && canAttachMedia);
-  const showNoteDetailFullPageInMenu = !mobileChromeUi;
-  const showCardOverflowMenu =
-    showNoteDetailFullPageInMenu || canEditInTimeline;
+  /** 与内联编辑脱钩：窄屏/三行折叠时仍可用 ⋯ 管理附件、置顶、删除等 */
+  const showCardOverflowMenu = canEdit;
   const dropEdgeActive =
     cardDropMarker !== null &&
     cardDropMarker.colId === colId &&
@@ -483,35 +468,7 @@ export function NoteTimelineCard(p: NoteTimelineCardProps) {
                     role="menu"
                     aria-orientation="vertical"
                   >
-                    {showNoteDetailFullPageInMenu ? (
-                    <button
-                      type="button"
-                      className={
-                        "card__menu-item" +
-                        (noteDetailPageActive ? " is-active" : "")
-                      }
-                      role="menuitem"
-                      onClick={() => {
-                        openCardPage(colId, card.id);
-                        setCardMenuId(null);
-                      }}
-                    >
-                      {c.uiCardNoteDetailFullPage}
-                    </button>
-                    ) : null}
-                    {canEditInTimeline ? (
-                      <button
-                        type="button"
-                        className="card__menu-item"
-                        role="menuitem"
-                        onClick={() => {
-                          openAddToCollectionPicker(colId, card.id);
-                        }}
-                      >
-                        {c.cardMenuAddToCollection}
-                      </button>
-                    ) : null}
-                    {canEditInTimeline && canAttachMedia ? (
+                    {canEdit && canAttachMedia ? (
                       <button
                         type="button"
                         className="card__menu-item"
@@ -526,7 +483,7 @@ export function NoteTimelineCard(p: NoteTimelineCardProps) {
                           : c.uiAddAttachment}
                       </button>
                     ) : null}
-                    {canEditInTimeline && hasGallery ? (
+                    {canEdit && hasGallery ? (
                       <button
                         type="button"
                         className="card__menu-item"
@@ -538,24 +495,7 @@ export function NoteTimelineCard(p: NoteTimelineCardProps) {
                         {c.uiClearAttachments}
                       </button>
                     ) : null}
-                    {canEditInTimeline ? (
-                      <button
-                        type="button"
-                        className="card__menu-item"
-                        role="menuitem"
-                        onClick={() => {
-                          setReminderPicker({
-                            kind: "card",
-                            colId,
-                            cardId: card.id,
-                          });
-                          setCardMenuId(null);
-                        }}
-                      >
-                        {c.uiReminderEllipsis}
-                      </button>
-                    ) : null}
-                    {canEditInTimeline ? (
+                    {canEdit ? (
                       <button
                         type="button"
                         className="card__menu-item"
@@ -568,7 +508,7 @@ export function NoteTimelineCard(p: NoteTimelineCardProps) {
                         {card.pinned ? c.uiUnpin : c.uiPin}
                       </button>
                     ) : null}
-                    {canEditInTimeline && showRemoveFromCollectionMenu ? (
+                    {canEdit && showRemoveFromCollectionMenu ? (
                       <button
                         type="button"
                         className="card__menu-item"
@@ -581,7 +521,7 @@ export function NoteTimelineCard(p: NoteTimelineCardProps) {
                         {c.cardMenuRemoveFromCollection}
                       </button>
                     ) : null}
-                    {canEditInTimeline ? (
+                    {canEdit ? (
                       <button
                         type="button"
                         className="card__menu-item card__menu-item--danger"

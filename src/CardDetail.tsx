@@ -122,22 +122,14 @@ export interface CardDetailProps {
   onClose: () => void;
   canEdit: boolean;
   canAttachMedia: boolean;
-  /** 全屏「卡片详情」是否正打开本笔记（⋯ 首项高亮） */
-  cardPageActive: boolean;
   uploadBusy: boolean;
   /** 云端附件上传进度 0–100；非上传中为 null */
   uploadProgress?: number | null;
   cardMenuId: string | null;
   setCardMenuId: (id: string | null) => void;
-  /** 打开全屏「卡片详情」并关闭本预览层 */
-  onOpenNoteDetailPage: () => void;
   onBeginMediaUpload: () => void;
   onClearMedia: () => void;
   onTogglePin: () => void;
-  /** 打开提醒日期选择（与列表卡片「⋯」一致） */
-  onOpenReminderPicker?: () => void;
-  /** 与列表卡片「⋯」一致：添加至其它合集（本地数据） */
-  onOpenAddToCollection?: () => void;
   /** 仅从当前合集移除一条归属（与列表 ⋯ 一致）；未提供时不显示该项 */
   onRemoveFromCollection?: () => void;
   onDelete: () => void;
@@ -155,17 +147,13 @@ export function CardDetail({
   onClose,
   canEdit,
   canAttachMedia,
-  cardPageActive,
   uploadBusy,
   uploadProgress = null,
   cardMenuId,
   setCardMenuId,
-  onOpenNoteDetailPage,
   onBeginMediaUpload,
   onClearMedia,
   onTogglePin,
-  onOpenReminderPicker,
-  onOpenAddToCollection,
   onRemoveFromCollection,
   onDelete,
   onChangeText,
@@ -368,7 +356,7 @@ export function CardDetail({
                       )}
                     </button>
                   ) : null}
-                  {!detailNarrow || canEdit ? (
+                  {canEdit ? (
                   <div
                     className="card__menu-root"
                     data-card-menu-root={menuId}
@@ -392,35 +380,6 @@ export function CardDetail({
                         role="menu"
                         aria-orientation="vertical"
                       >
-                        {!detailNarrow ? (
-                        <button
-                          type="button"
-                          className={
-                            "card__menu-item" +
-                            (cardPageActive ? " is-active" : "")
-                          }
-                          role="menuitem"
-                          onClick={() => {
-                            onOpenNoteDetailPage();
-                            setCardMenuId(null);
-                          }}
-                        >
-                          {c.uiCardNoteDetailFullPage}
-                        </button>
-                        ) : null}
-                        {canEdit && onOpenAddToCollection ? (
-                          <button
-                            type="button"
-                            className="card__menu-item"
-                            role="menuitem"
-                            onClick={() => {
-                              onOpenAddToCollection();
-                              setCardMenuId(null);
-                            }}
-                          >
-                            {c.cardMenuAddToCollection}
-                          </button>
-                        ) : null}
                         {canEdit && canAttachMedia ? (
                           <button
                             type="button"
@@ -440,19 +399,6 @@ export function CardDetail({
                             onClick={() => onClearMedia()}
                           >
                             {c.uiClearAttachments}
-                          </button>
-                        ) : null}
-                        {canEdit && onOpenReminderPicker ? (
-                          <button
-                            type="button"
-                            className="card__menu-item"
-                            role="menuitem"
-                            onClick={() => {
-                              onOpenReminderPicker();
-                              setCardMenuId(null);
-                            }}
-                          >
-                            {c.uiReminderEllipsis}
                           </button>
                         ) : null}
                         {canEdit ? (

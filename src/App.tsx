@@ -207,7 +207,6 @@ import {
   SidebarNavExploreIcon,
   SidebarNavRemindersIcon,
   NoteTimelineCard,
-  AddToCollectionModal,
   appendCardCopyToCollection,
   collectionIdsContainingCardId,
   pickPlacementColIdForCard,
@@ -487,12 +486,7 @@ export default function App() {
     return new Date(d.getFullYear(), d.getMonth(), 1);
   });
   const [cardMenuId, setCardMenuId] = useState<string | null>(null);
-  /** 「⋯」→ 添加至合集：选目标合集 */
-  const [addToCollectionTarget, setAddToCollectionTarget] = useState<{
-    colId: string;
-    cardId: string;
-  } | null>(null);
-  /** 从卡片「⋯」或「新建待办」打开提醒弹窗 */
+  /** 从笔记详情等打开提醒弹窗（「新建待办」等） */
   const [reminderPicker, setReminderPicker] = useState<ReminderPickerTarget | null>(
     null
   );
@@ -2319,16 +2313,7 @@ export default function App() {
     [canEdit, collections, trashStorageKey, dataMode, c.errTrashMove]
   );
 
-  const openAddToCollectionPicker = useCallback(
-    (colId: string, cardId: string) => {
-      if (!canEdit) return;
-      setCardMenuId(null);
-      setAddToCollectionTarget({ colId, cardId });
-    },
-    [canEdit]
-  );
-
-  /** 与「添加至合集」弹层相同的入树逻辑；供笔记详情标签式合集栏与弹层共用 */
+  /** 与笔记详情页标签式「合集」栏相同的入树逻辑 */
   const executeAddCardPlacement = useCallback(
     async (sourceColId: string, cardId: string, targetColId: string) => {
       if (!canEdit) return;
@@ -4235,7 +4220,6 @@ export default function App() {
         canAttachMedia={canAttachMedia}
         cardMenuId={cardMenuId}
         setCardMenuId={setCardMenuId}
-        cardPageCard={cardPageCard}
         uploadBusyCardId={uploadBusyCardId}
         uploadCardProgress={uploadCardProgress}
         cardDragOverId={cardDragOverId}
@@ -4254,7 +4238,6 @@ export default function App() {
         uploadFilesToCard={uploadFilesToCard}
         removeCardMediaItem={removeCardMediaItem}
         setCardMediaCoverItem={setCardMediaCoverItem}
-        setReminderPicker={setReminderPicker}
         togglePin={togglePin}
         removeCardFromCollection={(cId, cardId) => {
           void removeCardFromCollectionPlacementAt(cId, cardId);
@@ -4266,7 +4249,6 @@ export default function App() {
         deleteCard={deleteCard}
         setCardText={setCardText}
         timelineColumnCount={timelineColumnCount}
-        openAddToCollectionPicker={openAddToCollectionPicker}
         openCardPage={(cId, cardId) => {
           setDetailCard(null);
           setCardPageCard({ colId: cId, cardId });
@@ -6771,10 +6753,6 @@ export default function App() {
           }}
           canEdit={canEdit}
           canAttachMedia={canAttachMedia}
-          cardPageActive={
-            cardPageCard?.colId === detailCardLive.colId &&
-            cardPageCard?.cardId === detailCardLive.card.id
-          }
           uploadBusy={uploadBusyCardId === detailCardLive.card.id}
           uploadProgress={
             uploadBusyCardId === detailCardLive.card.id
@@ -6783,14 +6761,6 @@ export default function App() {
           }
           cardMenuId={cardMenuId}
           setCardMenuId={setCardMenuId}
-          onOpenNoteDetailPage={() => {
-            setDetailCard(null);
-            setCardPageCard({
-              colId: detailCardLive.colId,
-              cardId: detailCardLive.card.id,
-            });
-            setCardMenuId(null);
-          }}
           onBeginMediaUpload={() =>
             beginCardMediaUpload(
               detailCardLive.colId,
@@ -6802,16 +6772,6 @@ export default function App() {
           }
           onTogglePin={() =>
             togglePin(detailCardLive.colId, detailCardLive.card.id)
-          }
-          onOpenReminderPicker={
-            canEdit
-              ? () =>
-                  setReminderPicker({
-                    kind: "card",
-                    colId: detailCardLive.colId,
-                    cardId: detailCardLive.card.id,
-                  })
-              : undefined
           }
           onDelete={() =>
             deleteCard(detailCardLive.colId, detailCardLive.card.id)
@@ -6854,15 +6814,6 @@ export default function App() {
                   )
               : undefined
           }
-          onOpenAddToCollection={
-            canEdit
-              ? () =>
-                  openAddToCollectionPicker(
-                    detailCardLive.colId,
-                    detailCardLive.card.id
-                  )
-              : undefined
-          }
           onRemoveFromCollection={
             canEdit &&
             (detailCardLive.colId !== LOOSE_NOTES_COLLECTION_ID ||
@@ -6882,23 +6833,6 @@ export default function App() {
           }
         />
         </Suspense>
-      ) : null}
-      {addToCollectionTarget && canEdit ? (
-        <AddToCollectionModal
-          open
-          collections={collections}
-          occupiedCollectionIds={collectionIdsContainingCardId(
-            collections,
-            addToCollectionTarget.cardId
-          )}
-          hideCollectionDots={hideSidebarCollectionDots}
-          onClose={() => setAddToCollectionTarget(null)}
-          onPick={async (targetColId) => {
-            const { colId, cardId } = addToCollectionTarget;
-            setAddToCollectionTarget(null);
-            await executeAddCardPlacement(colId, cardId, targetColId);
-          }}
-        />
       ) : null}
       {reminderPicker ? (
         <Suspense fallback={null}>
