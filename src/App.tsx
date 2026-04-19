@@ -3394,38 +3394,41 @@ export default function App() {
     []
   );
 
-  /** 侧栏切换当前合集（activeId 变化）时滚到时间线顶部，避免停在上一次的滚动位置 */
-  const prevActiveIdForTimelineScrollRef = useRef<string | undefined>(
-    undefined
-  );
-  useLayoutEffect(() => {
-    const prev = prevActiveIdForTimelineScrollRef.current;
-    prevActiveIdForTimelineScrollRef.current = activeId;
-    if (prev === undefined) {
-      return;
-    }
-    if (prev === activeId) {
-      return;
-    }
-    if (
-      trashViewActive ||
-      connectionsViewActive ||
-      attachmentsViewActive
-    ) {
-      return;
-    }
+  /** 侧栏切换「主导航」时滚到时间线顶：合集 / 全部笔记 / 待办 / 回收站 / 探索 / 附件 / 日历某日 */
+  const mainTimelineNavScrollKey = useMemo(() => {
+    if (trashViewActive) return "trash";
+    if (connectionsViewActive) return "connections";
+    if (attachmentsViewActive) return "attachments";
+    if (remindersViewActive) return "reminders";
+    if (allNotesViewActive) return "all-notes";
     if (calendarDay !== null) {
-      return;
+      return `calendar:${calendarDay}`;
     }
-    scrollTimelineToTop("auto");
+    return `collection:${activeId}`;
   }, [
-    activeId,
     trashViewActive,
     connectionsViewActive,
     attachmentsViewActive,
+    remindersViewActive,
+    allNotesViewActive,
     calendarDay,
-    scrollTimelineToTop,
+    activeId,
   ]);
+
+  const prevMainTimelineNavScrollKeyRef = useRef<string | undefined>(
+    undefined
+  );
+  useLayoutEffect(() => {
+    const prev = prevMainTimelineNavScrollKeyRef.current;
+    prevMainTimelineNavScrollKeyRef.current = mainTimelineNavScrollKey;
+    if (prev === undefined) {
+      return;
+    }
+    if (prev === mainTimelineNavScrollKey) {
+      return;
+    }
+    scrollTimelineToTop("auto");
+  }, [mainTimelineNavScrollKey, scrollTimelineToTop]);
 
   /** 小屏：点击顶栏非控件区域时回到时间线顶部（类似系统「点顶栏回顶」） */
   const onMobileHeaderRowTapToTop = useCallback(
