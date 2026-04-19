@@ -4256,6 +4256,13 @@ export default function App() {
         setCardMediaCoverItem={setCardMediaCoverItem}
         setReminderPicker={setReminderPicker}
         togglePin={togglePin}
+        removeCardFromCollection={(cId, cardId) => {
+          void removeCardFromCollectionPlacementAt(cId, cardId);
+        }}
+        showRemoveFromCollectionMenu={
+          colId !== LOOSE_NOTES_COLLECTION_ID ||
+          collectionIdsContainingCardId(collections, card.id).size > 1
+        }
         deleteCard={deleteCard}
         setCardText={setCardText}
         timelineColumnCount={timelineColumnCount}
@@ -6854,6 +6861,23 @@ export default function App() {
                     detailCardLive.colId,
                     detailCardLive.card.id
                   )
+              : undefined
+          }
+          onRemoveFromCollection={
+            canEdit &&
+            (detailCardLive.colId !== LOOSE_NOTES_COLLECTION_ID ||
+              collectionIdsContainingCardId(
+                collections,
+                detailCardLive.card.id
+              ).size > 1)
+              ? () => {
+                  void removeCardFromCollectionPlacementAt(
+                    detailCardLive.colId,
+                    detailCardLive.card.id
+                  );
+                  setDetailCard(null);
+                  setCardMenuId(null);
+                }
               : undefined
           }
         />

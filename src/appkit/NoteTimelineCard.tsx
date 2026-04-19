@@ -110,6 +110,10 @@ export type NoteTimelineCardProps = {
     SetStateAction<ReminderPickerTarget | null>
   >;
   togglePin: (colId: string, cardId: string) => void;
+  /** 仅从当前合集移除一条归属（与详情页 ⋯ 一致） */
+  removeCardFromCollection: (colId: string, cardId: string) => void;
+  /** 未归类且仅此一处时不显示「从合集移除」 */
+  showRemoveFromCollectionMenu: boolean;
   deleteCard: (colId: string, cardId: string) => void;
   setCardText: (colId: string, cardId: string, text: string) => void;
   /** 打开「添加至合集」选择器（本地数据；远端模式内会提示不可用） */
@@ -153,6 +157,8 @@ export function NoteTimelineCard(p: NoteTimelineCardProps) {
     setCardMediaCoverItem,
     setReminderPicker,
     togglePin,
+    removeCardFromCollection,
+    showRemoveFromCollectionMenu,
     deleteCard,
     setCardText,
     openAddToCollectionPicker,
@@ -562,6 +568,19 @@ export function NoteTimelineCard(p: NoteTimelineCardProps) {
                         {card.pinned ? c.uiUnpin : c.uiPin}
                       </button>
                     ) : null}
+                    {canEditInTimeline && showRemoveFromCollectionMenu ? (
+                      <button
+                        type="button"
+                        className="card__menu-item"
+                        role="menuitem"
+                        onClick={() => {
+                          removeCardFromCollection(colId, card.id);
+                          setCardMenuId(null);
+                        }}
+                      >
+                        {c.cardMenuRemoveFromCollection}
+                      </button>
+                    ) : null}
                     {canEditInTimeline ? (
                       <button
                         type="button"
@@ -571,7 +590,7 @@ export function NoteTimelineCard(p: NoteTimelineCardProps) {
                           deleteCard(colId, card.id)
                         }
                       >
-                        {c.uiDelete}
+                        {c.cardMenuDeleteCard}
                       </button>
                     ) : null}
                   </div>

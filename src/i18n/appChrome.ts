@@ -81,6 +81,10 @@ export type AppChrome = {
   allAttachmentsPreviewToggleToSquareTitle: string;
   allAttachmentsPreviewToggleToOriginalTitle: string;
   cardMenuAddToCollection: string;
+  /** 卡片 ⋯：仅从当前合集移除一条归属（多合集时笔记仍在其它处） */
+  cardMenuRemoveFromCollection: string;
+  /** 卡片 ⋯：删除笔记（进回收站并从所有合集移除） */
+  cardMenuDeleteCard: string;
   cardAddToCollectionTitle: string;
   cardAddToCollectionHint: string;
   cardAddToCollectionEmpty: string;
@@ -376,6 +380,8 @@ const zh: AppChrome = {
   allAttachmentsPreviewToggleToSquareTitle: "缩略图改为正方形裁剪显示（点击切换）",
   allAttachmentsPreviewToggleToOriginalTitle: "缩略图改为原比例完整显示（点击切换）",
   cardMenuAddToCollection: "添加至合集",
+  cardMenuRemoveFromCollection: "从合集移除",
+  cardMenuDeleteCard: "删除卡片",
   cardAddToCollectionTitle: "添加至合集",
   cardAddToCollectionHint: "选择要加入的合集；同一张笔记会在多个合集中显示，内容会同步。",
   cardAddToCollectionEmpty: "没有可选的合集（已在所有合集中）。",
@@ -672,6 +678,8 @@ const en: AppChrome = {
   allAttachmentsPreviewToggleToSquareTitle: "Crop previews to a square (tap)",
   allAttachmentsPreviewToggleToOriginalTitle: "Show previews at original aspect (tap)",
   cardMenuAddToCollection: "Add to collection",
+  cardMenuRemoveFromCollection: "Remove from this collection",
+  cardMenuDeleteCard: "Delete note",
   cardAddToCollectionTitle: "Add to collection",
   cardAddToCollectionHint:
     "Pick a collection. The same note can appear in several places and stays in sync.",

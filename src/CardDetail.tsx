@@ -138,6 +138,8 @@ export interface CardDetailProps {
   onOpenReminderPicker?: () => void;
   /** 与列表卡片「⋯」一致：添加至其它合集（本地数据） */
   onOpenAddToCollection?: () => void;
+  /** 仅从当前合集移除一条归属（与列表 ⋯ 一致）；未提供时不显示该项 */
+  onRemoveFromCollection?: () => void;
   onDelete: () => void;
   onChangeText: (html: string) => void;
   onPasteFiles?: (files: File[]) => void;
@@ -164,6 +166,7 @@ export function CardDetail({
   onTogglePin,
   onOpenReminderPicker,
   onOpenAddToCollection,
+  onRemoveFromCollection,
   onDelete,
   onChangeText,
   onPasteFiles,
@@ -465,6 +468,19 @@ export function CardDetail({
                             {card.pinned ? c.uiUnpin : c.uiPin}
                           </button>
                         ) : null}
+                        {canEdit && onRemoveFromCollection ? (
+                          <button
+                            type="button"
+                            className="card__menu-item"
+                            role="menuitem"
+                            onClick={() => {
+                              onRemoveFromCollection();
+                              setCardMenuId(null);
+                            }}
+                          >
+                            {c.cardMenuRemoveFromCollection}
+                          </button>
+                        ) : null}
                         {canEdit ? (
                           <button
                             type="button"
@@ -472,7 +488,7 @@ export function CardDetail({
                             role="menuitem"
                             onClick={() => onDelete()}
                           >
-                            {c.uiDelete}
+                            {c.cardMenuDeleteCard}
                           </button>
                         ) : null}
                       </div>
