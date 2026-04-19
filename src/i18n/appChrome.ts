@@ -48,6 +48,10 @@ export type AppChrome = {
   browseByDate: string;
   /** 侧栏主导航分区标题：全部笔记 / 待办 / 探索 / 附件 */
   sidebarFeaturesSection: string;
+  /** 侧栏「笔记」分区（全部笔记 / 待办 / 连接） */
+  sidebarNotesSection: string;
+  /** 侧栏「文件」分区（所有附件） */
+  sidebarFilesSection: string;
   allNotesEntry: string;
   titleAllNotes: string;
   /** 内部「未归类」合集展示名（侧栏不显示该合集） */
@@ -350,6 +354,8 @@ const zh: AppChrome = {
   openMenu: "打开菜单",
   browseByDate: "日历",
   sidebarFeaturesSection: "功能",
+  sidebarNotesSection: "笔记",
+  sidebarFilesSection: "文件",
   allNotesEntry: "全部笔记",
   titleAllNotes: "全部笔记",
   looseNotesCollectionName: "未归类笔记",
@@ -648,6 +654,8 @@ const en: AppChrome = {
   openMenu: "Open menu",
   browseByDate: "Browse by date",
   sidebarFeaturesSection: "Features",
+  sidebarNotesSection: "Notes",
+  sidebarFilesSection: "Files",
   allNotesEntry: "All notes",
   titleAllNotes: "All Notes",
   looseNotesCollectionName: "Inbox",

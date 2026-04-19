@@ -81,6 +81,15 @@ export type ExtraModalChrome = {
   noteSettingsImportSourceFlomo: string;
   noteSettingsImportSourceEvernote: string;
   noteSettingsImportSourceYuque: string;
+  /** 大页面左侧：通用设置 */
+  noteSettingsNavGeneral: string;
+  /** 大页面左侧：对象类型预设 */
+  noteSettingsNavObjectTypes: string;
+  noteSettingsObjectTypesTitle: string;
+  noteSettingsObjectTypesLead: string;
+  noteSettingsObjectTypesMain: string;
+  noteSettingsObjectTypesBasic: string;
+  noteSettingsPresetComingSoon: string;
   dataStatsTitle: string;
   dataStatsHint: string;
   dataStatsCollections: string;
@@ -202,6 +211,14 @@ const zh: ExtraModalChrome = {
   noteSettingsImportSourceFlomo: "flomo",
   noteSettingsImportSourceEvernote: "印象笔记 / Evernote",
   noteSettingsImportSourceYuque: "语雀知识库",
+  noteSettingsNavGeneral: "通用",
+  noteSettingsNavObjectTypes: "对象类型",
+  noteSettingsObjectTypesTitle: "对象类型",
+  noteSettingsObjectTypesLead:
+    "以下为预设类型目录，后续可与合集与字段模板绑定。",
+  noteSettingsObjectTypesMain: "常用类型",
+  noteSettingsObjectTypesBasic: "基础类型",
+  noteSettingsPresetComingSoon: "即将推出",
   dataStatsTitle: "数据统计",
   dataStatsHint:
     "当前工作区内的合集、卡片与附件占用（按本机已记录或可推算的数据汇总）。",
@@ -331,6 +348,14 @@ const en: ExtraModalChrome = {
   noteSettingsImportSourceFlomo: "flomo",
   noteSettingsImportSourceEvernote: "Evernote",
   noteSettingsImportSourceYuque: "Yuque",
+  noteSettingsNavGeneral: "General",
+  noteSettingsNavObjectTypes: "Object types",
+  noteSettingsObjectTypesTitle: "Object types",
+  noteSettingsObjectTypesLead:
+    "Preset catalog for future collection and field templates.",
+  noteSettingsObjectTypesMain: "Common types",
+  noteSettingsObjectTypesBasic: "Basic types",
+  noteSettingsPresetComingSoon: "Coming soon",
   dataStatsTitle: "Usage stats",
   dataStatsHint:
     "Collections, cards, and attachment size in this workspace (from local data).",

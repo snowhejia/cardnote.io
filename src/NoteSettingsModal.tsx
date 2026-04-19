@@ -1,8 +1,16 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useAppChrome } from "./i18n/useAppChrome";
+import { useAppUiLang } from "./appUiLang";
 import type { AppDataMode } from "./appDataModeStorage";
 import type { NewNotePlacement } from "./newNotePlacementStorage";
+import {
+  PRESET_OBJECT_TYPES_BASIC,
+  PRESET_OBJECT_TYPES_MAIN,
+  type PresetObjectTypeItem,
+} from "./notePresetTypesCatalog";
+
+type NoteSettingsPanel = "general" | "objectTypes";
 
 type NoteSettingsModalProps = {
   open: boolean;
@@ -21,6 +29,33 @@ type NoteSettingsModalProps = {
   onOpenYuqueImport?: () => void;
 };
 
+function PresetTypeCard({
+  item,
+  label,
+}: {
+  item: PresetObjectTypeItem;
+  label: string;
+}) {
+  const c = useAppChrome();
+  return (
+    <div
+      className="note-settings-modal__preset-card"
+      role="presentation"
+      title={label}
+    >
+      <div
+        className="note-settings-modal__preset-icon"
+        style={{ background: item.tint }}
+        aria-hidden
+      >
+        <span className="note-settings-modal__preset-emoji">{item.emoji}</span>
+      </div>
+      <span className="note-settings-modal__preset-name">{label}</span>
+      <span className="note-settings-modal__preset-badge">{c.noteSettingsPresetComingSoon}</span>
+    </div>
+  );
+}
+
 export function NoteSettingsModal({
   open,
   onClose,
@@ -38,9 +73,13 @@ export function NoteSettingsModal({
   onOpenYuqueImport,
 }: NoteSettingsModalProps) {
   const c = useAppChrome();
+  const { lang } = useAppUiLang();
   const [importSource, setImportSource] = useState<
     "" | "apple" | "flomo" | "evernote" | "yuque"
   >("");
+  const [settingsPanel, setSettingsPanel] = useState<NoteSettingsPanel>(
+    "general"
+  );
 
   useEffect(() => {
     if (!open) setImportSource("");
@@ -55,25 +94,18 @@ export function NoteSettingsModal({
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
+  useEffect(() => {
+    if (open) setSettingsPanel("general");
+  }, [open]);
+
   if (!open) return null;
 
-  const panel = (
-    <div
-      className="auth-modal-backdrop"
-      role="presentation"
-      onClick={onClose}
-    >
-      <div
-        className="auth-modal note-settings-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="note-settings-title"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 id="note-settings-title" className="auth-modal__title">
-          {c.noteSettingsTitle}
-        </h2>
+  const presetLabel = (item: PresetObjectTypeItem) =>
+    lang === "en" ? item.nameEn : item.nameZh;
 
+  const panelContent =
+    settingsPanel === "general" ? (
+      <div className="note-settings-modal__panel-scroll">
         <p className="note-settings-modal__label">
           {c.noteSettingsPlacementLabel}
         </p>
@@ -254,19 +286,110 @@ export function NoteSettingsModal({
             </select>
           </>
         ) : null}
+      </div>
+    ) : (
+      <div className="note-settings-modal__panel-scroll">
+        <p className="note-settings-modal__object-types-lead">
+          {c.noteSettingsObjectTypesLead}
+        </p>
+        <p className="note-settings-modal__preset-subhead">
+          {c.noteSettingsObjectTypesMain}
+        </p>
+        <div
+          className="note-settings-modal__preset-grid"
+          role="list"
+          aria-label={c.noteSettingsObjectTypesMain}
+        >
+          {PRESET_OBJECT_TYPES_MAIN.map((item) => (
+            <div key={item.id} role="listitem">
+              <PresetTypeCard item={item} label={presetLabel(item)} />
+            </div>
+          ))}
+        </div>
+        <p className="note-settings-modal__preset-subhead">
+          {c.noteSettingsObjectTypesBasic}
+        </p>
+        <div
+          className="note-settings-modal__preset-grid"
+          role="list"
+          aria-label={c.noteSettingsObjectTypesBasic}
+        >
+          {PRESET_OBJECT_TYPES_BASIC.map((item) => (
+            <div key={item.id} role="listitem">
+              <PresetTypeCard item={item} label={presetLabel(item)} />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
 
-        <div className="auth-modal__actions">
-          <button
-            type="button"
-            className="auth-modal__btn auth-modal__btn--primary auth-modal__btn--primary--full"
-            onClick={onClose}
+  const modalTree = (
+    <div
+      className="auth-modal-backdrop"
+      role="presentation"
+      onClick={onClose}
+    >
+      <div
+        className="auth-modal note-settings-modal note-settings-modal--wide"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="note-settings-title"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="note-settings-modal__shell">
+          <nav
+            className="note-settings-modal__nav"
+            aria-label={c.noteSettingsTitle}
           >
-            {c.done}
-          </button>
+            <p className="note-settings-modal__nav-title" id="note-settings-title">
+              {c.noteSettingsTitle}
+            </p>
+            <button
+              type="button"
+              className={
+                "note-settings-modal__nav-item" +
+                (settingsPanel === "general" ? " is-active" : "")
+              }
+              aria-current={settingsPanel === "general" ? "page" : undefined}
+              onClick={() => setSettingsPanel("general")}
+            >
+              {c.noteSettingsNavGeneral}
+            </button>
+            <button
+              type="button"
+              className={
+                "note-settings-modal__nav-item" +
+                (settingsPanel === "objectTypes" ? " is-active" : "")
+              }
+              aria-current={
+                settingsPanel === "objectTypes" ? "page" : undefined
+              }
+              onClick={() => setSettingsPanel("objectTypes")}
+            >
+              {c.noteSettingsNavObjectTypes}
+            </button>
+          </nav>
+          <div className="note-settings-modal__main">
+            {settingsPanel === "objectTypes" ? (
+              <h3 className="note-settings-modal__content-title">
+                {c.noteSettingsObjectTypesTitle}
+              </h3>
+            ) : null}
+            {panelContent}
+            <div className="note-settings-modal__footer-actions">
+              <button
+                type="button"
+                className="auth-modal__btn auth-modal__btn--primary auth-modal__btn--primary--full"
+                onClick={onClose}
+              >
+                {c.done}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
   );
 
-  return createPortal(panel, document.body);
+  return createPortal(modalTree, document.body);
 }

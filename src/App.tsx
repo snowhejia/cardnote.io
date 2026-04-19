@@ -4651,9 +4651,61 @@ export default function App() {
 
         <div
           className={
-            "sidebar__features-section" +
-            (!sidebarSectionCollapsed.features
-              ? " sidebar__features-section--expanded"
+            "sidebar__calendar-section" +
+            (allReminderEntries.length === 0 &&
+            sidebarSectionCollapsed.calendar
+              ? " sidebar__calendar-section--below-rule-desktop"
+              : "")
+          }
+        >
+          <div className="sidebar__section-row sidebar__section-row--collapsible sidebar__calendar-head">
+            <button
+              type="button"
+              className="sidebar__section-hit"
+              onClick={() => toggleSidebarSection("calendar")}
+              aria-expanded={!sidebarSectionCollapsed.calendar}
+              aria-label={sidebarSectionToggleAria("calendar", c.browseByDate)}
+            >
+              <span
+                className={
+                  "sidebar__chevron" +
+                  (!sidebarSectionCollapsed.calendar ? " is-expanded" : "")
+                }
+                aria-hidden
+              >
+                <span className="sidebar__chevron-icon">›</span>
+              </span>
+              <span className="sidebar__section">{c.browseByDate}</span>
+            </button>
+          </div>
+          {!sidebarSectionCollapsed.calendar ? (
+            <div
+              className={
+                "sidebar__calendar" +
+                (allReminderEntries.length === 0
+                  ? " sidebar__calendar--below-rule-desktop"
+                  : "")
+              }
+              aria-label={c.browseByDate}
+            >
+              <CalendarBrowsePanel
+                calendarViewMonth={calendarViewMonth}
+                setCalendarViewMonth={setCalendarViewMonth}
+                calendarCells={calendarCells}
+                calendarDay={calendarDay}
+                datesWithNotesSet={datesWithNotesOnCalendarSet}
+                datesWithRemindersSet={datesWithRemindersOnCalendarSet}
+                onDayClick={onPickCalendarDay}
+              />
+            </div>
+          ) : null}
+        </div>
+
+        <div
+          className={
+            "sidebar__notes-section" +
+            (!sidebarSectionCollapsed.notes
+              ? " sidebar__notes-section--expanded"
               : "")
           }
         >
@@ -4661,26 +4713,23 @@ export default function App() {
             <button
               type="button"
               className="sidebar__section-hit"
-              onClick={() => toggleSidebarSection("features")}
-              aria-expanded={!sidebarSectionCollapsed.features}
-              aria-label={sidebarSectionToggleAria(
-                "features",
-                c.sidebarFeaturesSection
-              )}
+              onClick={() => toggleSidebarSection("notes")}
+              aria-expanded={!sidebarSectionCollapsed.notes}
+              aria-label={sidebarSectionToggleAria("notes", c.sidebarNotesSection)}
             >
               <span
                 className={
                   "sidebar__chevron" +
-                  (!sidebarSectionCollapsed.features ? " is-expanded" : "")
+                  (!sidebarSectionCollapsed.notes ? " is-expanded" : "")
                 }
                 aria-hidden
               >
                 <span className="sidebar__chevron-icon">›</span>
               </span>
-              <span className="sidebar__section">{c.sidebarFeaturesSection}</span>
+              <span className="sidebar__section">{c.sidebarNotesSection}</span>
             </button>
           </div>
-          {!sidebarSectionCollapsed.features ? (
+          {!sidebarSectionCollapsed.notes ? (
             <>
               <div className="sidebar__all-notes">
                 <button
@@ -4747,67 +4796,35 @@ export default function App() {
               ) : null}
 
               {!narrowUi ? (
-                <>
-                  <div className="sidebar__all-notes">
-                    <button
-                      type="button"
-                      className={
-                        "sidebar__all-notes-hit" +
-                        (connectionsViewActive && !searchActive
-                          ? " is-active"
-                          : "")
-                      }
-                      onClick={() => {
-                        closeCardFullPage();
-                        setTrashViewActive(false);
-                        setCalendarDay(null);
-                        setSearchQuery("");
-                        setSearchBarOpen(false);
-                        setConnectionsPrimed(true);
-                        setConnectionsViewActive(true);
-                        setMobileNavOpen(false);
-                      }}
-                    >
-                      <SidebarNavExploreIcon className="sidebar__nav-pillar-icon" />
-                      <span className="sidebar__all-notes-label">
-                        {c.connectionsEntry}
-                      </span>
-                      <span className="sidebar__all-notes-count">
-                        {connectionsPrimed ? connectionEdges.length : "–"}
-                      </span>
-                    </button>
-                  </div>
-                  <div className="sidebar__all-notes sidebar__connections">
-                    <button
-                      type="button"
-                      className={
-                        "sidebar__all-notes-hit" +
-                        (attachmentsViewActive && !searchActive
-                          ? " is-active"
-                          : "")
-                      }
-                      onClick={() => {
-                        closeCardFullPage();
-                        setTrashViewActive(false);
-                        setCalendarDay(null);
-                        setSearchQuery("");
-                        setSearchBarOpen(false);
-                        setAttachmentsViewActive(true);
-                        setMobileNavOpen(false);
-                      }}
-                    >
-                      <SidebarNavAttachmentsIcon className="sidebar__nav-pillar-icon" />
-                      <span className="sidebar__all-notes-label">
-                        {c.allAttachmentsEntry}
-                      </span>
-                      <span className="sidebar__all-notes-count">
-                        {dataMode === "remote"
-                          ? (remoteAttachmentsTotal ?? "–")
-                          : allMediaAttachmentEntries.length}
-                      </span>
-                    </button>
-                  </div>
-                </>
+                <div className="sidebar__all-notes">
+                  <button
+                    type="button"
+                    className={
+                      "sidebar__all-notes-hit" +
+                      (connectionsViewActive && !searchActive
+                        ? " is-active"
+                        : "")
+                    }
+                    onClick={() => {
+                      closeCardFullPage();
+                      setTrashViewActive(false);
+                      setCalendarDay(null);
+                      setSearchQuery("");
+                      setSearchBarOpen(false);
+                      setConnectionsPrimed(true);
+                      setConnectionsViewActive(true);
+                      setMobileNavOpen(false);
+                    }}
+                  >
+                    <SidebarNavExploreIcon className="sidebar__nav-pillar-icon" />
+                    <span className="sidebar__all-notes-label">
+                      {c.connectionsEntry}
+                    </span>
+                    <span className="sidebar__all-notes-count">
+                      {connectionsPrimed ? connectionEdges.length : "–"}
+                    </span>
+                  </button>
+                </div>
               ) : null}
             </>
           ) : null}
@@ -4815,52 +4832,60 @@ export default function App() {
 
         <div
           className={
-            "sidebar__calendar-section" +
-            (allReminderEntries.length === 0 &&
-            sidebarSectionCollapsed.calendar
-              ? " sidebar__calendar-section--below-rule-desktop"
+            "sidebar__files-section" +
+            (!sidebarSectionCollapsed.files
+              ? " sidebar__files-section--expanded"
               : "")
           }
         >
-          <div className="sidebar__section-row sidebar__section-row--collapsible sidebar__calendar-head">
+          <div className="sidebar__section-row sidebar__section-row--collapsible">
             <button
               type="button"
               className="sidebar__section-hit"
-              onClick={() => toggleSidebarSection("calendar")}
-              aria-expanded={!sidebarSectionCollapsed.calendar}
-              aria-label={sidebarSectionToggleAria("calendar", c.browseByDate)}
+              onClick={() => toggleSidebarSection("files")}
+              aria-expanded={!sidebarSectionCollapsed.files}
+              aria-label={sidebarSectionToggleAria("files", c.sidebarFilesSection)}
             >
               <span
                 className={
                   "sidebar__chevron" +
-                  (!sidebarSectionCollapsed.calendar ? " is-expanded" : "")
+                  (!sidebarSectionCollapsed.files ? " is-expanded" : "")
                 }
                 aria-hidden
               >
                 <span className="sidebar__chevron-icon">›</span>
               </span>
-              <span className="sidebar__section">{c.browseByDate}</span>
+              <span className="sidebar__section">{c.sidebarFilesSection}</span>
             </button>
           </div>
-          {!sidebarSectionCollapsed.calendar ? (
-            <div
-              className={
-                "sidebar__calendar" +
-                (allReminderEntries.length === 0
-                  ? " sidebar__calendar--below-rule-desktop"
-                  : "")
-              }
-              aria-label={c.browseByDate}
-            >
-              <CalendarBrowsePanel
-                calendarViewMonth={calendarViewMonth}
-                setCalendarViewMonth={setCalendarViewMonth}
-                calendarCells={calendarCells}
-                calendarDay={calendarDay}
-                datesWithNotesSet={datesWithNotesOnCalendarSet}
-                datesWithRemindersSet={datesWithRemindersOnCalendarSet}
-                onDayClick={onPickCalendarDay}
-              />
+          {!sidebarSectionCollapsed.files ? (
+            <div className="sidebar__all-notes sidebar__connections">
+              <button
+                type="button"
+                className={
+                  "sidebar__all-notes-hit" +
+                  (attachmentsViewActive && !searchActive ? " is-active" : "")
+                }
+                onClick={() => {
+                  closeCardFullPage();
+                  setTrashViewActive(false);
+                  setCalendarDay(null);
+                  setSearchQuery("");
+                  setSearchBarOpen(false);
+                  setAttachmentsViewActive(true);
+                  setMobileNavOpen(false);
+                }}
+              >
+                <SidebarNavAttachmentsIcon className="sidebar__nav-pillar-icon" />
+                <span className="sidebar__all-notes-label">
+                  {c.allAttachmentsEntry}
+                </span>
+                <span className="sidebar__all-notes-count">
+                  {dataMode === "remote"
+                    ? (remoteAttachmentsTotal ?? "–")
+                    : allMediaAttachmentEntries.length}
+                </span>
+              </button>
             </div>
           ) : null}
         </div>
