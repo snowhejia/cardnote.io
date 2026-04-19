@@ -238,9 +238,16 @@ function AttachmentGridCell({
 }) {
   const c = useAppChrome();
   const name = attachmentDisplayName(item);
+  const sb = (item as { sizeBytes?: number | string | undefined }).sizeBytes;
+  const sizeBytesNum =
+    typeof sb === "number" && Number.isFinite(sb) && sb >= 0
+      ? Math.floor(sb)
+      : typeof sb === "string" && /^\d+$/.test(sb.trim())
+        ? parseInt(sb.trim(), 10)
+        : null;
   const sizeLine =
-    typeof item.sizeBytes === "number" && item.sizeBytes >= 0
-      ? formatByteSize(item.sizeBytes)
+    sizeBytesNum != null && sizeBytesNum >= 0
+      ? formatByteSize(sizeBytesNum)
       : c.allAttachmentsMetaDash;
   return (
     <li key={`${colId}-${cardId}-${mediaIndex}`}>

@@ -1494,11 +1494,69 @@ export async function generateVideoThumbnailForExistingCosKey(objectKey) {
   } catch {
     return { skipped: "get_object" };
   }
-  const thumb = await tryExtractVideoThumbnail(buffer, mimetype);
-  if (!thumb) return { skipped: "ffmpeg" };
-  const thumbKey = `${cosSub}/${tokenPart}-thumb.${thumb.ext}`;
-  await putCosObject(thumbKey, thumb.buffer, thumb.mimeType);
-  return { thumbnailUrl: buildObjectPublicUrl(thumbKey) };
+  const [thumb, durationSec] = await Promise.all([
+    tryExtractVideoThumbnail(buffer, mimetype),
+    probeDurationSecondsFromAvBuffer(buffer, mimetype, ext),
+  ]);
+  const out = {};
+  if (thumb) {
+    const thumbKey = `${cosSub}/${tokenPart}-thumb.${thumb.ext}`;
+    await putCosObject(thumbKey, thumb.buffer, thumb.mimeType);
+    out.thumbnailUrl = buildObjectPublicUrl(thumbKey);
+  }
+  if (durationSec != null && Number.isFinite(durationSec) && durationSec >= 0) {
+    out.durationSec = Math.round(durationSec);
+  }
+  if (!out.thumbnailUrl && out.durationSec == null) {
+    return { skipped: "ffmpeg" };
+  }
+  return out;
+}
+
+/**
+ * 已存在于 COS 的音/视频：仅探测时长（批处理；与 generateVideoThumbnail 共用 ffprobe / music-metadata）
+ * @param {string} objectKey
+ * @returns {Promise<{ durationSec?: number; skipped?: string }>}
+ */
+export async function probeVideoOrAudioDurationFromCosKey(objectKey) {
+  if (!isCosConfigured()) {
+    return { skipped: "no_cos" };
+  }
+  const k = String(objectKey || "").replace(/^\/+/, "");
+  if (!k) return { skipped: "empty_key" };
+  const prefix = cosMediaPrefix();
+  if (!k.startsWith(prefix + "/")) {
+    return { skipped: "not_media_prefix" };
+  }
+  const file = basename(k);
+  const dot = file.lastIndexOf(".");
+  if (dot < 1) return { skipped: "bad_name" };
+  const tokenPart = file.slice(0, dot);
+  const ext = file.slice(dot + 1).toLowerCase();
+  if (!/^\d+-[a-f0-9]{24}$/.test(tokenPart)) {
+    return { skipped: "bad_token" };
+  }
+  const mimetype =
+    EXT_TO_MIME[ext] || `application/${ext === "bin" ? "octet-stream" : ext}`;
+  const kind = kindFromMime(mimetype);
+  if (kind !== "video" && kind !== "audio") {
+    return { skipped: "not_av" };
+  }
+  let buffer;
+  try {
+    buffer = await getCosObjectBuffer(k);
+  } catch {
+    return { skipped: "get_object" };
+  }
+  const durationSec = await probeDurationSecondsFromAvBuffer(
+    buffer,
+    mimetype,
+    ext
+  );
+  if (durationSec == null || !Number.isFinite(durationSec) || durationSec < 0) {
+    return { skipped: "no_duration" };
+  }
+  return { durationSec: Math.round(durationSec) };
 }
 
 /**

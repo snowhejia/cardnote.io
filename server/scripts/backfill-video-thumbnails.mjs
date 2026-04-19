@@ -2,6 +2,7 @@
 /**
  * 为历史笔记补 COS 侧元数据并写回 cards.media：
  * - 视频 / 图片缺 thumbnailUrl 时生成列表小图（需 ffmpeg 等，与原先一致）
+ * - 视频缺 durationSec 时探测时长（与 finalize 一致；已有缩略图也会补）
  * - 各类附件缺有效 sizeBytes 时，用 COS 对象元数据补字节数（Range 请求，不整文件下载）
  *
  * 用法（在 server 目录、已配置 DATABASE_URL + COS）：
@@ -30,6 +31,7 @@ const {
 const {
   generateImagePreviewForExistingCosKey,
   generateVideoThumbnailForExistingCosKey,
+  probeVideoOrAudioDurationFromCosKey,
 } = await import("../src/mediaUpload.js");
 
 if (!isCosConfigured()) {
@@ -53,8 +55,27 @@ function wantsSizeBytes(item) {
   const o = /** @type {Record<string, unknown>} */ (item);
   const sb = o.sizeBytes;
   if (sb == null) return true;
-  if (typeof sb === "number" && Number.isFinite(sb) && sb >= 0) return false;
+  if (typeof sb === "number" && Number.isFinite(sb) && sb >= 0) {
+    if (Number.isInteger(sb)) return false;
+    return true;
+  }
   if (typeof sb === "string" && /^\d+$/.test(sb.trim())) return false;
+  return true;
+}
+
+/** 视频缺服务端写入的时长（浏览器探测的不写库，此处只补 JSON 空档） */
+function wantsVideoDuration(item) {
+  if (!item || typeof item !== "object") return false;
+  const o = /** @type {Record<string, unknown>} */ (item);
+  if (o.kind !== "video") return false;
+  const d = o.durationSec;
+  if (typeof d === "number" && Number.isFinite(d) && d >= 0) return false;
+  if (
+    typeof d === "string" &&
+    /^-?\d+(\.\d+)?$/.test(String(d).trim())
+  ) {
+    return false;
+  }
   return true;
 }
 
@@ -111,6 +132,36 @@ async function patchMediaArray(media) {
             `  ✗ ${out.kind} ${key} thumb skipped: ${gen.skipped ?? "unknown"}`
           );
         }
+        if (
+          out.kind === "video" &&
+          gen.durationSec != null &&
+          Number.isFinite(gen.durationSec) &&
+          gen.durationSec >= 0
+        ) {
+          changed = true;
+          out = { ...out, durationSec: Math.round(gen.durationSec) };
+          console.log(`  ✓ video ${key} duration=${Math.round(gen.durationSec)}s`);
+        }
+      }
+    } else if (
+      out.kind === "video" &&
+      wantsVideoDuration(out) &&
+      key &&
+      !dryRun
+    ) {
+      const pr = await probeVideoOrAudioDurationFromCosKey(key);
+      if (
+        pr.durationSec != null &&
+        Number.isFinite(pr.durationSec) &&
+        pr.durationSec >= 0
+      ) {
+        changed = true;
+        out = { ...out, durationSec: Math.round(pr.durationSec) };
+        console.log(`  ✓ video ${key} duration only → ${Math.round(pr.durationSec)}s`);
+      } else {
+        console.warn(
+          `  ✗ video ${key} duration skipped: ${pr.skipped ?? "unknown"}`
+        );
       }
     }
 
@@ -118,6 +169,10 @@ async function patchMediaArray(media) {
       if (!key) {
         if (url.startsWith("/uploads/") || url.startsWith("uploads/")) {
           /* 本地盘路径，部署脚本不处理 */
+        } else if (/^https?:\/\//i.test(url)) {
+          console.warn(
+            `  跳过 sizeBytes（无法从 URL 解析 COS key，请核对 COS_PUBLIC_BASE 与直链域）: ${url.slice(0, 96)}`
+          );
         }
       } else if (dryRun) {
         console.log(`  [dry-run] 将补 sizeBytes key=${key}`);
@@ -151,11 +206,24 @@ function mediaNeedsWorkExists(tableAlias, mediaColumn) {
       AND (elem->>'thumbnailUrl' IS NULL OR btrim(elem->>'thumbnailUrl') = '')
     )
     OR (
+      (elem->>'kind' = 'video')
+      AND NOT (
+        jsonb_typeof(elem->'durationSec') = 'number'
+        AND (elem->>'durationSec')::double precision >= 0
+      )
+      AND NOT (
+        (elem->>'durationSec') ~ '^-?[0-9]+(\\.[0-9]+)?$'
+      )
+    )
+    OR (
       (elem->>'kind' IN ('image', 'video', 'audio', 'file'))
       AND NOT (
-        jsonb_typeof(elem->'sizeBytes') = 'number'
-        AND (elem->>'sizeBytes')::numeric >= 0
-        AND (elem->>'sizeBytes')::numeric = floor((elem->>'sizeBytes')::numeric)
+        (
+          jsonb_typeof(elem->'sizeBytes') = 'number'
+          AND (elem->>'sizeBytes')::numeric >= 0
+          AND (elem->>'sizeBytes')::numeric = floor((elem->>'sizeBytes')::numeric)
+        )
+        OR ((elem->>'sizeBytes') ~ '^[0-9]+$')
       )
     )
   )
