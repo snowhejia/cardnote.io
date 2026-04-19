@@ -365,6 +365,7 @@ export function CardDetail({
                       )}
                     </button>
                   ) : null}
+                  {!detailNarrow || canEdit ? (
                   <div
                     className="card__menu-root"
                     data-card-menu-root={menuId}
@@ -388,6 +389,7 @@ export function CardDetail({
                         role="menu"
                         aria-orientation="vertical"
                       >
+                        {!detailNarrow ? (
                         <button
                           type="button"
                           className={
@@ -402,6 +404,7 @@ export function CardDetail({
                         >
                           {c.uiCardNoteDetailFullPage}
                         </button>
+                        ) : null}
                         {canEdit && onOpenAddToCollection ? (
                           <button
                             type="button"
@@ -475,6 +478,7 @@ export function CardDetail({
                       </div>
                     ) : null}
                   </div>
+                  ) : null}
                 </div>
               </div>
               <NoteCardTiptap

@@ -80,7 +80,7 @@
   justify-content: center;
   box-sizing: border-box;
   padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
-    env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+    0px env(safe-area-inset-left, 0px);
   min-height: 100dvh;
   min-height: 100svh;
   background: rgba(250, 250, 249, 0.92);
@@ -244,7 +244,7 @@
   -webkit-overflow-scrolling: touch;
   background: #fbfbfa;
   border-radius: 16px 16px 0 0;
-  padding: 0 12px calc(12px + env(safe-area-inset-bottom, 0px));
+  padding: 0 12px 12px;
   box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.14);
 }
 
@@ -2193,7 +2193,7 @@
   min-height: 0;
   overflow-y: auto;
   padding: 12px max(14px, env(safe-area-inset-left, 0px))
-    calc(20px + env(safe-area-inset-bottom, 0px))
+    20px
     max(14px, env(safe-area-inset-right, 0px));
   -webkit-overflow-scrolling: touch;
 }
@@ -2239,7 +2239,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 12px 6px calc(12px + env(safe-area-inset-bottom, 0px));
+  padding: 12px 6px 12px;
 }
 
 .related-panel__add--readonly .related-panel__readonly-lower-body .related-panel__hint {
@@ -2254,7 +2254,7 @@
   overflow-x: hidden;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  padding-bottom: 12px;
   box-sizing: border-box;
 }
 
@@ -4529,7 +4529,7 @@ textarea.main__hint-editor:focus {
   justify-content: center;
   padding: max(16px, env(safe-area-inset-top))
     max(16px, env(safe-area-inset-right))
-    max(16px, env(safe-area-inset-bottom))
+    16px
     max(16px, env(safe-area-inset-left));
   background: rgba(0, 0, 0, 0.88);
   cursor: zoom-out;
@@ -5193,6 +5193,15 @@ div.card__text--readonly:not(.card__text--preview) {
   user-select: text;
 }
 
+/* 时间线卡片：包住正文，供手机双击打开全页（不包顶栏 ⋯） */
+.card__text-dbltap-host {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 /* Tiptap / ProseMirror：与横格 .card__text 行高一致 */
 .card__text-editor {
   width: 100%;
@@ -5633,7 +5642,7 @@ div.card__text--readonly:not(.card__text--preview) {
 .auth-modal-backdrop__legal {
   flex-shrink: 0;
   margin: 0;
-  padding: 0.65rem 1rem calc(0.75rem + env(safe-area-inset-bottom, 0px));
+  padding: 0.65rem 1rem 0.75rem;
   text-align: center;
   font-size: 0.75rem;
   line-height: 1.45;
@@ -6089,16 +6098,26 @@ div.card__text--readonly:not(.card__text--preview) {
   /* scrollIntoView / 锚点滚动时预留刘海区，避免顶栏被状态栏挡住 */
   html {
     scroll-padding-top: calc(10px + env(safe-area-inset-top, 0px));
+    background: var(--vp-c-bg-soft);
+  }
+
+  #root {
+    min-height: 100dvh;
+    min-height: 100svh;
+    background: var(--vp-c-bg-soft);
   }
 
   .app {
     display: block;
     min-height: 100%;
+    min-height: 100dvh;
+    min-height: 100svh;
     height: auto;
     max-height: none;
     overflow: visible;
-    /* 底栏与「滚到底」共用：与 .mobile-dock 的 bottom / 内高一致 */
-    --mobile-dock-offset-bottom: 22px;
+    background: var(--vp-c-bg-soft);
+    /* 底栏与「滚到底」共用：与 .mobile-dock 的 bottom / 内高一致；含底部安全区避免内容落在 Home 指示条后 */
+    --mobile-dock-offset-bottom: calc(22px + env(safe-area-inset-bottom, 0px));
     --mobile-dock-pad-y: 8px;
     --mobile-dock-inner-max-h: 56px;
     --scroll-to-bottom-size: 44px;
@@ -6150,7 +6169,7 @@ div.card__text--readonly:not(.card__text--preview) {
     padding-top: calc(env(safe-area-inset-top, 0px) + 6px);
     padding-left: 0;
     padding-right: 0;
-    padding-bottom: max(12px, env(safe-area-inset-bottom, 0px));
+    padding-bottom: 12px;
     margin: 0;
     overflow-x: hidden;
     overflow-y: hidden;
@@ -6706,7 +6725,8 @@ div.card__text--readonly:not(.card__text--preview) {
     padding-top: calc(1.05rem + env(safe-area-inset-top, 0px));
     padding-right: max(0.75rem, constant(safe-area-inset-right));
     padding-right: max(0.75rem, env(safe-area-inset-right, 0px));
-    padding-bottom: 0.75rem;
+    /* 勿留底内边距：否则时间线 flex 区与屏底之间会露出一条固定浅灰带；底部留白由 .timeline padding-bottom / 底栏 offset 承担 */
+    padding-bottom: 0;
     padding-left: max(0.75rem, constant(safe-area-inset-left));
     padding-left: max(0.75rem, env(safe-area-inset-left, 0px));
   }
@@ -6716,7 +6736,7 @@ div.card__text--readonly:not(.card__text--preview) {
     padding: 0;
     padding-top: env(safe-area-inset-top, 0px);
     padding-right: env(safe-area-inset-right, 0px);
-    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding-bottom: 0px;
     padding-left: env(safe-area-inset-left, 0px);
   }
 
@@ -6740,7 +6760,7 @@ div.card__text--readonly:not(.card__text--preview) {
   }
 
   .main.main--connections-board .timeline {
-    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding-bottom: 0px;
   }
 
   .main__header {
@@ -6782,7 +6802,15 @@ div.card__text--readonly:not(.card__text--preview) {
   }
 
   .timeline {
-    padding-bottom: calc(5.15rem + 12px + env(safe-area-inset-bottom, 0px));
+    /* 浮层底栏 position:fixed + z-index:35 会盖住时间线底部；须预留 ≥ 底栏占位 + 额外呼吸区 */
+    padding-bottom: calc(
+      var(--mobile-dock-offset-bottom) + var(--mobile-dock-pad-y) * 2 +
+        var(--mobile-dock-inner-max-h) + 2rem
+    );
+    scroll-padding-bottom: calc(
+      var(--mobile-dock-offset-bottom) + var(--mobile-dock-pad-y) * 2 +
+        var(--mobile-dock-inner-max-h) + 1.25rem
+    );
   }
 
   .timeline__add-bottom {
@@ -6794,9 +6822,7 @@ div.card__text--readonly:not(.card__text--preview) {
     display: flex;
     position: fixed;
     left: 50%;
-    bottom: calc(
-      var(--mobile-dock-offset-bottom) + env(safe-area-inset-bottom, 0px)
-    );
+    bottom: var(--mobile-dock-offset-bottom);
     transform: translateX(-50%);
     z-index: 35;
     align-items: center;
@@ -6909,8 +6935,7 @@ div.card__text--readonly:not(.card__text--preview) {
     bottom: calc(
       var(--mobile-dock-offset-bottom) + var(--mobile-dock-pad-y) +
         (var(--mobile-dock-inner-max-h) / 2) -
-        (var(--scroll-to-bottom-size) / 2) +
-        env(safe-area-inset-bottom, 0px)
+        (var(--scroll-to-bottom-size) / 2)
     );
     z-index: 36;
     display: inline-flex;
@@ -8694,7 +8719,7 @@ div.card__text--readonly:not(.card__text--preview) {
     align-items: center;
     justify-content: center;
     padding: max(12px, env(safe-area-inset-top, 0px)) 16px
-      max(12px, env(safe-area-inset-bottom, 0px));
+      12px;
     box-sizing: border-box;
   }
 
@@ -8867,7 +8892,7 @@ div.card__text--readonly:not(.card__text--preview) {
   flex-direction: column !important;
   box-sizing: border-box;
   padding-top: calc(env(safe-area-inset-top, 0px) + 6px);
-  padding-bottom: max(12px, env(safe-area-inset-bottom, 0px));
+  padding-bottom: 12px;
   padding-left: env(safe-area-inset-left, 0px);
   padding-right: env(safe-area-inset-right, 0px);
   -webkit-overflow-scrolling: touch;
@@ -9098,6 +9123,33 @@ body.app--related-panel-open .app.app--tablet-split-nav .main {
 
 .main--card-page {
   padding: 0;
+  /* 全页笔记时 .main 的刘海安全区内边距被 padding:0 清掉，须单独补回（左右由 card-page 头/正文自行 max(env,)） */
+  padding-top: constant(safe-area-inset-top);
+  padding-top: env(safe-area-inset-top, 0px);
+  /* 底部不预留 safe-area（与全局一致） */
+  box-sizing: border-box;
+  background: #ffffff;
+}
+
+/*
+ * 全页笔记：小屏 main 为 position:fixed 不占 .app 高度，.app 会塌成一条缝，body 灰底从底部露出。
+ * 根链强制满高 + 白底，去掉「底下一道灰边」。
+ */
+html:has(body.app--card-page-open),
+body.app--card-page-open {
+  background: #ffffff;
+}
+
+body.app--card-page-open #root {
+  min-height: 100dvh;
+  min-height: 100svh;
+  background: #ffffff;
+}
+
+body.app--card-page-open .app {
+  min-height: 100dvh;
+  min-height: 100svh;
+  background: #ffffff;
 }
 
 /* ——— 卡片全页详情（Notion 式属性编辑） ——— */
@@ -9111,6 +9163,246 @@ body.app--related-panel-open .app.app--tablet-split-nav .main {
   background: #fff;
 }
 
+/**
+ * 全页笔记详情：小屏 / 大屏触控（MOBILE_CHROME_MEDIA）紧凑布局。
+ * 由 CardPageView 根节点挂 `card-page--compact`，与仅 max-width 的 CSS 媒体互补（含平板横宽 ≤900）。
+ */
+.card-page--compact .card-page__body {
+  flex-direction: column;
+}
+
+/* 小屏全页：标题栏「属性 / 目录」打开侧栏抽屉 */
+
+.card-page__main {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.card-page__main--compact {
+  flex-direction: column;
+}
+
+.card-page__sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10038;
+  background: rgba(0, 0, 0, 0.34);
+  animation: card-page-sheet-backdrop-in 0.16s ease;
+}
+
+@keyframes card-page-sheet-backdrop-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+.card-page__sheet {
+  position: fixed;
+  top: calc(46px + env(safe-area-inset-top, 0px));
+  bottom: 0;
+  width: min(100vw - 36px, 380px);
+  max-width: 92vw;
+  z-index: 10040;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: #fff;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.14);
+}
+
+.card-page__sheet--from-left {
+  left: 0;
+  border-right: 1px solid rgba(60, 60, 67, 0.1);
+  transform: translateX(-104%);
+  transition: transform 0.22s ease;
+}
+
+.card-page__sheet--from-left.is-open {
+  transform: translateX(0);
+}
+
+.card-page__sheet--from-right {
+  right: 0;
+  border-left: 1px solid rgba(60, 60, 67, 0.1);
+  transform: translateX(104%);
+  transition: transform 0.22s ease;
+}
+
+.card-page__sheet--from-right.is-open {
+  transform: translateX(0);
+}
+
+/* 手机全页：属性 / 目录铺满视口（仍可从左/右滑入，关闭用标题栏 × 或 Esc） */
+.card-page--compact .card-page__sheet {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  max-width: none;
+  box-shadow: none;
+}
+
+.card-page--compact .card-page__sheet--from-left {
+  border-right: none;
+}
+
+.card-page--compact .card-page__sheet--from-right {
+  border-left: none;
+}
+
+.card-page--compact .card-page__sheet-head {
+  padding-top: max(10px, env(safe-area-inset-top, 0px));
+  padding-right: max(14px, env(safe-area-inset-right, 0px));
+  padding-left: max(14px, env(safe-area-inset-left, 0px));
+}
+
+.card-page--compact .card-page__sheet-body {
+  padding-bottom: 24px;
+}
+
+.card-page__sheet-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px 10px max(14px, env(safe-area-inset-left, 0px));
+  border-bottom: 1px solid rgba(60, 60, 67, 0.08);
+}
+
+.card-page__sheet--from-right .card-page__sheet-head {
+  padding-right: max(14px, env(safe-area-inset-right, 0px));
+}
+
+.card-page__sheet-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: rgba(55, 53, 47, 0.9);
+}
+
+.card-page__sheet-close {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  margin: -6px -8px -6px 0;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: rgba(55, 53, 47, 0.5);
+  font-size: 1.35rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.card-page__sheet-close:hover {
+  background: rgba(55, 53, 47, 0.06);
+  color: rgba(55, 53, 47, 0.85);
+}
+
+.card-page__sheet-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 8px max(12px, env(safe-area-inset-left, 0px)) 24px
+    max(12px, env(safe-area-inset-right, 0px));
+}
+
+.card-page__sheet-body--props {
+  padding-top: 4px;
+}
+
+.card-page--compact .card-page__center {
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.card-page--compact .card-page__attachments-rail {
+  /* 不按 max-height 压扁：缩略图区需完整显示 168 方图 + 顶栏 + 内边距 */
+  flex: 0 0 auto;
+  flex-shrink: 0;
+  width: 100%;
+  max-width: none;
+  max-height: none;
+  border-left: none;
+  border-top: 1px solid rgba(60, 60, 67, 0.1);
+  padding-top: 12px;
+  padding-right: max(12px, env(safe-area-inset-right, 0px));
+  padding-bottom: 12px;
+  padding-left: max(12px, env(safe-area-inset-left, 0px));
+}
+
+.card-page--compact .card-page__attachments-rail-scroll {
+  flex: 0 0 auto;
+  overflow-x: hidden;
+  overflow-y: visible;
+}
+
+.card-page--compact .card-page__attachments-rail-list {
+  /* 高度随内容，避免 min-height:0 + flex:1 把一行缩略图挤扁 */
+  flex: 0 0 auto;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: visible;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: flex-start;
+  gap: 10px;
+  padding-bottom: 4px;
+  scroll-snap-type: x proximity;
+}
+
+.card-page--compact .card-page__attachments-rail .card-page__attachment {
+  flex: 0 0 auto;
+  width: auto;
+  max-width: 118px;
+  min-width: 82px;
+  scroll-snap-align: start;
+}
+
+.card-page--compact .card-page__attachments-rail .card-page__attachment-thumb,
+.card-page--compact .card-page__attachments-rail .card__gallery-thumb-wrap,
+.card-page--compact
+  .card-page__attachments-rail
+  .card-page__attachment-thumb-fallback {
+  max-width: 118px;
+  max-height: 118px;
+}
+
+.card-page--compact .card-page__editor-area .ProseMirror {
+  padding-top: 14px;
+  padding-bottom: 32px;
+  padding-left: max(14px, env(safe-area-inset-left, 0px));
+  padding-right: max(14px, env(safe-area-inset-right, 0px));
+  font-size: 0.9375rem;
+}
+
+.card-page--compact .card-page__editor-area .note-toolbar {
+  padding: 4px max(8px, env(safe-area-inset-left, 0px)) 4px
+    max(8px, env(safe-area-inset-right, 0px));
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
 .card-page__header {
   display: flex;
   align-items: center;
@@ -9118,6 +9410,11 @@ body.app--related-panel-open .app.app--tablet-split-nav .main {
   padding: 14px 24px 12px;
   border-bottom: 1px solid rgba(60, 60, 67, 0.08);
   flex: 0 0 auto;
+}
+
+.card-page--compact .card-page__header {
+  padding: 10px max(12px, env(safe-area-inset-left, 0px)) 10px
+    max(12px, env(safe-area-inset-right, 0px));
 }
 
 .card-page__back {
@@ -9142,7 +9439,85 @@ body.app--related-panel-open .app.app--tablet-split-nav .main {
 .card-page__time {
   font-size: 0.8125rem;
   color: rgba(55, 53, 47, 0.45);
+}
+
+.card-page:not(.card-page--compact) .card-page__time {
   margin-left: auto;
+}
+
+.card-page--compact .card-page__time {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card-page__header-panels {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.card-page__header-panel-btn {
+  padding: 6px 10px;
+  border: 1px solid rgba(60, 60, 67, 0.14);
+  border-radius: 8px;
+  background: rgba(250, 250, 252, 0.95);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: rgba(55, 53, 47, 0.72);
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    border-color 0.15s,
+    color 0.15s;
+}
+
+.card-page__header-panel-btn:hover {
+  background: rgba(55, 53, 47, 0.05);
+  border-color: rgba(60, 60, 67, 0.22);
+  color: rgba(55, 53, 47, 0.88);
+}
+
+.card-page__header-panel-btn.is-active {
+  background: rgba(55, 53, 47, 0.08);
+  border-color: rgba(60, 60, 67, 0.28);
+  color: rgba(55, 53, 47, 0.92);
+}
+
+.card-page__done {
+  flex-shrink: 0;
+  margin-left: 4px;
+  padding: 6px 14px;
+  border: 1px solid var(--mikujar-logo-jar);
+  border-radius: 8px;
+  background: var(--mikujar-logo-jar);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: #fff;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    border-color 0.15s,
+    color 0.15s;
+}
+
+.card-page__done:hover {
+  background: var(--mikujar-logo-jar-deep);
+  border-color: var(--mikujar-logo-jar-deep);
+  color: #fff;
+}
+
+.card-page__done:active {
+  background: color-mix(in srgb, var(--mikujar-logo-jar-deep) 88%, #0f172a);
+  border-color: color-mix(in srgb, var(--mikujar-logo-jar-deep) 88%, #0f172a);
+}
+
+.card-page__done:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--mikujar-logo-jar) 55%, transparent);
+  outline-offset: 2px;
 }
 
 .card-page__loading-body {
@@ -9482,7 +9857,7 @@ body.app--related-panel-open .app.app--tablet-split-nav .main {
 
 .card-page__prop-row {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
   min-height: 36px;
   padding: 4px 0;
@@ -9520,9 +9895,9 @@ body.app--related-panel-open .app.app--tablet-split-nav .main {
   align-self: center;
 }
 
-/* 卡片页「标签」：Notion 式药丸 + 白底容器 */
+/* 卡片页「标签」：与多行合集等一致用行内垂直居中，避免左侧「标签」顶在首行而显偏高 */
 .card-page__prop-row--tags {
-  align-items: flex-start;
+  align-items: center;
 }
 
 .card-page__prop-row--tags .card-page__prop-content {
@@ -9532,6 +9907,7 @@ body.app--related-panel-open .app.app--tablet-split-nav .main {
 .card-page__tags-panel {
   width: 100%;
   box-sizing: border-box;
+  /* 横向留白交给 .card-page__tags-add-input，避免与输入框 padding 叠成双份偏右 */
   padding: 6px 0 5px;
   background: transparent;
   border: 1px solid transparent;
@@ -9571,6 +9947,7 @@ body.app--related-panel-open .app.app--tablet-split-nav .main {
   flex-wrap: wrap;
   align-items: center;
   gap: 4px;
+  box-sizing: border-box;
 }
 
 .card-page__tags-dropdown {
@@ -9640,6 +10017,7 @@ body.app--related-panel-open .app.app--tablet-split-nav .main {
   flex-wrap: wrap;
   gap: 4px;
   align-items: center;
+  box-sizing: border-box;
 }
 
 .card-page__tags-pill {
@@ -9699,8 +10077,14 @@ body.app--related-panel-open .app.app--tablet-split-nav .main {
   background: transparent;
   font-size: 0.875rem;
   color: rgba(55, 53, 47, 0.85);
-  padding: 4px 0;
+  /* 仅输入时与「添加提醒…」等全宽 .card-page__prop-link 一致（8px 10px） */
+  padding: 8px 10px;
   outline: none;
+}
+
+/* 已有药丸时左侧由 gap 负责，勿再叠 10px 左内边距 */
+.card-page__tags-inline > .card-page__tags-add-input:not(:only-child) {
+  padding: 6px 10px 6px 4px;
 }
 
 .card-page__tags-add-input::placeholder {
@@ -9710,9 +10094,15 @@ body.app--related-panel-open .app.app--tablet-split-nav .main {
 
 .card-page__prop-label {
   flex: 0 0 92px;
+  display: flex;
+  align-items: center;
+  align-self: center;
+  box-sizing: border-box;
+  min-height: 40px;
   font-size: 0.8125rem;
+  line-height: 1.35;
   color: rgba(55, 53, 47, 0.5);
-  padding-top: 6px;
+  padding-top: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -9772,7 +10162,7 @@ body.app--related-panel-open .app.app--tablet-split-nav .main {
   flex-direction: column;
   align-items: flex-start;
   gap: 4px;
-  padding-top: 5px;
+  padding-top: 0;
 }
 
 .card-page__prop-content--row {
@@ -9833,10 +10223,17 @@ body.app--related-panel-open .app.app--tablet-split-nav .main {
 /* 链接/操作按钮 */
 
 .card-page__prop-link {
+  -webkit-appearance: none;
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
   background: none;
   border: none;
   cursor: pointer;
+  font: inherit;
   font-size: 0.875rem;
+  line-height: 1.35;
   color: rgba(55, 53, 47, 0.85);
   padding: 2px 4px 2px 0;
   border-radius: 4px;
@@ -9844,11 +10241,16 @@ body.app--related-panel-open .app.app--tablet-split-nav .main {
   transition: background 0.12s;
 }
 
-/* 单列值区：链接与占位条左缘与标签输入对齐；合集行等多列不加满宽 */
+/* 单列值区：整行已 align-items:center；占位/链接与左侧标签中线对齐，对称内边距避免 iOS 文案贴底 */
 .card-page__prop-content:not(.card-page__prop-content--row) > .card-page__prop-link {
   align-self: stretch;
   width: 100%;
   box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  min-height: 40px;
+  padding: 8px 10px;
 }
 
 .card-page__prop-link:hover {
@@ -10111,6 +10513,19 @@ body.app--related-panel-open .app.app--tablet-split-nav .main {
 
 .card-page__attachment:hover .card-page__attachment-remove {
   opacity: 1;
+}
+
+/* 手机全页：无可靠 hover，删除「×」常驻缩略图右上角 */
+.card-page--compact .card-page__attachment-remove {
+  opacity: 1;
+  top: 4px;
+  right: 4px;
+  z-index: 3;
+}
+
+/* 小屏全页：软键盘呼起或正文区聚焦（打字）时隐藏附件栏 */
+.card-page--compact .card-page__attachments-rail--keyboard-hidden {
+  display: none !important;
 }
 
 /* 删除自定义属性按钮 */

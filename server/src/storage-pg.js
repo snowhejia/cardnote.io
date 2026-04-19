@@ -181,6 +181,20 @@ function userIdCondition(userId, paramIdx) {
   return { sql: `user_id = $${paramIdx}`, params: [userId] };
 }
 
+/**
+ * 卡片行归属：已登录用户允许 `user_id = 本人` 或 `user_id IS NULL`（迁移/单库遗留），
+ * 避免「侧栏/详情已显示多合集」但 DELETE placement 因条件过严返回 0 行。
+ */
+function cardOwnershipCondition(userId, paramIdx) {
+  if (userId === null || userId === undefined) {
+    return { sql: "user_id IS NULL", params: [] };
+  }
+  return {
+    sql: `(user_id = $${paramIdx} OR user_id IS NULL)`,
+    params: [userId],
+  };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 合集树读取
 // ─────────────────────────────────────────────────────────────────────────────
@@ -497,6 +511,77 @@ export async function deleteCollection(userId, collectionId) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
+ * 仅写入 card_placements：把已有笔记加入另一合集（不读/不写 cards 正文等大字段）。
+ * @param {string|null} userId
+ * @param {string} cardId
+ * @param {string} collectionId
+ * @param {{ insertAtStart?: boolean, pinned?: boolean }} opts
+ * @returns {{ cardId: string, collectionId: string, sortOrder: number, pinned: boolean }}
+ */
+export async function addCardToCollectionPlacement(
+  userId,
+  cardId,
+  collectionId,
+  opts = {}
+) {
+  const colId = String(collectionId || "").trim();
+  const cid = String(cardId || "").trim();
+  if (!cid || !colId) throw new Error("缺少卡片或合集");
+
+  const insertAtStart = Boolean(opts.insertAtStart);
+  const pinned = Boolean(opts.pinned);
+
+  const { sql: uidSql, params: uidParams } = userIdCondition(userId, 2);
+  const colCheck = await query(
+    `SELECT id FROM collections WHERE id = $1 AND ${uidSql}`,
+    [colId, ...uidParams]
+  );
+  if (colCheck.rowCount === 0) throw new Error("合集不存在或无权限");
+
+  let sortOrder;
+  if (insertAtStart) {
+    const minRes = await query(
+      `SELECT MIN(sort_order) AS m FROM card_placements WHERE collection_id = $1`,
+      [colId]
+    );
+    const m = minRes.rows[0]?.m;
+    sortOrder = m === null || m === undefined ? 0 : m - 1;
+  } else {
+    const orderRes = await query(
+      `SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM card_placements WHERE collection_id = $1`,
+      [colId]
+    );
+    sortOrder = orderRes.rows[0].next;
+  }
+
+  const { sql: cOwnSql, params: cOwnParams } = cardOwnershipCondition(userId, 2);
+  const existing = await query(
+    `SELECT id, trashed_at FROM cards WHERE id = $1 AND (${cOwnSql})`,
+    [cid, ...cOwnParams]
+  );
+  if (existing.rowCount === 0) throw new Error("卡片不存在或无权限");
+  if (existing.rows[0].trashed_at != null) {
+    throw new Error("该笔记在回收站中，请先恢复");
+  }
+
+  await query(
+    `INSERT INTO card_placements (card_id, collection_id, pinned, sort_order)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (card_id, collection_id) DO UPDATE SET
+       pinned = EXCLUDED.pinned,
+       sort_order = EXCLUDED.sort_order`,
+    [cid, colId, pinned, sortOrder]
+  );
+
+  return {
+    cardId: cid,
+    collectionId: colId,
+    sortOrder,
+    pinned,
+  };
+}
+
+/**
  * 在指定合集内创建卡片（默认末尾；card.insertAtStart 为 true 时插在 sort_order 最前）。
  * 在插入前先验证 collectionId 属于该用户。
  * @param {string|null} userId
@@ -531,6 +616,33 @@ export async function createCard(userId, collectionId, card) {
 
   if (!id) throw new Error("card.id 为必填项");
 
+  const { sql: cOwnSql, params: cOwnParams } = cardOwnershipCondition(userId, 2);
+  const existing = await query(
+    `SELECT id, user_id, trashed_at FROM cards WHERE id = $1 AND (${cOwnSql})`,
+    [id, ...cOwnParams]
+  );
+
+  if (existing.rowCount > 0) {
+    if (existing.rows[0].trashed_at != null) {
+      throw new Error("该笔记在回收站中，请先恢复");
+    }
+    await addCardToCollectionPlacement(userId, id, collectionId, {
+      insertAtStart,
+      pinned,
+    });
+    const row = await query(
+      `SELECT c.id, c.text, c.minutes_of_day, c.added_on, c.reminder_on,
+              c.reminder_time, c.reminder_note, c.reminder_completed_at, c.reminder_completed_note,
+              c.tags, c.related_refs, c.media, c.custom_props, p.pinned
+       FROM cards c
+       JOIN card_placements p ON p.card_id = c.id AND p.collection_id = $2
+       WHERE c.id = $1`,
+      [id, collectionId]
+    );
+    const r = row.rows[0];
+    return rowToCard(r);
+  }
+
   let sortOrder;
   if (insertAtStart) {
     const minRes = await query(
@@ -545,37 +657,6 @@ export async function createCard(userId, collectionId, card) {
       [collectionId]
     );
     sortOrder = orderRes.rows[0].next;
-  }
-
-  const { sql: cUidSql, params: cUidParams } = userIdCondition(userId, 2);
-  const existing = await query(
-    `SELECT id, user_id, trashed_at FROM cards WHERE id = $1 AND ${cUidSql}`,
-    [id, ...cUidParams]
-  );
-
-  if (existing.rowCount > 0) {
-    if (existing.rows[0].trashed_at != null) {
-      throw new Error("该笔记在回收站中，请先恢复");
-    }
-    await query(
-      `INSERT INTO card_placements (card_id, collection_id, pinned, sort_order)
-       VALUES ($1, $2, $3, $4)
-       ON CONFLICT (card_id, collection_id) DO UPDATE SET
-         pinned = EXCLUDED.pinned,
-         sort_order = EXCLUDED.sort_order`,
-      [id, collectionId, pinned, sortOrder]
-    );
-    const row = await query(
-      `SELECT c.id, c.text, c.minutes_of_day, c.added_on, c.reminder_on,
-              c.reminder_time, c.reminder_note, c.reminder_completed_at, c.reminder_completed_note,
-              c.tags, c.related_refs, c.media, c.custom_props, p.pinned
-       FROM cards c
-       JOIN card_placements p ON p.card_id = c.id AND p.collection_id = $2
-       WHERE c.id = $1`,
-      [id, collectionId]
-    );
-    const r = row.rows[0];
-    return rowToCard(r);
   }
 
   await query(
@@ -733,11 +814,14 @@ export async function updateCard(userId, cardId, patch) {
     await client.query("BEGIN");
 
     if (cardCols.length > 0) {
-      const { sql: cUidSql, params: cUidParams } = userIdCondition(userId, i + 1);
+      const { sql: cOwnSql, params: cOwnParams } = cardOwnershipCondition(
+        userId,
+        i + 1
+      );
       const res = await client.query(
         `UPDATE cards SET ${cardCols.join(", ")}
-         WHERE id = $${i} AND (${cUidSql}) AND trashed_at IS NULL`,
-        [...cardParams, cardId, ...cUidParams]
+         WHERE id = $${i} AND (${cOwnSql}) AND trashed_at IS NULL`,
+        [...cardParams, cardId, ...cOwnParams]
       );
       if (res.rowCount === 0) throw new Error("卡片不存在或无权限");
     }
@@ -764,11 +848,11 @@ export async function updateCard(userId, cardId, patch) {
       if (pCols.length === 0) {
         throw new Error("未提供可更新的归属字段");
       }
-      const { sql: pUidSql, params: pUidParams } = userIdCondition(
+      const { sql: pOwnSql, params: pOwnParams } = cardOwnershipCondition(
         userId,
         k + 2
       );
-      const pUidQualified = pUidSql.replace(/\buser_id\b/g, "c.user_id");
+      const pOwnQualified = pOwnSql.replace(/\buser_id\b/g, "c.user_id");
       const res = await client.query(
         `UPDATE card_placements p
          SET ${pCols.join(", ")}
@@ -776,8 +860,8 @@ export async function updateCard(userId, cardId, patch) {
          WHERE p.card_id = c.id
            AND p.card_id = $${k}
            AND p.collection_id = $${k + 1}
-           AND (${pUidQualified})`,
-        [...pParams, cardId, placementCollectionId, ...pUidParams]
+           AND (${pOwnQualified})`,
+        [...pParams, cardId, placementCollectionId, ...pOwnParams]
       );
       if (res.rowCount === 0) throw new Error("卡片归属不存在或无权限");
     }
@@ -806,8 +890,8 @@ export async function removeCardFromCollectionPlacement(
   const colId = String(collectionId || "").trim();
   if (!cid || !colId) throw new Error("缺少卡片或合集");
 
-  const { sql: uidSql, params: uidParams } = userIdCondition(userId, 3);
-  const uidOnC = uidSql.replace(/\buser_id\b/g, "c.user_id");
+  const { sql: ownSql, params: ownParams } = cardOwnershipCondition(userId, 3);
+  const ownOnC = ownSql.replace(/\buser_id\b/g, "c.user_id");
   const res = await query(
     `DELETE FROM card_placements p
      USING cards c
@@ -815,8 +899,8 @@ export async function removeCardFromCollectionPlacement(
        AND p.card_id = $1
        AND p.collection_id = $2
        AND c.trashed_at IS NULL
-       AND (${uidOnC})`,
-    [cid, colId, ...uidParams]
+       AND (${ownOnC})`,
+    [cid, colId, ...ownParams]
   );
   if (res.rowCount === 0) {
     throw new Error("归属不存在或无权限");
@@ -829,11 +913,11 @@ export async function removeCardFromCollectionPlacement(
  * @param {string} cardId
  */
 export async function deleteCard(userId, cardId) {
-  const { sql: uidSql, params: uidParams } = userIdCondition(userId, 2);
+  const { sql: ownSql, params: ownParams } = cardOwnershipCondition(userId, 2);
   const res = await query(
     `DELETE FROM cards
-     WHERE id = $1 AND (${uidSql})`,
-    [cardId, ...uidParams]
+     WHERE id = $1 AND (${ownSql})`,
+    [cardId, ...ownParams]
   );
   if (res.rowCount === 0) throw new Error("卡片不存在或无权限");
 }

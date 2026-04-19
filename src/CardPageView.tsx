@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
@@ -48,7 +49,28 @@ import {
 } from "./mediaDisplay";
 import { isPdfAttachment } from "./noteMediaPdf";
 import { NOTE_MEDIA_ITEM_DRAG_MIME } from "./noteEditor/noteMediaDragMime";
+import {
+  MOBILE_CHROME_MEDIA,
+  matchesMobileChromeMedia,
+} from "./appkit/appConstants";
 import { parseHeadingsFromStoredNote } from "./noteEditor/plainHtml";
+
+function subscribeCardPageCompactLayout(cb: () => void) {
+  if (typeof window === "undefined") return () => {};
+  const mq = window.matchMedia(MOBILE_CHROME_MEDIA);
+  mq.addEventListener("change", cb);
+  return () => mq.removeEventListener("change", cb);
+}
+
+/** 双击 / 双次轻点空白收键盘时，排除工具栏与可点控件 */
+function gestureTargetAllowsBlankDismiss(t: HTMLElement | null): boolean {
+  return Boolean(
+    t &&
+      !t.closest(
+        "button, a, input, select, textarea, .note-toolbar-wrap, .note-toolbar"
+      )
+  );
+}
 
 /** 自定义属性「链接」：仅允许 http(s)，避免 javascript: 等危险协议 */
 function safeHttpHrefFromPropValue(raw: unknown): string | null {
@@ -514,6 +536,22 @@ export function CardPageView({
 }: CardPageViewProps) {
   const { lang } = useAppUiLang();
   const ui = useAppChrome();
+  /** 与主站 narrowUi / MOBILE_CHROME 一致：小屏全页改为纵向叠放，避免固定侧栏挤扁正文 */
+  const compactLayout = useSyncExternalStore(
+    subscribeCardPageCompactLayout,
+    () => matchesMobileChromeMedia(),
+    () => false
+  );
+  /** 小屏：软键盘占位时隐藏底部附件栏（visualViewport 与 layout viewport 高度差） */
+  const [compactKeyboardHidesAttachments, setCompactKeyboardHidesAttachments] =
+    useState(false);
+  /** 小屏可编辑：焦点在正文编辑区（含工具栏）时隐藏附件，打字即生效、不必等键盘动画 */
+  const [compactEditorAreaFocused, setCompactEditorAreaFocused] =
+    useState(false);
+  /** 小屏：标题栏「属性 / 目录」打开侧栏抽屉 */
+  const [mobileOverlay, setMobileOverlay] = useState<
+    null | "toc" | "props"
+  >(null);
   const [lightbox, setLightbox] = useState<{ index: number } | null>(null);
   const [attachMenu, setAttachMenu] = useState<{
     x: number;
@@ -522,6 +560,7 @@ export function CardPageView({
   } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const editorAreaRef = useRef<HTMLDivElement>(null);
+  const cardPageRootRef = useRef<HTMLDivElement>(null);
   const [showTypePicker, setShowTypePicker] = useState(false);
   const typePickerRef = useRef<HTMLDivElement>(null);
   const [propsPanelOpen, setPropsPanelOpen] = useState(true);
@@ -688,6 +727,245 @@ export function CardPageView({
     []
   );
 
+  /** 小屏全页：空白处双击 / 双次轻点收起键盘（不误伤双击选词、工具栏与按钮） */
+  const scheduleBlurEditorIfNoWordSelection = useCallback(() => {
+    const pm = editorAreaRef.current?.querySelector(
+      ".ProseMirror"
+    ) as HTMLElement | null;
+    if (!pm) return;
+    const ae = document.activeElement;
+    if (!(ae instanceof HTMLElement) || !pm.contains(ae)) return;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const ae2 = document.activeElement;
+        if (!(ae2 instanceof HTMLElement) || !pm.contains(ae2)) return;
+        const sel = window.getSelection();
+        if (sel && sel.rangeCount > 0 && !sel.getRangeAt(0).collapsed) return;
+        ae2.blur();
+      });
+    });
+  }, []);
+
+  const onCardPageDoubleClick = useCallback(
+    (e: ReactMouseEvent<HTMLDivElement>) => {
+      if (!compactLayout || !canEdit) return;
+      if (!gestureTargetAllowsBlankDismiss(e.target as HTMLElement | null))
+        return;
+      scheduleBlurEditorIfNoWordSelection();
+    },
+    [compactLayout, canEdit, scheduleBlurEditorIfNoWordSelection]
+  );
+
+  useEffect(() => {
+    if (!compactLayout || !canEdit) return;
+    const root = cardPageRootRef.current;
+    if (!root) return;
+
+    let lastEnd = 0;
+    let lastX = 0;
+    let lastY = 0;
+    let moved = false;
+    const MOVE_PX = 14;
+    const DOUBLE_MS = 380;
+    const DOUBLE_DIST = 44;
+
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length !== 1) return;
+      moved = false;
+      lastX = e.touches[0].clientX;
+      lastY = e.touches[0].clientY;
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      if (e.touches.length !== 1) return;
+      const x = e.touches[0].clientX;
+      const y = e.touches[0].clientY;
+      if (Math.hypot(x - lastX, y - lastY) > MOVE_PX) moved = true;
+    };
+    const onTouchEnd = (e: TouchEvent) => {
+      const touch = e.changedTouches[0];
+      if (!touch) return;
+      if (moved) {
+        lastEnd = 0;
+        return;
+      }
+      const now = Date.now();
+      const x = touch.clientX;
+      const y = touch.clientY;
+      const isDouble =
+        lastEnd > 0 &&
+        now - lastEnd < DOUBLE_MS &&
+        Math.hypot(x - lastX, y - lastY) < DOUBLE_DIST;
+      lastEnd = now;
+      lastX = x;
+      lastY = y;
+      if (!isDouble) return;
+      const el = document.elementFromPoint(x, y) as HTMLElement | null;
+      if (!gestureTargetAllowsBlankDismiss(el)) return;
+      scheduleBlurEditorIfNoWordSelection();
+    };
+
+    const onTouchCancel = () => {
+      lastEnd = 0;
+      moved = false;
+    };
+
+    root.addEventListener("touchstart", onTouchStart, { passive: true });
+    root.addEventListener("touchmove", onTouchMove, { passive: true });
+    root.addEventListener("touchend", onTouchEnd, { passive: true });
+    root.addEventListener("touchcancel", onTouchCancel, { passive: true });
+    return () => {
+      root.removeEventListener("touchstart", onTouchStart);
+      root.removeEventListener("touchmove", onTouchMove);
+      root.removeEventListener("touchend", onTouchEnd);
+      root.removeEventListener("touchcancel", onTouchCancel);
+    };
+  }, [compactLayout, canEdit, card.id, scheduleBlurEditorIfNoWordSelection]);
+
+  /** 小屏全页：正文区向下滚动时收起键盘（失焦 ProseMirror） */
+  useEffect(() => {
+    if (!compactLayout || !canEdit) return;
+    const root = editorAreaRef.current;
+    if (!root) return;
+
+    let detachScroll: (() => void) | null = null;
+    let detachTouch: (() => void) | null = null;
+    let pmEl: HTMLElement | null = null;
+    let lastScrollTop = 0;
+    /** 累计向下滚动：iOS 快速滑时常连续多帧小增量，单帧小于约 12px 会永远不收键盘 */
+    let accScrollDown = 0;
+
+    const blurEditorIfFocused = (pm: HTMLElement) => {
+      const ae = document.activeElement;
+      if (!(ae instanceof HTMLElement)) return;
+      if (!pm.contains(ae)) return;
+      ae.blur();
+      accScrollDown = 0;
+    };
+
+    const bind = (pm: HTMLElement) => {
+      detachScroll?.();
+      pmEl = pm;
+      lastScrollTop = pm.scrollTop;
+      accScrollDown = 0;
+      const onScroll = () => {
+        const t = pm.scrollTop;
+        const delta = t - lastScrollTop;
+        lastScrollTop = t;
+        if (delta <= 0) {
+          accScrollDown = 0;
+          return;
+        }
+        accScrollDown += delta;
+        if (accScrollDown < 6) return;
+        blurEditorIfFocused(pm);
+      };
+      pm.addEventListener("scroll", onScroll, { passive: true });
+      detachScroll = () => {
+        pm.removeEventListener("scroll", onScroll);
+        detachScroll = null;
+      };
+    };
+
+    /** 手指快速上划（内容向下滚）时尽早失焦，不必等 scrollTop 追上 */
+    let touchY0: number | null = null;
+    const onTouchStart = (e: TouchEvent) => {
+      touchY0 = e.touches[0]?.clientY ?? null;
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      if (touchY0 == null) return;
+      const y = e.touches[0]?.clientY;
+      if (y == null) return;
+      if (touchY0 - y < 20) return;
+      const pm = root.querySelector(".ProseMirror") as HTMLElement | null;
+      if (pm) blurEditorIfFocused(pm);
+      touchY0 = y;
+    };
+    const onTouchEnd = () => {
+      touchY0 = null;
+    };
+    root.addEventListener("touchstart", onTouchStart, { passive: true });
+    root.addEventListener("touchmove", onTouchMove, { passive: true });
+    root.addEventListener("touchend", onTouchEnd, { passive: true });
+    root.addEventListener("touchcancel", onTouchEnd, { passive: true });
+    detachTouch = () => {
+      root.removeEventListener("touchstart", onTouchStart);
+      root.removeEventListener("touchmove", onTouchMove);
+      root.removeEventListener("touchend", onTouchEnd);
+      root.removeEventListener("touchcancel", onTouchEnd);
+      detachTouch = null;
+    };
+
+    const sync = () => {
+      const pm = root.querySelector(".ProseMirror") as HTMLElement | null;
+      if (pm === pmEl) return;
+      detachScroll?.();
+      pmEl = pm;
+      if (pm) bind(pm);
+    };
+
+    sync();
+    const mo = new MutationObserver(sync);
+    mo.observe(root, { childList: true, subtree: true });
+    return () => {
+      mo.disconnect();
+      detachScroll?.();
+      detachTouch?.();
+    };
+  }, [compactLayout, canEdit, card.id]);
+
+  useEffect(() => {
+    if (!compactLayout) {
+      setCompactKeyboardHidesAttachments(false);
+      return;
+    }
+    const vv = window.visualViewport;
+    if (!vv) return;
+
+    const KEYBOARD_HEIGHT_DELTA_PX = 72;
+
+    const sync = () => {
+      const delta = window.innerHeight - vv.height;
+      setCompactKeyboardHidesAttachments(delta > KEYBOARD_HEIGHT_DELTA_PX);
+    };
+
+    sync();
+    vv.addEventListener("resize", sync);
+    vv.addEventListener("scroll", sync);
+    window.addEventListener("resize", sync);
+    return () => {
+      vv.removeEventListener("resize", sync);
+      vv.removeEventListener("scroll", sync);
+      window.removeEventListener("resize", sync);
+    };
+  }, [compactLayout]);
+
+  useEffect(() => {
+    if (!compactLayout || !canEdit) {
+      setCompactEditorAreaFocused(false);
+      return;
+    }
+    const root = editorAreaRef.current;
+    if (!root) return;
+
+    const contains = (n: EventTarget | null) =>
+      n instanceof Node && root.contains(n);
+
+    const onFocusIn = (e: FocusEvent) => {
+      if (contains(e.target)) setCompactEditorAreaFocused(true);
+    };
+    const onFocusOut = (e: FocusEvent) => {
+      if (!contains(e.relatedTarget)) setCompactEditorAreaFocused(false);
+    };
+
+    root.addEventListener("focusin", onFocusIn);
+    root.addEventListener("focusout", onFocusOut);
+    return () => {
+      root.removeEventListener("focusin", onFocusIn);
+      root.removeEventListener("focusout", onFocusOut);
+      setCompactEditorAreaFocused(false);
+    };
+  }, [compactLayout, canEdit, card.id]);
+
   useEffect(() => {
     setLightbox((lb) => {
       if (!lb) return lb;
@@ -737,6 +1015,22 @@ export function CardPageView({
   }, [lightbox]);
 
   useEffect(() => {
+    if (!compactLayout) setMobileOverlay(null);
+  }, [compactLayout]);
+
+  useEffect(() => {
+    if (!compactLayout || !mobileOverlay) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setMobileOverlay(null);
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [compactLayout, mobileOverlay]);
+
+  useEffect(() => {
     if (!showTypePicker) return;
     function onDown(e: PointerEvent) {
       if (
@@ -779,6 +1073,268 @@ export function CardPageView({
     };
     updateCustomProps([...customProps, newProp]);
     setShowTypePicker(false);
+  }
+
+  function renderPropsFieldsBlock() {
+    return (
+      <>
+          <div className="card-page__prop-row card-page__prop-row--tags">
+            <span className="card-page__prop-label">标签</span>
+            <div className="card-page__prop-content">
+              <CardPageTagsPanel
+                cardId={card.id}
+                tags={card.tags}
+                tagOptions={tagLibrary}
+                canEdit={canEdit}
+                onCommit={(tags) => setCardTags(colId, card.id, tags)}
+              />
+            </div>
+          </div>
+
+          <div className="card-page__prop-row">
+            <span className="card-page__prop-label">提醒</span>
+            <div className="card-page__prop-content">
+              {hasReminder ? (
+                <button
+                  type="button"
+                  className="card-page__prop-link"
+                  onClick={() =>
+                    setReminderPicker({ kind: "card", colId, cardId: card.id })
+                  }
+                >
+                  {card.reminderOn}
+                  {card.reminderTime ? ` ${card.reminderTime}` : ""}
+                  {card.reminderNote ? ` · ${card.reminderNote}` : ""}
+                </button>
+              ) : canEdit ? (
+                <button
+                  type="button"
+                  className="card-page__prop-link card-page__prop-link--placeholder"
+                  onClick={() =>
+                    setReminderPicker({ kind: "card", colId, cardId: card.id })
+                  }
+                >
+                  添加提醒…
+                </button>
+              ) : (
+                <span className="card-page__prop-empty">—</span>
+              )}
+            </div>
+          </div>
+
+          <div className="card-page__prop-row">
+            <span className="card-page__prop-label">合集</span>
+            <div className="card-page__prop-content card-page__prop-content--row">
+              {colIds.map((id) => {
+                const pathLabel = collectionPathLabel(collections, id);
+                const showRemove = Boolean(
+                  canEdit && onRemoveCardFromCollection
+                );
+                return (
+                  <span
+                    key={id}
+                    className={`card-page__prop-chip card-page__prop-chip--col${
+                      showRemove ? " card-page__prop-chip--removable" : ""
+                    }`}
+                  >
+                    <span
+                      className="card-page__prop-chip-col-text"
+                      title={pathLabel}
+                    >
+                      {pathLabel}
+                    </span>
+                    {showRemove ? (
+                      <button
+                        type="button"
+                        className="card-page__tags-pill-remove"
+                        aria-label={ui.cardRemoveFromCollectionChipAria(
+                          pathLabel
+                        )}
+                        onClick={() => onRemoveCardFromCollection?.(id)}
+                      >
+                        ×
+                      </button>
+                    ) : null}
+                  </span>
+                );
+              })}
+              {canEdit && (
+                <button
+                  type="button"
+                  className="card-page__prop-link card-page__prop-link--add"
+                  onClick={() =>
+                    openAddToCollectionPicker(colId, card.id)
+                  }
+                >
+                  + 添加至合集
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="card-page__prop-row">
+            <span className="card-page__prop-label">相关笔记</span>
+            <div className="card-page__prop-content">
+              {relatedCount > 0 ? (
+                <button
+                  type="button"
+                  className="card-page__prop-link"
+                  onClick={() =>
+                    setRelatedPanel({ colId, cardId: card.id })
+                  }
+                >
+                  {relatedCount} 条相关
+                </button>
+              ) : canEdit ? (
+                <button
+                  type="button"
+                  className="card-page__prop-link card-page__prop-link--placeholder"
+                  onClick={() =>
+                    setRelatedPanel({ colId, cardId: card.id })
+                  }
+                >
+                  添加关联…
+                </button>
+              ) : (
+                <span className="card-page__prop-empty">—</span>
+              )}
+            </div>
+          </div>
+
+          {customProps.map((prop) => (
+            <div
+              key={prop.id}
+              className="card-page__prop-row card-page__prop-row--custom"
+            >
+              <div className="card-page__prop-label-wrap">
+                <span className="card-page__prop-type-icon">
+                  {PROP_TYPE_ICONS[prop.type]}
+                </span>
+                {canEdit ? (
+                  <input
+                    type="text"
+                    className="card-page__prop-name-input"
+                    defaultValue={prop.name}
+                    onBlur={(e) => {
+                      const name = e.target.value.trim() || prop.name;
+                      updateCustomProps(
+                        customProps.map((p) =>
+                          p.id === prop.id ? { ...p, name } : p
+                        )
+                      );
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter")
+                        (e.target as HTMLInputElement).blur();
+                    }}
+                  />
+                ) : (
+                  <span className="card-page__prop-label">{prop.name}</span>
+                )}
+              </div>
+              <div className="card-page__prop-content">
+                <PropValueEditor
+                  prop={prop}
+                  canEdit={canEdit}
+                  onChangeValue={(v) =>
+                    updateCustomProps(
+                      customProps.map((p) =>
+                        p.id === prop.id ? { ...p, value: v } : p
+                      )
+                    )
+                  }
+                  onChangeOptions={(opts) =>
+                    updateCustomProps(
+                      customProps.map((p) =>
+                        p.id === prop.id ? { ...p, options: opts } : p
+                      )
+                    )
+                  }
+                />
+              </div>
+              {canEdit && (
+                <button
+                  type="button"
+                  className="card-page__prop-delete"
+                  onClick={() =>
+                    updateCustomProps(customProps.filter((p) => p.id !== prop.id))
+                  }
+                  title="删除属性"
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          ))}
+
+          {canEdit && (
+            <div className="card-page__prop-add-wrap" ref={typePickerRef}>
+              <button
+                type="button"
+                className="card-page__prop-add"
+                onClick={() => setShowTypePicker((v) => !v)}
+              >
+                + 添加属性
+              </button>
+              {showTypePicker && (
+                <div className="card-page__prop-type-menu">
+                  {(
+                    Object.keys(PROP_TYPE_LABELS) as CardPropertyType[]
+                  ).map((type) => (
+                    <button
+                      key={type}
+                      type="button"
+                      className="card-page__prop-type-option"
+                      onClick={() => addProperty(type)}
+                    >
+                      <span className="card-page__prop-type-icon">
+                        {PROP_TYPE_ICONS[type]}
+                      </span>
+                      {PROP_TYPE_LABELS[type]}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+      </>
+    );
+  }
+
+  function renderTocNavBlock() {
+    return (
+      <nav className="card-page__toc" aria-label="正文目录">
+        {tocHeadings.length === 0 ? (
+          <span className="card-page__toc-empty">无标题</span>
+        ) : (
+          tocHeadings.map((h, i) => (
+            <button
+              key={`toc-${i}`}
+              type="button"
+              className={
+                "card-page__toc-item" +
+                (i === tocActiveClamped
+                  ? " card-page__toc-item--active"
+                  : "")
+              }
+              aria-current={
+                i === tocActiveClamped ? "location" : undefined
+              }
+              onClick={() => scrollToHeading(i)}
+            >
+              <span
+                className="card-page__toc-item-text"
+                style={{
+                  paddingLeft: `${Math.max(0, h.level - 1) * 12}px`,
+                }}
+              >
+                {h.text}
+              </span>
+            </button>
+          ))
+        )}
+      </nav>
+    );
   }
 
   const lbIdx =
@@ -1041,12 +1597,21 @@ export function CardPageView({
     );
 
   return (
-    <div className="card-page">
+    <div
+      ref={cardPageRootRef}
+      className={
+        "card-page" + (compactLayout ? " card-page--compact" : "")
+      }
+      onDoubleClick={
+        compactLayout && canEdit ? onCardPageDoubleClick : undefined
+      }
+    >
       <div className="card-page__header">
         <button
           type="button"
           className="card-page__back"
           onClick={onClose}
+          aria-label={ui.uiBack}
         >
           <svg
             width="16"
@@ -1063,324 +1628,129 @@ export function CardPageView({
               strokeLinejoin="round"
             />
           </svg>
-          返回
         </button>
         <span className="card-page__time">
           {formatCardTimeLabel(card, lang)}
         </span>
+        {compactLayout ? (
+          <nav
+            className="card-page__header-panels"
+            aria-label="属性与目录"
+          >
+            <button
+              type="button"
+              className={
+                "card-page__header-panel-btn" +
+                (mobileOverlay === "props" ? " is-active" : "")
+              }
+              aria-pressed={mobileOverlay === "props"}
+              onClick={() =>
+                setMobileOverlay((o) => (o === "props" ? null : "props"))
+              }
+            >
+              属性
+            </button>
+            <button
+              type="button"
+              className={
+                "card-page__header-panel-btn" +
+                (mobileOverlay === "toc" ? " is-active" : "")
+              }
+              aria-pressed={mobileOverlay === "toc"}
+              onClick={() =>
+                setMobileOverlay((o) => (o === "toc" ? null : "toc"))
+              }
+            >
+              目录
+            </button>
+          </nav>
+        ) : null}
+        {compactLayout ? (
+          <button
+            type="button"
+            className="card-page__done"
+            onClick={() => {
+              setMobileOverlay(null);
+              onClose();
+            }}
+          >
+            {ui.done}
+          </button>
+        ) : null}
       </div>
 
       <div className="card-page__body">
-        <div className="card-page__props" style={{ width: propsWidth, flexBasis: propsWidth }}>
-          <div className="sidebar__section-row sidebar__section-row--collapsible card-page__props-sidebar-row">
-            <button
-              type="button"
-              className="sidebar__section-hit"
-              aria-expanded={propsPanelOpen}
-              onClick={() => setPropsPanelOpen((v) => !v)}
-            >
-              <span
-                className={
-                  "sidebar__chevron" + (propsPanelOpen ? " is-expanded" : "")
-                }
-                aria-hidden
-              >
-                <span className="sidebar__chevron-icon">›</span>
-              </span>
-              <span className="sidebar__section">属性</span>
-            </button>
-          </div>
-          {propsPanelOpen ? (
-            <div className="card-page__props-panel-inner">
-          {/* 标签 */}
-          <div className="card-page__prop-row card-page__prop-row--tags">
-            <span className="card-page__prop-label">标签</span>
-            <div className="card-page__prop-content">
-              <CardPageTagsPanel
-                cardId={card.id}
-                tags={card.tags}
-                tagOptions={tagLibrary}
-                canEdit={canEdit}
-                onCommit={(tags) => setCardTags(colId, card.id, tags)}
-              />
-            </div>
-          </div>
-
-          {/* 提醒 */}
-          <div className="card-page__prop-row">
-            <span className="card-page__prop-label">提醒</span>
-            <div className="card-page__prop-content">
-              {hasReminder ? (
-                <button
-                  type="button"
-                  className="card-page__prop-link"
-                  onClick={() =>
-                    setReminderPicker({ kind: "card", colId, cardId: card.id })
-                  }
-                >
-                  {card.reminderOn}
-                  {card.reminderTime ? ` ${card.reminderTime}` : ""}
-                  {card.reminderNote ? ` · ${card.reminderNote}` : ""}
-                </button>
-              ) : canEdit ? (
-                <button
-                  type="button"
-                  className="card-page__prop-link card-page__prop-link--placeholder"
-                  onClick={() =>
-                    setReminderPicker({ kind: "card", colId, cardId: card.id })
-                  }
-                >
-                  添加提醒…
-                </button>
-              ) : (
-                <span className="card-page__prop-empty">—</span>
-              )}
-            </div>
-          </div>
-
-          {/* 合集 */}
-          <div className="card-page__prop-row">
-            <span className="card-page__prop-label">合集</span>
-            <div className="card-page__prop-content card-page__prop-content--row">
-              {colIds.map((id) => {
-                const pathLabel = collectionPathLabel(collections, id);
-                const showRemove = Boolean(
-                  canEdit && onRemoveCardFromCollection
-                );
-                return (
-                  <span
-                    key={id}
-                    className={`card-page__prop-chip card-page__prop-chip--col${
-                      showRemove ? " card-page__prop-chip--removable" : ""
-                    }`}
-                  >
-                    <span
-                      className="card-page__prop-chip-col-text"
-                      title={pathLabel}
-                    >
-                      {pathLabel}
-                    </span>
-                    {showRemove ? (
-                      <button
-                        type="button"
-                        className="card-page__tags-pill-remove"
-                        aria-label={ui.cardRemoveFromCollectionChipAria(
-                          pathLabel
-                        )}
-                        onClick={() => onRemoveCardFromCollection?.(id)}
-                      >
-                        ×
-                      </button>
-                    ) : null}
-                  </span>
-                );
-              })}
-              {canEdit && (
-                <button
-                  type="button"
-                  className="card-page__prop-link card-page__prop-link--add"
-                  onClick={() =>
-                    openAddToCollectionPicker(colId, card.id)
-                  }
-                >
-                  + 添加至合集
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* 相关笔记 */}
-          <div className="card-page__prop-row">
-            <span className="card-page__prop-label">相关笔记</span>
-            <div className="card-page__prop-content">
-              {relatedCount > 0 ? (
-                <button
-                  type="button"
-                  className="card-page__prop-link"
-                  onClick={() =>
-                    setRelatedPanel({ colId, cardId: card.id })
-                  }
-                >
-                  {relatedCount} 条相关
-                </button>
-              ) : canEdit ? (
-                <button
-                  type="button"
-                  className="card-page__prop-link card-page__prop-link--placeholder"
-                  onClick={() =>
-                    setRelatedPanel({ colId, cardId: card.id })
-                  }
-                >
-                  添加关联…
-                </button>
-              ) : (
-                <span className="card-page__prop-empty">—</span>
-              )}
-            </div>
-          </div>
-
-          {/* 自定义属性 */}
-          {customProps.map((prop) => (
+        {!compactLayout ? (
+          <>
             <div
-              key={prop.id}
-              className="card-page__prop-row card-page__prop-row--custom"
+              className="card-page__props"
+              style={{ width: propsWidth, flexBasis: propsWidth }}
             >
-              <div className="card-page__prop-label-wrap">
-                <span className="card-page__prop-type-icon">
-                  {PROP_TYPE_ICONS[prop.type]}
-                </span>
-                {canEdit ? (
-                  <input
-                    type="text"
-                    className="card-page__prop-name-input"
-                    defaultValue={prop.name}
-                    onBlur={(e) => {
-                      const name = e.target.value.trim() || prop.name;
-                      updateCustomProps(
-                        customProps.map((p) =>
-                          p.id === prop.id ? { ...p, name } : p
-                        )
-                      );
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter")
-                        (e.target as HTMLInputElement).blur();
-                    }}
-                  />
-                ) : (
-                  <span className="card-page__prop-label">{prop.name}</span>
-                )}
-              </div>
-              <div className="card-page__prop-content">
-                <PropValueEditor
-                  prop={prop}
-                  canEdit={canEdit}
-                  onChangeValue={(v) =>
-                    updateCustomProps(
-                      customProps.map((p) =>
-                        p.id === prop.id ? { ...p, value: v } : p
-                      )
-                    )
-                  }
-                  onChangeOptions={(opts) =>
-                    updateCustomProps(
-                      customProps.map((p) =>
-                        p.id === prop.id ? { ...p, options: opts } : p
-                      )
-                    )
-                  }
-                />
-              </div>
-              {canEdit && (
+              <div className="sidebar__section-row sidebar__section-row--collapsible card-page__props-sidebar-row">
                 <button
                   type="button"
-                  className="card-page__prop-delete"
-                  onClick={() =>
-                    updateCustomProps(customProps.filter((p) => p.id !== prop.id))
-                  }
-                  title="删除属性"
+                  className="sidebar__section-hit"
+                  aria-expanded={propsPanelOpen}
+                  onClick={() => setPropsPanelOpen((v) => !v)}
                 >
-                  ×
-                </button>
-              )}
-            </div>
-          ))}
-
-          {/* 添加属性 */}
-          {canEdit && (
-            <div className="card-page__prop-add-wrap" ref={typePickerRef}>
-              <button
-                type="button"
-                className="card-page__prop-add"
-                onClick={() => setShowTypePicker((v) => !v)}
-              >
-                + 添加属性
-              </button>
-              {showTypePicker && (
-                <div className="card-page__prop-type-menu">
-                  {(
-                    Object.keys(PROP_TYPE_LABELS) as CardPropertyType[]
-                  ).map((type) => (
-                    <button
-                      key={type}
-                      type="button"
-                      className="card-page__prop-type-option"
-                      onClick={() => addProperty(type)}
-                    >
-                      <span className="card-page__prop-type-icon">
-                        {PROP_TYPE_ICONS[type]}
-                      </span>
-                      {PROP_TYPE_LABELS[type]}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-            </div>
-          ) : null}
-
-          <div className="sidebar__section-row sidebar__section-row--collapsible card-page__props-sidebar-row card-page__props-sidebar-row--toc">
-            <button
-              type="button"
-              className="sidebar__section-hit"
-              aria-expanded={tocPanelOpen}
-              onClick={() => setTocPanelOpen((v) => !v)}
-            >
-              <span
-                className={
-                  "sidebar__chevron" + (tocPanelOpen ? " is-expanded" : "")
-                }
-                aria-hidden
-              >
-                <span className="sidebar__chevron-icon">›</span>
-              </span>
-              <span className="sidebar__section">目录</span>
-            </button>
-          </div>
-          {tocPanelOpen ? (
-            <nav className="card-page__toc" aria-label="正文目录">
-              {tocHeadings.length === 0 ? (
-                <span className="card-page__toc-empty">无标题</span>
-              ) : (
-                tocHeadings.map((h, i) => (
-                  <button
-                    key={`toc-${i}`}
-                    type="button"
+                  <span
                     className={
-                      "card-page__toc-item" +
-                      (i === tocActiveClamped
-                        ? " card-page__toc-item--active"
-                        : "")
+                      "sidebar__chevron" +
+                      (propsPanelOpen ? " is-expanded" : "")
                     }
-                    aria-current={
-                      i === tocActiveClamped ? "location" : undefined
-                    }
-                    onClick={() => scrollToHeading(i)}
+                    aria-hidden
                   >
-                    <span
-                      className="card-page__toc-item-text"
-                      style={{
-                        paddingLeft: `${Math.max(0, h.level - 1) * 12}px`,
-                      }}
-                    >
-                      {h.text}
-                    </span>
-                  </button>
-                ))
-              )}
-            </nav>
-          ) : null}
-        </div>
+                    <span className="sidebar__chevron-icon">›</span>
+                  </span>
+                  <span className="sidebar__section">属性</span>
+                </button>
+              </div>
+              {propsPanelOpen ? (
+                <div className="card-page__props-panel-inner">
+                  {renderPropsFieldsBlock()}
+                </div>
+              ) : null}
+
+              <div className="sidebar__section-row sidebar__section-row--collapsible card-page__props-sidebar-row card-page__props-sidebar-row--toc">
+                <button
+                  type="button"
+                  className="sidebar__section-hit"
+                  aria-expanded={tocPanelOpen}
+                  onClick={() => setTocPanelOpen((v) => !v)}
+                >
+                  <span
+                    className={
+                      "sidebar__chevron" +
+                      (tocPanelOpen ? " is-expanded" : "")
+                    }
+                    aria-hidden
+                  >
+                    <span className="sidebar__chevron-icon">›</span>
+                  </span>
+                  <span className="sidebar__section">目录</span>
+                </button>
+              </div>
+              {tocPanelOpen ? (
+                renderTocNavBlock()
+              ) : null}
+            </div>
+
+            <div
+              className="card-page__divider"
+              onPointerDown={onDividerPointerDown}
+              onPointerMove={onDividerPointerMove}
+              onPointerUp={onDividerPointerUp}
+            />
+          </>
+        ) : null}
 
         <div
-          className="card-page__divider"
-          onPointerDown={onDividerPointerDown}
-          onPointerMove={onDividerPointerMove}
-          onPointerUp={onDividerPointerUp}
-        />
-
-        <div className="card-page__center">
+          className={
+            "card-page__main" +
+            (compactLayout ? " card-page__main--compact" : "")
+          }
+        >
+          <div className="card-page__center">
           <div className="card-page__editor-area" ref={editorAreaRef}>
             <NoteCardTiptap
               id={card.id}
@@ -1400,7 +1770,13 @@ export function CardPageView({
           </div>
           {media.length > 0 || canAttachMedia ? (
             <aside
-              className="card-page__attachments-rail"
+              className={
+                "card-page__attachments-rail" +
+                (compactLayout &&
+                (compactKeyboardHidesAttachments || compactEditorAreaFocused)
+                  ? " card-page__attachments-rail--keyboard-hidden"
+                  : "")
+              }
               aria-label="附件"
             >
               <div className="card-page__attachments-rail-scroll">
@@ -1435,13 +1811,14 @@ export function CardPageView({
                   <div
                     key={item.url}
                     className={
-                      canEdit
-                        ? "card-page__attachment card-page__attachment--draggable"
-                        : "card-page__attachment"
+                      "card-page__attachment" +
+                      (canEdit && !compactLayout
+                        ? " card-page__attachment--draggable"
+                        : "")
                     }
-                    draggable={canEdit}
+                    draggable={Boolean(canEdit && !compactLayout)}
                     onDragStart={(e) => {
-                      if (!canEdit) return;
+                      if (!canEdit || compactLayout) return;
                       if (
                         (e.target as HTMLElement).closest(
                           ".card-page__attachment-remove"
@@ -1496,7 +1873,61 @@ export function CardPageView({
             </aside>
           ) : null}
         </div>
+        </div>
       </div>
+      {compactLayout && mobileOverlay ? (
+        <>
+          <div
+            className="card-page__sheet-backdrop"
+            role="presentation"
+            onClick={() => setMobileOverlay(null)}
+          />
+          {mobileOverlay === "toc" ? (
+            <aside
+              className="card-page__sheet card-page__sheet--from-left is-open"
+              aria-label="正文目录"
+            >
+              <div className="card-page__sheet-head">
+                <span className="card-page__sheet-title">目录</span>
+                <button
+                  type="button"
+                  className="card-page__sheet-close"
+                  aria-label={ui.uiClose}
+                  onClick={() => setMobileOverlay(null)}
+                >
+                  ×
+                </button>
+              </div>
+              <div className="card-page__sheet-body">
+                {renderTocNavBlock()}
+              </div>
+            </aside>
+          ) : null}
+          {mobileOverlay === "props" ? (
+            <aside
+              className="card-page__sheet card-page__sheet--from-right is-open"
+              aria-label="笔记属性"
+            >
+              <div className="card-page__sheet-head">
+                <span className="card-page__sheet-title">属性</span>
+                <button
+                  type="button"
+                  className="card-page__sheet-close"
+                  aria-label={ui.uiClose}
+                  onClick={() => setMobileOverlay(null)}
+                >
+                  ×
+                </button>
+              </div>
+              <div className="card-page__sheet-body card-page__sheet-body--props">
+                <div className="card-page__props-panel-inner">
+                  {renderPropsFieldsBlock()}
+                </div>
+              </div>
+            </aside>
+          ) : null}
+        </>
+      ) : null}
       {lightboxPortal}
       {attachMenuPortal}
     </div>

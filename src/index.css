@@ -54,6 +54,11 @@ body,
   margin: 0;
 }
 
+/* 与 body 一致，避免 iOS 底部安全区等露出默认白底与主区灰底分层 */
+html {
+  background: var(--vp-c-bg-soft);
+}
+
 body {
   font-family: var(--mikujar-font-ui);
   background: var(--vp-c-bg-soft);

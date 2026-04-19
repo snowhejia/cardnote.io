@@ -1,8 +1,11 @@
-import type {
-  Dispatch,
-  DragEvent,
-  MutableRefObject,
-  SetStateAction,
+import {
+  type Dispatch,
+  type DragEvent,
+  type MutableRefObject,
+  type SetStateAction,
+  useCallback,
+  useRef,
+  useSyncExternalStore,
 } from "react";
 import type { AppDataMode } from "../appDataModeStorage";
 import { useAppChrome } from "../i18n/useAppChrome";
@@ -28,6 +31,17 @@ import {
   persistNoteCardDropToRemote,
   readNoteCardDragPayload,
 } from "./noteCardDrag";
+import {
+  MOBILE_CHROME_MEDIA,
+  matchesMobileChromeMedia,
+} from "./appConstants";
+
+function subscribeMobileChromeMedia(cb: () => void) {
+  if (typeof window === "undefined") return () => {};
+  const mq = window.matchMedia(MOBILE_CHROME_MEDIA);
+  mq.addEventListener("change", cb);
+  return () => mq.removeEventListener("change", cb);
+}
 
 export type NoteTimelineCardProps = {
   card: NoteCard;
@@ -145,10 +159,44 @@ export function NoteTimelineCard(p: NoteTimelineCardProps) {
   const hasGallery = media.length > 0 || mediaUploadPending;
   const reminderBesideTime = formatCardReminderBesideTime(card, lang);
   const noteKey = `${colId}-${card.id}`;
+  /** 手机端暂时隐藏「⋯」内「笔记详情」；全页入口：双击正文或灰条双击 */
+  const mobileChromeUi = useSyncExternalStore(
+    subscribeMobileChromeMedia,
+    () => matchesMobileChromeMedia(),
+    () => false
+  );
+  const showNoteDetailFullPageInMenu = !mobileChromeUi;
+  const showCardOverflowMenu = showNoteDetailFullPageInMenu || canEdit;
   const dropEdgeActive =
     cardDropMarker !== null &&
     cardDropMarker.colId === colId &&
     cardDropMarker.cardId === card.id;
+
+  const mobileTextDblTapRef = useRef<{
+    t: number;
+    x: number;
+    y: number;
+  } | null>(null);
+  const onCardTextTouchEnd = useCallback(
+    (e: React.TouchEvent<HTMLDivElement>) => {
+      if (!mobileChromeUi) return;
+      const touch = e.changedTouches[0];
+      if (!touch) return;
+      const t = e.timeStamp;
+      const x = touch.clientX;
+      const y = touch.clientY;
+      const prev = mobileTextDblTapRef.current;
+      mobileTextDblTapRef.current = { t, x, y };
+      if (!prev) return;
+      if (t - prev.t > 380) return;
+      if (Math.hypot(x - prev.x, y - prev.y) > 52) return;
+      mobileTextDblTapRef.current = null;
+      openCardPage(colId, card.id);
+      e.preventDefault();
+      e.stopPropagation();
+    },
+    [mobileChromeUi, colId, card.id, openCardPage]
+  );
 
   return (
     <li
@@ -366,6 +414,7 @@ export function NoteTimelineCard(p: NoteTimelineCardProps) {
                   <path d="M1 1h5v1.5H2.5V5H1V1zm9 0h5v4h-1.5V2.5H10V1zM1 10h1.5v2.5H5V14H1v-4zM15 10h-1.5v2.5H11V14H15v-4z" />
                 </svg>
               </button>
+              {showCardOverflowMenu ? (
               <div
                 className="card__menu-root"
                 data-card-menu-root={card.id}
@@ -389,6 +438,7 @@ export function NoteTimelineCard(p: NoteTimelineCardProps) {
                     role="menu"
                     aria-orientation="vertical"
                   >
+                    {showNoteDetailFullPageInMenu ? (
                     <button
                       type="button"
                       className={
@@ -403,6 +453,7 @@ export function NoteTimelineCard(p: NoteTimelineCardProps) {
                     >
                       {c.uiCardNoteDetailFullPage}
                     </button>
+                    ) : null}
                     {canEdit ? (
                       <button
                         type="button"
@@ -487,22 +538,28 @@ export function NoteTimelineCard(p: NoteTimelineCardProps) {
                   </div>
                 )}
               </div>
+              ) : null}
             </div>
           </div>
-          <NoteCardTiptap
-            id={`card-text-${card.id}`}
-            value={card.text}
-            canEdit={canEdit}
-            timelineBodyHeadings
-            onChange={(next) => setCardText(colId, card.id, next)}
-            onPasteFiles={
-              canEdit && canAttachMedia
-                ? (files) => {
-                    void uploadFilesToCard(colId, card.id, files);
-                  }
-                : undefined
-            }
-          />
+          <div
+            className="card__text-dbltap-host"
+            onTouchEnd={onCardTextTouchEnd}
+          >
+            <NoteCardTiptap
+              id={`card-text-${card.id}`}
+              value={card.text}
+              canEdit={canEdit}
+              timelineBodyHeadings
+              onChange={(next) => setCardText(colId, card.id, next)}
+              onPasteFiles={
+                canEdit && canAttachMedia
+                  ? (files) => {
+                      void uploadFilesToCard(colId, card.id, files);
+                    }
+                  : undefined
+              }
+            />
+          </div>
         </div>
         {hasGallery ? (
           <CardGallery

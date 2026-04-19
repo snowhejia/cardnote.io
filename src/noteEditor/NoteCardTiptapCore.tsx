@@ -1,12 +1,17 @@
 import Highlight from "@tiptap/extension-highlight";
-import Underline from "@tiptap/extension-underline";
 import TextAlign from "@tiptap/extension-text-align";
 import Superscript from "@tiptap/extension-superscript";
 import Subscript from "@tiptap/extension-subscript";
 import { useEditor, EditorContent } from "@tiptap/react";
 import type { Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
-import { useEffect, useMemo, useRef } from "react";
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+} from "react";
 import { useAppChrome } from "../i18n/useAppChrome";
 import type { NoteMediaItem } from "../types";
 import { filesFromDataTransfer } from "../filesFromDataTransfer";
@@ -19,6 +24,7 @@ import {
 import {
   hasNoteMediaDragPayload,
   parseNoteMediaDragPayload,
+  type NoteMediaDragPayload,
 } from "./noteMediaDragMime";
 import { noteBodyToHtml } from "./plainHtml";
 
@@ -375,19 +381,107 @@ function NoteEditorToolbar({ editor }: { editor: Editor }) {
 
 /* ——— 主编辑器组件 ——— */
 
+export type NoteCardTiptapEditorHandle = {
+  /** 将附件栏媒体插入到视口坐标对应正文位置（桌面拖放） */
+  insertNoteMediaAtClientCoords: (
+    clientX: number,
+    clientY: number,
+    payload: NoteMediaDragPayload
+  ) => boolean;
+};
+
+function insertNoteMediaPayloadAtPos(
+  ed: Editor,
+  pos: number,
+  payload: NoteMediaDragPayload
+): boolean {
+  if (payload.kind === "image") {
+    ed.chain()
+      .focus()
+      .insertContentAt(pos, {
+        type: "image",
+        attrs: {
+          src: payload.url,
+          alt: payload.name ?? "",
+          title: payload.name,
+        },
+      })
+      .run();
+  } else if (payload.kind === "video") {
+    ed.chain()
+      .focus()
+      .insertContentAt(pos, {
+        type: "noteBodyVideo",
+        attrs: {
+          src: payload.url,
+          title: payload.name ?? null,
+        },
+      })
+      .run();
+  } else if (payload.kind === "audio") {
+    ed.chain()
+      .focus()
+      .insertContentAt(pos, {
+        type: "noteBodyAudio",
+        attrs: {
+          src: payload.url,
+          title: payload.name ?? null,
+        },
+      })
+      .run();
+  } else {
+    const label = payload.name?.trim() || "文件";
+    const safe = (s: string) =>
+      s
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    const href = encodeURI(payload.url);
+    ed.chain()
+      .focus()
+      .insertContentAt(
+        pos,
+        `<p><a href="${href}" rel="noopener noreferrer" target="_blank">${safe(label)}</a></p>`
+      )
+      .run();
+  }
+  return true;
+}
+
+function insertNoteMediaPayloadAtClient(
+  ed: Editor,
+  clientX: number,
+  clientY: number,
+  payload: NoteMediaDragPayload
+): boolean {
+  const coords = ed.view.posAtCoords({
+    left: clientX,
+    top: clientY,
+  });
+  if (coords == null) return false;
+  return insertNoteMediaPayloadAtPos(ed, coords.pos, payload);
+}
+
 /** TipTap 实现层；界面请用 NoteCardTiptap。 */
-export function NoteCardTiptapCore({
-  id,
-  value,
-  onChange,
-  canEdit,
-  ariaLabel: ariaLabelProp,
-  onPasteFiles,
-  showToolbar = false,
-  timelineBodyHeadings = false,
-  hideEmbeddedMedia = false,
-  insertUploadedImagesAtCursor = false,
-}: NoteCardTiptapProps) {
+export const NoteCardTiptapCore = forwardRef<
+  NoteCardTiptapEditorHandle,
+  NoteCardTiptapProps
+>(function NoteCardTiptapCore(
+  {
+    id,
+    value,
+    onChange,
+    canEdit,
+    ariaLabel: ariaLabelProp,
+    onPasteFiles,
+    showToolbar = false,
+    timelineBodyHeadings = false,
+    hideEmbeddedMedia = false,
+    insertUploadedImagesAtCursor = false,
+  },
+  ref
+) {
   const c = useAppChrome();
   const ariaLabel = ariaLabelProp ?? c.uiNoteBodyAria;
   const onChangeRef = useRef(onChange);
@@ -417,7 +511,6 @@ export function NoteCardTiptapCore({
       NoteBodyVideo,
       NoteBodyAudio,
       Highlight.configure({ multicolor: true }),
-      Underline,
       TextAlign.configure({ types: ["heading", "paragraph"] }),
       Superscript,
       Subscript,
@@ -514,71 +607,31 @@ export function NoteCardTiptapCore({
         }
         const ed = editorRef.current;
         if (!ed?.isEditable) return false;
-        const coords = view.posAtCoords({
-          left: event.clientX,
-          top: event.clientY,
-        });
-        if (coords == null) return false;
         event.preventDefault();
-        const pos = coords.pos;
-        if (payload.kind === "image") {
-          ed.chain()
-            .focus()
-            .insertContentAt(pos, {
-              type: "image",
-              attrs: {
-                src: payload.url,
-                alt: payload.name ?? "",
-                title: payload.name,
-              },
-            })
-            .run();
-        } else if (payload.kind === "video") {
-          ed.chain()
-            .focus()
-            .insertContentAt(pos, {
-              type: "noteBodyVideo",
-              attrs: {
-                src: payload.url,
-                title: payload.name ?? null,
-              },
-            })
-            .run();
-        } else if (payload.kind === "audio") {
-          ed.chain()
-            .focus()
-            .insertContentAt(pos, {
-              type: "noteBodyAudio",
-              attrs: {
-                src: payload.url,
-                title: payload.name ?? null,
-              },
-            })
-            .run();
-        } else {
-          const label = payload.name?.trim() || "文件";
-          const safe = (s: string) =>
-            s
-              .replace(/&/g, "&amp;")
-              .replace(/</g, "&lt;")
-              .replace(/>/g, "&gt;")
-              .replace(/"/g, "&quot;");
-          const href = encodeURI(payload.url);
-          ed.chain()
-            .focus()
-            .insertContentAt(
-              pos,
-              `<p><a href="${href}" rel="noopener noreferrer" target="_blank">${safe(label)}</a></p>`
-            )
-            .run();
-        }
-        return true;
+        return insertNoteMediaPayloadAtClient(
+          ed,
+          event.clientX,
+          event.clientY,
+          payload
+        );
       },
     },
     onUpdate: ({ editor: ed }) => {
       onChangeRef.current(ed.getHTML());
     },
   });
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      insertNoteMediaAtClientCoords(clientX, clientY, payload) {
+        const ed = editorRef.current;
+        if (!ed?.isEditable) return false;
+        return insertNoteMediaPayloadAtClient(ed, clientX, clientY, payload);
+      },
+    }),
+    []
+  );
 
   useEffect(() => {
     if (!editor) return;
@@ -619,4 +672,4 @@ export function NoteCardTiptapCore({
       <EditorContent editor={editor} />
     </div>
   );
-}
+});

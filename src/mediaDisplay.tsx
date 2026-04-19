@@ -122,12 +122,15 @@ export function MediaThumbImage({
           alt={alt}
           loading={priority ? "eager" : "lazy"}
           decoding="async"
-          fetchPriority={priority ? "high" : "auto"}
           className={[className, decoded ? "card__gallery-thumb--ready" : "card__gallery-thumb--pending"]
             .filter(Boolean)
             .join(" ")}
           onLoad={() => setDecoded(true)}
           onError={() => setDecoded(true)}
+          {...({
+            /* DOM 标准小写；React 18 对 fetchPriority 会报警，@types 尚无 fetchpriority */
+            fetchpriority: priority ? "high" : "auto",
+          } as Record<string, string>)}
         />
       ) : null}
     </div>
@@ -204,7 +207,7 @@ export function MediaThumbVideo({
           tabIndex={-1}
           aria-hidden
           {...(videoFetchPriority
-            ? { fetchPriority: videoFetchPriority }
+            ? ({ fetchpriority: videoFetchPriority } as Record<string, string>)
             : {})}
           onLoadedData={() => setReady(true)}
           onCanPlay={() => setReady(true)}

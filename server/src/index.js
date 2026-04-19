@@ -64,6 +64,7 @@ import {
   updateCollection,
   deleteCollection,
   createCard,
+  addCardToCollectionPlacement,
   updateCard,
   deleteCard,
   removeCardFromCollectionPlacement,
@@ -1092,6 +1093,39 @@ app.post("/api/collections/:collectionId/cards", collectionsWriterMw, async (req
     res.status(status).json({ error: e.message || "创建失败" });
   }
 });
+
+/**
+ * POST /api/cards/:cardId/placements — 仅写入 card_placements（已有笔记加入另一合集，不搬运正文等大字段）
+ * body: { collectionId, insertAtStart?, pinned? }
+ */
+app.post(
+  "/api/cards/:cardId/placements",
+  collectionsWriterMw,
+  async (req, res) => {
+    try {
+      const body = req.body ?? {};
+      const collectionId =
+        typeof body.collectionId === "string" ? body.collectionId.trim() : "";
+      if (!collectionId) {
+        return res.status(400).json({ error: "缺少 collectionId" });
+      }
+      const insertAtStart = body.insertAtStart === true;
+      const pinned = body.pinned === true;
+      const out = await addCardToCollectionPlacement(
+        getUserId(req),
+        req.params.cardId,
+        collectionId,
+        { insertAtStart, pinned }
+      );
+      notifyCollectionsSync(req);
+      res.status(201).json(out);
+    } catch (e) {
+      console.error(e);
+      const status = e.message?.includes("不存在") ? 404 : 400;
+      res.status(status).json({ error: e.message || "添加失败" });
+    }
+  }
+);
 
 /** PATCH /api/cards/:id — 更新单卡片任意字段 */
 app.patch("/api/cards/:id", collectionsWriterMw, async (req, res) => {

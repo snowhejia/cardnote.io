@@ -17,6 +17,7 @@ import {
   updateCollectionApi,
   deleteCollectionApi,
   createCardApi,
+  addCardPlacementApi,
   updateCardApi,
   fetchCollectionsFromApi,
   removeCardFromCollectionApi,
@@ -456,6 +457,10 @@ export default function App() {
   );
   const collectionsRef = useRef(collections);
   collectionsRef.current = collections;
+  const getCollectionsForMerge = useCallback(
+    () => collectionsRef.current,
+    []
+  );
   const [activeId, setActiveId] = useState(() => INITIAL_WORKSPACE.activeId);
   const [calendarDay, setCalendarDay] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -962,6 +967,14 @@ export default function App() {
     };
   }, [relatedPanel]);
 
+  /** 笔记全页：html/body 与主区同为白底，避免底部安全区露出灰底 */
+  useEffect(() => {
+    const cl = "app--card-page-open";
+    if (cardPageCard) document.body.classList.add(cl);
+    else document.body.classList.remove(cl);
+    return () => document.body.classList.remove(cl);
+  }, [cardPageCard]);
+
   useEffect(() => {
     if (!mobileNavOpen) return;
     const onKey = (e: KeyboardEvent) => {
@@ -1048,6 +1061,7 @@ export default function App() {
     appUiLang,
     writeRequiresLogin,
     currentUser,
+    getCollectionsForMerge,
     setCollections,
     setActiveId,
     setCollapsedFolderIds,
@@ -1078,6 +1092,7 @@ export default function App() {
     remoteLoaded,
     writeRequiresLogin,
     currentUserId: currentUser?.id,
+    getCollectionsForMerge,
     setCollections,
     setLoadError,
     setApiOnline,
@@ -1099,46 +1114,50 @@ export default function App() {
     [authReady, showRemoteLoading, dataMode, remoteLoaded]
   );
 
-  const resyncRemoteCollectionsTree = useCallback(async (): Promise<
-    Collection[] | null
-  > => {
-    if (dataMode !== "remote") return null;
-    if (writeRequiresLogin && !currentUser && !getAdminToken()) {
-      return null;
-    }
-    const data = await fetchCollectionsFromApi();
-    if (data === null) {
-      setLoadError((prev) => prev ?? c.syncLoadFail);
-      setApiOnline(false);
-      return null;
-    }
-    setLoadError(null);
-    setApiOnline(true);
-    const tree = migrateCollectionTree(data);
-    let merged: Collection[] = tree;
-    flushSync(() => {
-      setCollections((prev) => {
-        merged = mergeServerTreeWithLocalExtraCards(tree, prev);
-        return merged;
-      });
-    });
-    const sk = remoteSnapshotUserKey(
+  const resyncRemoteCollectionsTree = useCallback(
+    async (opts?: {
+      /** 仅对齐合集树时用：省掉收藏夹+回收站两次请求，明显快于默认全量刷新 */
+      skipPreferenceRefresh?: boolean;
+    }): Promise<Collection[] | null> => {
+      if (dataMode !== "remote") return null;
+      if (writeRequiresLogin && !currentUser && !getAdminToken()) {
+        return null;
+      }
+      const data = await fetchCollectionsFromApi();
+      if (data === null) {
+        setLoadError((prev) => prev ?? c.syncLoadFail);
+        setApiOnline(false);
+        return null;
+      }
+      setLoadError(null);
+      setApiOnline(true);
+      const tree = migrateCollectionTree(data);
+      const merged = mergeServerTreeWithLocalExtraCards(
+        tree,
+        collectionsRef.current
+      );
+      setCollections(merged);
+      const sk = remoteSnapshotUserKey(
+        writeRequiresLogin,
+        currentUser?.id?.trim() || null
+      );
+      if (sk) saveRemoteCollectionsSnapshot(sk, merged);
+      if (!opts?.skipPreferenceRefresh) {
+        await refreshRemotePreferences();
+      }
+      return merged;
+    },
+    [
+      dataMode,
+      c.syncLoadFail,
       writeRequiresLogin,
-      currentUser?.id?.trim() || null
-    );
-    if (sk) saveRemoteCollectionsSnapshot(sk, merged);
-    await refreshRemotePreferences();
-    return merged;
-  }, [
-    dataMode,
-    c.syncLoadFail,
-    writeRequiresLogin,
-    currentUser,
-    setCollections,
-    setLoadError,
-    setApiOnline,
-    refreshRemotePreferences,
-  ]);
+      currentUser,
+      setCollections,
+      setLoadError,
+      setApiOnline,
+      refreshRemotePreferences,
+    ]
+  );
 
   const handleTimelinePullRefresh = useCallback(async () => {
     if (dataMode === "remote") {
@@ -1448,71 +1467,60 @@ export default function App() {
     }
   }, [collections, activeId]);
 
-  /** 在 passive effect 写入 localStorage 之前同步恢复「全部笔记 / 待办 / 笔记探索」，避免 persist 用旧状态覆盖 sentinel */
+  /** 在 passive effect 写入 localStorage 之前恢复「全部笔记 / 待办 / 笔记探索」，避免 persist 用旧状态覆盖 sentinel（React 18 在 layout effect 内批处理 setState，勿用 flushSync） */
   useLayoutEffect(() => {
     if (!authReady) return;
     if (dataMode === "remote" && !remoteLoaded) return;
     try {
       const raw = readPersistedActiveCollectionId(activeCollectionKey);
-      if (raw === PERSISTED_WORKSPACE_ALL_NOTES) {
-        flushSync(() => {
-          setAllNotesViewActive(true);
-          setRemindersViewActive(false);
-          setConnectionsViewActive(false);
-          setAttachmentsViewActive(false);
-        });
-      } else if (raw === PERSISTED_WORKSPACE_REMINDERS) {
-        flushSync(() => {
-          setRemindersViewActive(true);
-          setAllNotesViewActive(false);
-          setConnectionsViewActive(false);
-          setAttachmentsViewActive(false);
-        });
-      } else if (raw === PERSISTED_WORKSPACE_CONNECTIONS) {
-        if (matchesMobileChromeMedia()) {
-          flushSync(() => {
-            setConnectionsViewActive(false);
-            setConnectionsPrimed(false);
-            setAllNotesViewActive(true);
-            setRemindersViewActive(false);
-            setAttachmentsViewActive(false);
-          });
-        } else {
-          flushSync(() => {
-            setConnectionsViewActive(true);
-            setConnectionsPrimed(true);
-            setAllNotesViewActive(false);
-            setRemindersViewActive(false);
-            setAttachmentsViewActive(false);
-          });
-        }
-      } else if (raw === PERSISTED_WORKSPACE_ALL_ATTACHMENTS) {
-        if (matchesMobileChromeMedia()) {
-          flushSync(() => {
-            setAttachmentsViewActive(false);
-            setAllNotesViewActive(true);
-            setRemindersViewActive(false);
-            setConnectionsViewActive(false);
-            setConnectionsPrimed(false);
-          });
-        } else {
-          flushSync(() => {
-            setAttachmentsViewActive(true);
-            setAllNotesViewActive(false);
-            setRemindersViewActive(false);
-            setConnectionsViewActive(false);
-            setConnectionsPrimed(false);
-          });
-        }
-      }
       const attachmentFilterStoreKey = attachmentsFilterStorageKey(
         dataMode,
         currentUser?.id ?? null
       );
       const savedAttachmentFilter =
         readPersistedAttachmentsFilterKey(attachmentFilterStoreKey);
+
+      if (raw === PERSISTED_WORKSPACE_ALL_NOTES) {
+        setAllNotesViewActive(true);
+        setRemindersViewActive(false);
+        setConnectionsViewActive(false);
+        setAttachmentsViewActive(false);
+      } else if (raw === PERSISTED_WORKSPACE_REMINDERS) {
+        setRemindersViewActive(true);
+        setAllNotesViewActive(false);
+        setConnectionsViewActive(false);
+        setAttachmentsViewActive(false);
+      } else if (raw === PERSISTED_WORKSPACE_CONNECTIONS) {
+        if (matchesMobileChromeMedia()) {
+          setConnectionsViewActive(false);
+          setConnectionsPrimed(false);
+          setAllNotesViewActive(true);
+          setRemindersViewActive(false);
+          setAttachmentsViewActive(false);
+        } else {
+          setConnectionsViewActive(true);
+          setConnectionsPrimed(true);
+          setAllNotesViewActive(false);
+          setRemindersViewActive(false);
+          setAttachmentsViewActive(false);
+        }
+      } else if (raw === PERSISTED_WORKSPACE_ALL_ATTACHMENTS) {
+        if (matchesMobileChromeMedia()) {
+          setAttachmentsViewActive(false);
+          setAllNotesViewActive(true);
+          setRemindersViewActive(false);
+          setConnectionsViewActive(false);
+          setConnectionsPrimed(false);
+        } else {
+          setAttachmentsViewActive(true);
+          setAllNotesViewActive(false);
+          setRemindersViewActive(false);
+          setConnectionsViewActive(false);
+          setConnectionsPrimed(false);
+        }
+      }
       if (savedAttachmentFilter) {
-        flushSync(() => setAttachmentsFilterKey(savedAttachmentFilter));
+        setAttachmentsFilterKey(savedAttachmentFilter);
       }
     } catch {
       /* ignore */
@@ -2315,23 +2323,37 @@ export default function App() {
       }
       const ok = await removeCardFromCollectionApi(cardId, placementColId);
       if (!ok) {
+        void resyncRemoteCollectionsTree();
         window.alert(c.cardRemovePlacementFail);
         return;
       }
-      const merged = await resyncRemoteCollectionsTree();
-      if (!merged) return;
+      const mergedLocal = removeCardPlacementFromTree(
+        collectionsRef.current,
+        placementColId,
+        cardId,
+        c.looseNotesCollectionName
+      );
+      setCollections(mergedLocal);
+      const skRm = remoteSnapshotUserKey(
+        writeRequiresLogin,
+        currentUser?.id?.trim() || null
+      );
+      if (skRm) saveRemoteCollectionsSnapshot(skRm, mergedLocal);
       setCardPageCard((cp) => {
         if (!cp || cp.cardId !== cardId) return cp;
-        const ids = [...collectionIdsContainingCardId(merged, cardId)];
+        const ids = [...collectionIdsContainingCardId(mergedLocal, cardId)];
         if (ids.length === 0) return null;
         if (ids.includes(cp.colId)) return cp;
         return { colId: ids[0], cardId };
       });
+      void resyncRemoteCollectionsTree({ skipPreferenceRefresh: true });
     },
     [
       canEdit,
       collections,
       dataMode,
+      writeRequiresLogin,
+      currentUser,
       c.looseNotesCollectionName,
       c.cardRemovePlacementFail,
       resyncRemoteCollectionsTree,
@@ -3356,6 +3378,50 @@ export default function App() {
       scrollTimelineToTop,
     ]
   );
+
+  /**
+   * 小屏底部罐子：新建空笔记后直接进入全页编辑。
+   * 合集 id 与 {@link appendNoteCardWithHtml} 内 `targetColId` 一致。
+   */
+  const addSmallNoteThenOpenCardFullPage = useCallback(() => {
+    void (async () => {
+      const afterLocal =
+        newNotePlacement === "bottom"
+          ? () => {
+              scrollTimelineToBottom("auto");
+              requestAnimationFrame(() => {
+                scrollTimelineToBottom("auto");
+              });
+            }
+          : () => {
+              scrollTimelineToTop("auto");
+              requestAnimationFrame(() => {
+                scrollTimelineToTop("auto");
+              });
+            };
+      const cardId = await appendNoteCardWithHtml("", undefined, undefined, {
+        afterLocalInsert: afterLocal,
+      });
+      if (!cardId) return;
+      const targetColId =
+        allNotesViewActive || remindersViewActive
+          ? LOOSE_NOTES_COLLECTION_ID
+          : active?.id ?? "";
+      if (!targetColId) return;
+      setMobileNavOpen(false);
+      queueMicrotask(() => {
+        setCardPageCard({ colId: targetColId, cardId });
+      });
+    })();
+  }, [
+    active?.id,
+    allNotesViewActive,
+    appendNoteCardWithHtml,
+    newNotePlacement,
+    remindersViewActive,
+    scrollTimelineToBottom,
+    scrollTimelineToTop,
+  ]);
 
   /** 我的待办：先打开与卡片相同的「提醒」弹窗，保存后再建空笔记 */
   const openNewTaskReminderPicker = useCallback(() => {
@@ -5536,6 +5602,7 @@ export default function App() {
                 type="button"
                 className="card-page__back"
                 onClick={() => setCardPageCard(null)}
+                aria-label={c.uiBack}
               >
                 <svg
                   width="16"
@@ -5552,7 +5619,6 @@ export default function App() {
                     strokeLinejoin="round"
                   />
                 </svg>
-                返回
               </button>
               <span className="card-page__time" aria-hidden="true" />
             </div>
@@ -6002,7 +6068,8 @@ export default function App() {
       !attachmentsViewActive &&
       (!mobileNavOpen || tabletSplitNav) &&
       !mobileCalendarOpen &&
-      !remindersViewActive ? (
+      !remindersViewActive &&
+      !cardPageCard ? (
         <button
           type="button"
           className="main__scroll-to-bottom"
@@ -6024,7 +6091,8 @@ export default function App() {
           </svg>
         </button>
       ) : null}
-      <nav className="mobile-dock" aria-label={c.mobileDockAria}>
+      {!cardPageCard ? (
+        <nav className="mobile-dock" aria-label={c.mobileDockAria}>
         <button
           type="button"
           className="mobile-dock__btn mobile-dock__btn--icon"
@@ -6153,7 +6221,7 @@ export default function App() {
               !remindersViewActive &&
               searchQuery.trim().length === 0
             ) {
-              addSmallNote({ scrollTimelineToEnd: true });
+              addSmallNoteThenOpenCardFullPage();
               return;
             }
             addSmallNote();
@@ -6210,7 +6278,8 @@ export default function App() {
             <path d="m21 21-4.35-4.35" />
           </svg>
         </button>
-      </nav>
+        </nav>
+      ) : null}
       {mobileCalendarOpen
         ? createPortal(
             <div className="mobile-cal-popup" role="presentation">
@@ -6672,14 +6741,27 @@ export default function App() {
               );
               return;
             }
-            const created = await createCardApi(targetColId, hit.card, {
+            const placement = await addCardPlacementApi(cardId, targetColId, {
               insertAtStart: newNotePlacement === "top",
+              pinned: hit.card.pinned === true,
             });
-            if (!created) {
+            if (!placement) {
               window.alert(c.errMergeColSave);
               return;
             }
-            await resyncRemoteCollectionsTree();
+            const mergedAdd = appendCardCopyToCollection(
+              collectionsRef.current,
+              targetColId,
+              { ...hit.card, pinned: placement.pinned },
+              newNotePlacement === "top"
+            );
+            setCollections(mergedAdd);
+            const skAdd = remoteSnapshotUserKey(
+              writeRequiresLogin,
+              currentUser?.id?.trim() || null
+            );
+            if (skAdd) saveRemoteCollectionsSnapshot(skAdd, mergedAdd);
+            void resyncRemoteCollectionsTree({ skipPreferenceRefresh: true });
           }}
         />
       ) : null}

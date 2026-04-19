@@ -1,5 +1,4 @@
 import { useEffect, useRef, type Dispatch, type SetStateAction } from "react";
-import { flushSync } from "react-dom";
 import { authUsesHttpOnlyCookie, getAdminToken } from "../auth/token";
 import { fetchCollectionsFromApi } from "../api/collections";
 import { apiBase, remoteApiBase } from "../api/apiBase";
@@ -42,6 +41,7 @@ export function useCollectionsRemotePush(p: {
   setApiOnline: Dispatch<SetStateAction<boolean>>;
   /** 与星标 / 回收站 GET 对齐，避免仅合集树更新、侧栏偏好仍旧 */
   refreshRemotePreferences: () => void | Promise<void>;
+  getCollectionsForMerge: () => Collection[];
 }): void {
   const {
     authReady,
@@ -49,6 +49,7 @@ export function useCollectionsRemotePush(p: {
     remoteLoaded,
     writeRequiresLogin,
     currentUserId,
+    getCollectionsForMerge,
     setCollections,
     setLoadError,
     setApiOnline,
@@ -88,13 +89,11 @@ export function useCollectionsRemotePush(p: {
       setLoadError(null);
       setApiOnline(true);
       const tree = migrateCollectionTree(data);
-      let merged = tree;
-      flushSync(() => {
-        setCollections((prev) => {
-          merged = mergeServerTreeWithLocalExtraCards(tree, prev);
-          return merged;
-        });
-      });
+      const merged = mergeServerTreeWithLocalExtraCards(
+        tree,
+        getCollectionsForMerge()
+      );
+      setCollections(merged);
       const sk = remoteSnapshotUserKey(
         writeRequiresLogin,
         currentUserId?.trim() || null
@@ -137,5 +136,6 @@ export function useCollectionsRemotePush(p: {
     setCollections,
     setLoadError,
     setApiOnline,
+    getCollectionsForMerge,
   ]);
 }

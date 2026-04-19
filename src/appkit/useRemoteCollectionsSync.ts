@@ -1,5 +1,4 @@
 import { useEffect, type Dispatch, type SetStateAction } from "react";
-import { flushSync } from "react-dom";
 import type { LoginUiLang } from "../auth/loginUiI18n";
 import { fetchApiHealth } from "../api/health";
 import { getAppChrome } from "../i18n/appChrome";
@@ -55,6 +54,8 @@ export function useRemoteCollectionsSync(p: {
   setSaveError: Dispatch<SetStateAction<string | null>>;
   setMediaUploadMode: Dispatch<SetStateAction<MediaMode>>;
   setSidebarFlash: Dispatch<SetStateAction<string | null>>;
+  /** 与 merge 时 React 状态一致（勿在 effect 内 flushSync） */
+  getCollectionsForMerge: () => Collection[];
 }): void {
   const {
     authReady,
@@ -62,6 +63,7 @@ export function useRemoteCollectionsSync(p: {
     appUiLang,
     writeRequiresLogin,
     currentUser,
+    getCollectionsForMerge,
     setCollections,
     setActiveId,
     setCollapsedFolderIds,
@@ -173,7 +175,6 @@ export function useRemoteCollectionsSync(p: {
         if (cancelled) return;
         if (data !== null) {
           let tree = migrateCollectionTree(data);
-          let useMergeWithPrevAfterSeed = false;
           const authed = Boolean(currentUser || getAdminToken());
           if (tree.length === 0 && authed && writeRequiresLogin) {
             tree = currentUser?.id
@@ -189,31 +190,17 @@ export function useRemoteCollectionsSync(p: {
               if (cancelled) return;
               if (pulled !== null) {
                 tree = migrateCollectionTree(pulled);
-                useMergeWithPrevAfterSeed = true;
               }
             }
           }
           if (cancelled) return;
-          if (useMergeWithPrevAfterSeed) {
-            let merged = tree;
-            flushSync(() => {
-              setCollections((prev) => {
-                merged = mergeServerTreeWithLocalExtraCards(tree, prev);
-                return merged;
-              });
-            });
-            tree = merged;
-          } else {
-            /* 慢网/久未开：缓存先渲染后 GET 才返回时，若用户已乐观建卡而服务端尚无同 id，整树覆盖会闪没再出现 */
-            let merged = tree;
-            flushSync(() => {
-              setCollections((prev) => {
-                merged = mergeServerTreeWithLocalExtraCards(tree, prev);
-                return merged;
-              });
-            });
-            tree = merged;
-          }
+          /* 慢网/久未开：缓存先渲染后 GET 才返回时，若用户已乐观建卡而服务端尚无同 id，整树覆盖会闪没再出现 */
+          const merged = mergeServerTreeWithLocalExtraCards(
+            tree,
+            getCollectionsForMerge()
+          );
+          setCollections(merged);
+          tree = merged;
           const remoteKey = activeCollectionStorageKey(
             "remote",
             currentUser?.id ?? null
@@ -283,5 +270,6 @@ export function useRemoteCollectionsSync(p: {
     setSaveError,
     setMediaUploadMode,
     setSidebarFlash,
+    getCollectionsForMerge,
   ]);
 }

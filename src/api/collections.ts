@@ -135,6 +135,40 @@ export async function deleteCollectionApi(id: string): Promise<boolean> {
 
 // ─── 粒度化卡片操作 ───────────────────────────────────────────────────────────
 
+/** 仅把已有笔记加入目标合集（placement 行）；不写 cards 正文等大字段 */
+export type AddCardPlacementResult = {
+  cardId: string;
+  collectionId: string;
+  sortOrder: number;
+  pinned: boolean;
+};
+
+export async function addCardPlacementApi(
+  cardId: string,
+  collectionId: string,
+  opts?: { insertAtStart?: boolean; pinned?: boolean }
+): Promise<AddCardPlacementResult | null> {
+  const base = apiBase();
+  try {
+    const r = await fetch(
+      `${base}/api/cards/${encodeURIComponent(cardId)}/placements`,
+      apiFetchInit({
+        method: "POST",
+        headers: buildHeadersPut({ "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          collectionId,
+          ...(opts?.insertAtStart === true ? { insertAtStart: true } : {}),
+          ...(opts?.pinned === true ? { pinned: true } : {}),
+        }),
+      })
+    );
+    if (!r.ok) return null;
+    return (await r.json()) as AddCardPlacementResult;
+  } catch {
+    return null;
+  }
+}
+
 /** 在合集内创建卡片；opts.insertAtStart 为 true 时插入到该合集列表最前（与客户端「新建在顶部」一致） */
 export async function createCardApi(
   collectionId: string,
