@@ -11,6 +11,7 @@
  *   node scripts/backfill-video-thumbnails.mjs --include-trash
  *
  * 非 COS 直链（仅 /uploads/ 本地路径）无法从桶里读大小，会跳过。
+ * 外链占位图（如 picsum）不是本桶对象，解析不出 key 属正常，脚本会静默跳过且不刷屏 warn。
  */
 import dotenv from "dotenv";
 import { dirname, join } from "path";
@@ -37,6 +38,46 @@ const {
 if (!isCosConfigured()) {
   console.error("❌ 未配置 COS 环境变量，无法拉取对象。退出。");
   process.exit(1);
+}
+
+/** 占位图 / 常见外链 CDN：非本桶，不尝试 COS 补全、不打逐条 warn */
+function isLikelyNonCosAttachmentUrl(url) {
+  try {
+    const u = new URL(url);
+    const h = u.hostname.toLowerCase();
+    return (
+      h === "picsum.photos" ||
+      h.endsWith(".picsum.photos") ||
+      h === "placehold.co" ||
+      h === "via.placeholder.com" ||
+      h === "dummyimage.com" ||
+      h.endsWith("unsplash.com") ||
+      h === "placekitten.com" ||
+      h === "loremflickr.com"
+    );
+  } catch {
+    return false;
+  }
+}
+
+let cosKeyWarnBudget = 40;
+let cosKeyWarnBudgetNoticePrinted = false;
+
+/** @param {string} message @param {string} url */
+function warnMissingCosKey(message, url) {
+  if (isLikelyNonCosAttachmentUrl(url)) return;
+  if (url.startsWith("/uploads/") || url.startsWith("uploads/")) return;
+  if (cosKeyWarnBudget <= 0) {
+    if (!cosKeyWarnBudgetNoticePrinted) {
+      cosKeyWarnBudgetNoticePrinted = true;
+      console.warn(
+        "  （无法解析 COS key 的告警已达上限，后续省略；外链/占位图已静默跳过）"
+      );
+    }
+    return;
+  }
+  cosKeyWarnBudget--;
+  console.warn(`${message}: ${url.slice(0, 96)}`);
 }
 
 /** @param {unknown} item */
@@ -113,9 +154,7 @@ async function patchMediaArray(media) {
 
     if (wantsThumb(out)) {
       if (!key) {
-        console.warn(
-          `  跳过缩略图（非本桶 URL 或本地路径）: ${url.slice(0, 80)}`
-        );
+        warnMissingCosKey("  跳过缩略图（非本桶 URL 或本地路径）", url);
       } else if (dryRun) {
         console.log(`  [dry-run] 将生成缩略图 ${out.kind} key=${key}`);
       } else if (out.kind === "video" || out.kind === "image") {
@@ -170,8 +209,9 @@ async function patchMediaArray(media) {
         if (url.startsWith("/uploads/") || url.startsWith("uploads/")) {
           /* 本地盘路径，部署脚本不处理 */
         } else if (/^https?:\/\//i.test(url)) {
-          console.warn(
-            `  跳过 sizeBytes（无法从 URL 解析 COS key，请核对 COS_PUBLIC_BASE 与直链域）: ${url.slice(0, 96)}`
+          warnMissingCosKey(
+            "  跳过 sizeBytes（无法从 URL 解析 COS key，请核对 COS_PUBLIC_BASE 与直链域）",
+            url
           );
         }
       } else if (dryRun) {
