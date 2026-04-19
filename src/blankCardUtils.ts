@@ -21,7 +21,8 @@ function hasMeaningfulCustomProps(card: NoteCard): boolean {
 }
 
 /**
- * 无任何正文、附件、标签、互链、提醒/置顶，且自定义属性无有效值。
+ * 无任何正文、附件、标签、提醒/置顶，且自定义属性无有效值。
+ * 仅有指向其它卡的 relatedRefs（相关 / creator / source / attachment 等）而无上述实质内容时，仍视为空白（设置里「清除空白卡片」会收录）。
  */
 export function isBlankNoteCard(card: NoteCard): boolean {
   if (plainTextFromNoteHtml(card.text ?? "").length > 0) return false;
@@ -30,7 +31,6 @@ export function isBlankNoteCard(card: NoteCard): boolean {
   if (hasMeaningfulCustomProps(card)) return false;
   const tags = (card.tags ?? []).map((t) => String(t).trim()).filter(Boolean);
   if (tags.length > 0) return false;
-  if ((card.relatedRefs ?? []).length > 0) return false;
   if (card.reminderOn?.trim()) return false;
   if (card.reminderTime?.trim()) return false;
   if (card.reminderNote?.trim()) return false;

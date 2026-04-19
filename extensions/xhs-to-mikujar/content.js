@@ -123,6 +123,80 @@ function scrapeAuthorNickname() {
   return "";
 }
 
+/** 内嵌时间戳多为毫秒（13 位）或秒（10 位） */
+function xhsTimestampToYmd(raw) {
+  let n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  if (n < 1e12) n *= 1000;
+  const d = new Date(n);
+  if (Number.isNaN(d.getTime())) return null;
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function scrapeXhsPublishDateYmd() {
+  const noteId = extractNoteIdFromUrl();
+  if (!noteId) return null;
+  for (const script of document.querySelectorAll("script:not([src])")) {
+    const t = script.textContent || "";
+    if (t.length < 80 || t.length > 500_000) continue;
+    const idx = t.indexOf(noteId);
+    if (idx === -1) continue;
+    const chunk = t.slice(
+      Math.max(0, idx - 2500),
+      Math.min(t.length, idx + 35000)
+    );
+    const reNum =
+      /"(?:time|timestamp|lastUpdateTime|pubTime|publish_time)"\s*:\s*(\d{10,13})\b/g;
+    let m;
+    while ((m = reNum.exec(chunk)) !== null) {
+      const ymd = xhsTimestampToYmd(m[1]);
+      if (ymd && ymd >= "2010-01-01") return ymd;
+    }
+    const iso = chunk.match(
+      /"(?:time|date|publishTime)"\s*:\s*"(\d{4}-\d{2}-\d{2})/
+    );
+    if (iso?.[1]) return iso[1];
+  }
+  return null;
+}
+
+/**
+ * 与主站 sf-xhs-type 选项 id 一致：o-xhs-note（图文）/ o-xhs-video（视频）
+ * @param {string} noteId
+ * @param {string[]} videoUrls
+ */
+function inferXhsPostType(noteId, videoUrls) {
+  if (videoUrls && videoUrls.length > 0) return "o-xhs-video";
+  const roots = [
+    document.querySelector("#noteContainer"),
+    document.querySelector(".note-detail"),
+    document.querySelector('[class*="note-detail"]'),
+  ].filter(Boolean);
+  for (const root of roots) {
+    if (root.querySelector("video")) return "o-xhs-video";
+  }
+  if (noteId) {
+    for (const script of document.querySelectorAll("script:not([src])")) {
+      const t = script.textContent || "";
+      if (t.length < 80 || t.length > 500_000) continue;
+      const idx = t.indexOf(noteId);
+      if (idx === -1) continue;
+      const chunk = t.slice(idx, Math.min(t.length, idx + 22000));
+      if (
+        /"type"\s*:\s*"video"/i.test(chunk) ||
+        /"noteType"\s*:\s*"video"/i.test(chunk) ||
+        /"noteType"\s*:\s*2\b/.test(chunk)
+      ) {
+        return "o-xhs-video";
+      }
+    }
+  }
+  return "o-xhs-note";
+}
+
 function scrapeNotePage() {
   const ogTitle = document
     .querySelector('meta[property="og:title"]')
@@ -318,7 +392,19 @@ function scrapeNotePage() {
 
   const pageUrl = location.href;
   const authorNickname = scrapeAuthorNickname();
-  return { title, body, imageUrls, videoUrls, pageUrl, authorNickname };
+  const noteIdForType = extractNoteIdFromUrl();
+  const publishDateYmd = scrapeXhsPublishDateYmd();
+  const xhsPostType = inferXhsPostType(noteIdForType, videoUrls);
+  return {
+    title,
+    body,
+    imageUrls,
+    videoUrls,
+    pageUrl,
+    authorNickname,
+    publishDateYmd,
+    xhsPostType,
+  };
 }
 
 /** 同一支视频常出现多条 URL（仅 query 不同，或 performance 与 video 元素各一条），按路径去重 */

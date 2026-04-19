@@ -58,6 +58,11 @@ export type CardProperty = {
   type: CardPropertyType;
   value: string | number | boolean | string[] | CardLinkRef | null;
   options?: CardPropertyOption[];
+  /**
+   * 可选：`cardLink` 尚未指向卡片时，供服务端自动关联（如人物卡）生成初始标题。
+   * 浏览器剪藏扩展写入；合并关联引用后仍可保留或手动清理。
+   */
+  seedTitle?: string;
 };
 
 /** 卡片对象类型：默认 note；file/link 等为后续对象化扩展预留 */

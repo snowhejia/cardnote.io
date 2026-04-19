@@ -622,6 +622,8 @@ export default function App() {
   );
   const collectionsRef = useRef(collections);
   collectionsRef.current = collections;
+  /** 「新建」：优先全页/分栏当前卡片类型，否则当前合集 preset；全部笔记/待办固定为笔记 */
+  const objectKindForNewTimelineCardRef = useRef<string>("note");
   /** 同一笔记附件并发「建 file 卡」时串行化，避免本地/同步前双请求重复建卡 */
   const attachmentFileCardOpenInflightRef = useRef(
     new Map<string, Promise<void>>()
@@ -3471,6 +3473,8 @@ export default function App() {
       const trimmed = plainAnswer.trim();
       if (!canEdit || !trimmed) return false;
 
+      const sourceHit = findCardInTree(collections, sourceColId, sourceCardId);
+      const srcKind = sourceHit?.card.objectKind ?? "note";
       const preferTop = readNewNotePlacement() === "top";
       const htmlBody = noteBodyToHtml(trimmed);
       const now = new Date();
@@ -3483,6 +3487,7 @@ export default function App() {
         text: htmlBody,
         minutesOfDay,
         addedOn: day,
+        ...(srcKind !== "note" ? { objectKind: srcKind } : {}),
       };
 
       flushSync(() => {
@@ -3534,7 +3539,7 @@ export default function App() {
       addRelatedPair(sourceColId, sourceCardId, sourceColId, newId);
       return true;
     },
-    [canEdit, dataMode, addRelatedPair]
+    [canEdit, dataMode, addRelatedPair, collections]
   );
 
   const setCardTags = useCallback(
@@ -3823,6 +3828,8 @@ export default function App() {
         reminderOn?: string;
         reminderTime?: string;
         reminderNote?: string;
+        /** 覆盖推断的 objectKind（导入等场景） */
+        objectKindOverride?: string;
       }
     ): Promise<string | null> => {
       if (!canEdit) return null;
@@ -3852,6 +3859,18 @@ export default function App() {
       const rOn = opts?.reminderOn?.trim();
       const rTime = opts?.reminderTime?.trim();
       const rNote = opts?.reminderNote?.trim();
+      const overrideKind = opts?.objectKindOverride?.trim();
+      let effectiveObjectKind = "note";
+      if (overrideKind) {
+        effectiveObjectKind = overrideKind;
+      } else if (targetColIdOverride?.trim()) {
+        const tcol = findCollectionById(collections, targetColIdOverride.trim());
+        const pid = tcol?.presetTypeId?.trim();
+        effectiveObjectKind = pid || "note";
+      } else {
+        effectiveObjectKind =
+          objectKindForNewTimelineCardRef.current || "note";
+      }
       const newCard: NoteCard = {
         id: cardId,
         text: htmlBody,
@@ -3863,6 +3882,9 @@ export default function App() {
               ...(rTime ? { reminderTime: rTime } : {}),
               ...(rNote ? { reminderNote: rNote } : {}),
             }
+          : {}),
+        ...(effectiveObjectKind !== "note"
+          ? { objectKind: effectiveObjectKind }
           : {}),
       };
 
@@ -3946,6 +3968,7 @@ export default function App() {
       allNotesViewActive,
       c.looseNotesCollectionName,
       c.errCreateCol,
+      collections,
     ]
   );
 
@@ -5079,6 +5102,31 @@ export default function App() {
     const c = col?.cards.find((x) => x.id === cardPageCard.cardId);
     return c ? { colId: cardPageCard.colId, card: c } : null;
   }, [cardPageCard, collections]);
+
+  useLayoutEffect(() => {
+    let k = "note";
+    if (allNotesViewActive || remindersViewActive) {
+      objectKindForNewTimelineCardRef.current = k;
+      return;
+    }
+    if (cardPageCardLive?.card) {
+      k = cardPageCardLive.card.objectKind ?? "note";
+    } else if (detailCardLive?.card) {
+      k = detailCardLive.card.objectKind ?? "note";
+    } else {
+      const pid = active?.presetTypeId?.trim();
+      if (pid) k = pid;
+    }
+    objectKindForNewTimelineCardRef.current = k;
+  }, [
+    allNotesViewActive,
+    remindersViewActive,
+    cardPageCardLive?.card?.id,
+    cardPageCardLive?.card?.objectKind,
+    detailCardLive?.card?.id,
+    detailCardLive?.card?.objectKind,
+    active?.presetTypeId,
+  ]);
 
   useEffect(() => {
     syncCardPageParamsToUrl(cardPageCard);

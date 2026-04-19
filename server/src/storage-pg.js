@@ -2153,7 +2153,12 @@ function customPropValueAsAutoLinkTitle(prop) {
     if (Array.isArray(v)) return v.map(String).filter(Boolean).join(", ").trim();
     return String(v).trim();
   }
-  if (t === "checkbox" || t === "cardLink") return "";
+  if (t === "checkbox" || t === "cardLink") {
+    const seed =
+      typeof prop.seedTitle === "string" ? prop.seedTitle.trim() : "";
+    if (seed) return seed;
+    return "";
+  }
   if (t === "collectionLink") {
     if (Array.isArray(v)) return v.length ? v.join(", ") : "";
     return "";
@@ -2190,7 +2195,8 @@ function autoLinkNewCardTitleFromSource(step, sourceCardRow, mergedFieldMap) {
       ? step.syncSchemaFieldId.trim()
       : "";
   if (syncId) {
-    return truncateAutoLinkCardTitle(readByFieldId(syncId));
+    const fromSync = readByFieldId(syncId);
+    if (fromSync) return truncateAutoLinkCardTitle(fromSync);
   }
 
   const key = typeof step.targetKey === "string" ? step.targetKey : "";
@@ -2949,12 +2955,16 @@ function bilibiliAuthorFromCustomProps(raw) {
       const cid =
         v && typeof v === "object" && typeof v.cardId === "string" ? v.cardId.trim() : "";
       if (cid) return null;
+      const seed = typeof p.seedTitle === "string" ? p.seedTitle.trim() : "";
+      if (seed) return seed;
     }
     if (typ === "cardLink" && typeof p.name === "string" && p.name.trim() === "UP 主") {
       const v = p.value;
       const cid =
         v && typeof v === "object" && typeof v.cardId === "string" ? v.cardId.trim() : "";
       if (cid) return null;
+      const seed = typeof p.seedTitle === "string" ? p.seedTitle.trim() : "";
+      if (seed) return seed;
     }
   }
   for (const p of props) {
@@ -3482,6 +3492,14 @@ function readLegacyClipAuthorTextFromProps(raw) {
   const props = Array.isArray(raw) ? raw : [];
   for (const p of props) {
     if (!p || typeof p !== "object") continue;
+    if (
+      (p.id === "sf-xhs-author" || p.id === "sf-bili-author") &&
+      p.type === "cardLink" &&
+      typeof p.seedTitle === "string" &&
+      p.seedTitle.trim()
+    ) {
+      return p.seedTitle.trim();
+    }
     if (p.id === "sf-xhs-author" && p.type === "text") {
       const v = p.value;
       if (typeof v === "string" && v.trim()) return v.trim();
@@ -3582,14 +3600,28 @@ function buildPresetClipCustomPropsArray(presetTypeId, url, authorText, clipTitl
     return [
       ...clipBase,
       { id: "sf-xhs-url", name: "原始链接", type: "url", value: u || null },
-      { id: "sf-xhs-author", name: "作者", type: "text", value: a || null },
+      {
+        id: "sf-xhs-author",
+        name: "作者",
+        type: "cardLink",
+        value: null,
+        cardLinkFromEdge: "creator",
+        ...(a ? { seedTitle: a } : {}),
+      },
     ];
   }
   if (presetTypeId === "post_bilibili") {
     return [
       ...clipBase,
       { id: "sf-bili-url", name: "视频链接", type: "url", value: u || null },
-      { id: "sf-bili-author", name: "UP 主", type: "text", value: a || null },
+      {
+        id: "sf-bili-author",
+        name: "UP 主",
+        type: "cardLink",
+        value: null,
+        cardLinkFromEdge: "creator",
+        ...(a ? { seedTitle: a } : {}),
+      },
     ];
   }
   return [];

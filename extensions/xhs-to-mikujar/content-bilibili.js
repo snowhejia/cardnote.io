@@ -33,6 +33,17 @@ function normalizeHttpUrl(raw) {
   return s;
 }
 
+/** B 站 view 接口 pubdate / ctime 为秒级 Unix 时间 */
+function unixSecToYmd(sec) {
+  if (!Number.isFinite(sec) || sec <= 0) return null;
+  const d = new Date(sec * 1000);
+  if (Number.isNaN(d.getTime())) return null;
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 function isBilibiliImageCdnHost(hostname) {
   const h = String(hostname || "").toLowerCase();
   return /(?:^|\.)hdslb\.com$/.test(h) || /(?:^|\.)biliimg\.com$/.test(h);
@@ -652,6 +663,8 @@ async function scrapeBilibiliVideoPageAsync(mainWorldPlay) {
   let viewApiDescRaw = "";
   /** 与当前 BV 一致，比内联 JSON / 全页 DOM 更稳，避免偶发错 UP */
   let viewApiOwnerNameRaw = "";
+  let viewApiPubdateSec = 0;
+  let viewApiDurationSec = 0;
   if (bvid) {
     try {
       const r = await fetch(
@@ -675,6 +688,14 @@ async function scrapeBilibiliVideoPageAsync(mainWorldPlay) {
               ? j.data.owner.name.trim()
               : "";
           if (on) viewApiOwnerNameRaw = on;
+          if (typeof j.data.pubdate === "number" && j.data.pubdate > 0) {
+            viewApiPubdateSec = j.data.pubdate;
+          } else if (typeof j.data.ctime === "number" && j.data.ctime > 0) {
+            viewApiPubdateSec = j.data.ctime;
+          }
+          if (typeof j.data.duration === "number" && j.data.duration > 0) {
+            viewApiDurationSec = Math.round(j.data.duration);
+          }
         }
       }
     } catch {
@@ -789,6 +810,11 @@ async function scrapeBilibiliVideoPageAsync(mainWorldPlay) {
 
   const body = descClean.trim() || "（无简介）";
 
+  const publishDateYmd =
+    viewApiPubdateSec > 0 ? unixSecToYmd(viewApiPubdateSec) : null;
+  const durationSec =
+    viewApiDurationSec > 0 ? viewApiDurationSec : null;
+
   return {
     title,
     body,
@@ -805,6 +831,9 @@ async function scrapeBilibiliVideoPageAsync(mainWorldPlay) {
     authorNickname: author,
     /** 写入「简介」自定义属性（与正文一致） */
     intro: descClean.trim() || null,
+    /** 与剪藏预设 sf-bili-date / sf-bili-duration 一致 */
+    publishDateYmd,
+    durationSec,
   };
 }
 

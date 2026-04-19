@@ -47,18 +47,43 @@ function buildCardHtml({ title, body, intro }) {
 }
 
 /**
- * 与主站剪藏预设一致：父级 sf-clip-url / sf-clip-title + 子类链接与作者。
+ * 与主站剪藏预设 notePresetTypesCatalog（post_xhs / post_bilibili）字段 id 与类型一致。
+ * `cardLink` 的 `seedTitle`：服务端自动关联人物卡时用昵称作初始标题（写入关联前 value 为 null）。
+ *
+ * @param {object} [clipMeta]
+ * @param {string|null} [clipMeta.publishDateYmd]
+ * @param {'o-xhs-note'|'o-xhs-video'|null} [clipMeta.xhsPostType]
+ * @param {number|null} [clipMeta.durationSec]
  */
-function buildPresetClipCustomProps(isBili, pageUrl, authorNickname, clipTitle) {
+function buildPresetClipCustomProps(
+  isBili,
+  pageUrl,
+  authorNickname,
+  clipTitle,
+  clipMeta
+) {
   const url = String(pageUrl || "").trim();
   const author = String(authorNickname || "").trim();
   const title = String(clipTitle || "").trim();
+  const meta = clipMeta && typeof clipMeta === "object" ? clipMeta : {};
+  const publishDateYmd =
+    typeof meta.publishDateYmd === "string" &&
+    /^\d{4}-\d{2}-\d{2}$/.test(meta.publishDateYmd)
+      ? meta.publishDateYmd
+      : null;
+  const xhsPostType =
+    meta.xhsPostType === "o-xhs-note" || meta.xhsPostType === "o-xhs-video"
+      ? meta.xhsPostType
+      : null;
+  const durationSec = Number(meta.durationSec);
+  const durationOk = Number.isFinite(durationSec) && durationSec > 0;
+
   const clipBase = [
     { id: "sf-clip-url", name: "链接", type: "url", value: url || null },
     { id: "sf-clip-title", name: "标题", type: "text", value: title || null },
   ];
   if (isBili) {
-    return [
+    const out = [
       ...clipBase,
       {
         id: "sf-bili-url",
@@ -69,12 +94,31 @@ function buildPresetClipCustomProps(isBili, pageUrl, authorNickname, clipTitle) 
       {
         id: "sf-bili-author",
         name: "UP 主",
-        type: "text",
-        value: author || null,
+        type: "cardLink",
+        value: null,
+        cardLinkFromEdge: "creator",
+        ...(author ? { seedTitle: author } : {}),
       },
     ];
+    if (publishDateYmd) {
+      out.push({
+        id: "sf-bili-date",
+        name: "发布日期",
+        type: "date",
+        value: publishDateYmd,
+      });
+    }
+    if (durationOk) {
+      out.push({
+        id: "sf-bili-duration",
+        name: "时长（秒）",
+        type: "number",
+        value: Math.round(durationSec),
+      });
+    }
+    return out;
   }
-  return [
+  const out = [
     ...clipBase,
     {
       id: "sf-xhs-url",
@@ -85,10 +129,33 @@ function buildPresetClipCustomProps(isBili, pageUrl, authorNickname, clipTitle) 
     {
       id: "sf-xhs-author",
       name: "作者",
-      type: "text",
-      value: author || null,
+      type: "cardLink",
+      value: null,
+      cardLinkFromEdge: "creator",
+      ...(author ? { seedTitle: author } : {}),
     },
   ];
+  if (publishDateYmd) {
+    out.push({
+      id: "sf-xhs-date",
+      name: "发布日期",
+      type: "date",
+      value: publishDateYmd,
+    });
+  }
+  if (xhsPostType) {
+    out.push({
+      id: "sf-xhs-type",
+      name: "类型",
+      type: "choice",
+      options: [
+        { id: "o-xhs-note", name: "图文", color: "#ef4444" },
+        { id: "o-xhs-video", name: "视频", color: "#8b5cf6" },
+      ],
+      value: xhsPostType,
+    });
+  }
+  return out;
 }
 
 async function fetchPresetCollectionId(settings, presetTypeId) {
@@ -1155,6 +1222,9 @@ async function runSave(tabId, emit) {
     pageUrl,
     authorNickname,
     intro = null,
+    publishDateYmd = null,
+    xhsPostType = null,
+    durationSec = null,
   } = scraped.data;
   const media = [];
   const errors = [];
@@ -1494,7 +1564,10 @@ async function runSave(tabId, emit) {
       isBili,
       pageUrl,
       authorNickname,
-      title
+      title,
+      isBili
+        ? { publishDateYmd, durationSec }
+        : { publishDateYmd, xhsPostType }
     ),
     media,
     insertAtStart: settings.insertNewNotesAtTop,
