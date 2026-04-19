@@ -39,7 +39,7 @@ export function assertMediaKeyAllowedForUpload(key, userId) {
   }
 }
 
-/** 直传约定：`1739-xxxx…24hex`；外链/B 站等导入常为 `md5_115` 等，仍须在 media 前缀下且字符安全 */
+/** 直传约定：`1739-xxxx…24hex`；另含 md5 名、**中文/引号等用户原始文件名**（键已在 media/ 前缀下） */
 const CANONICAL_UPLOAD_STEM_RE = /^\d+-[a-f0-9]{24}$/i;
 
 /** @param {string} stem 不含扩展名的主文件名 */
@@ -48,8 +48,10 @@ function isAllowedCosMediaFilenameStem(stem) {
   if (!s || s.length > 240) return false;
   if (s.includes("..") || s.includes("/") || s.includes("\\")) return false;
   if (CANONICAL_UPLOAD_STEM_RE.test(s)) return true;
+  // ASCII 仅字母数字等（外链 dump）；Unicode 文件名仅禁控制字符，避免误拒「想逆转时间…」.mp4
   if (/^[a-zA-Z0-9._-]+$/.test(s) && s.length >= 4) return true;
-  return false;
+  if (/[\u0000-\u001f\u007f]/.test(s)) return false;
+  return true;
 }
 
 /** 写入 COS/磁盘的封面上限；再大则尝试 sharp 压图，仍过大则跳过 */
