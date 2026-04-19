@@ -77,6 +77,7 @@ import {
   clearTrashedNotes,
   countCardAttachments,
   listCardAttachmentsPage,
+  attachmentStorageBytesByUserId,
 } from "./storage-pg.js";
 import {
   broadcastCollectionsChanged,
@@ -798,7 +799,13 @@ app.post("/api/users/me/delete", attachJwtSession, requireLoggedInUser, async (r
 app.get("/api/users", attachJwtSession, requireAdminSession, async (_req, res) => {
   try {
     const users = await readUsersList(null);
-    res.json(users.map((u) => toPublicUser(u)));
+    const storageByUser = await attachmentStorageBytesByUserId();
+    res.json(
+      users.map((u) => ({
+        ...toPublicUser(u),
+        attachmentsTotalBytes: storageByUser.get(u.id) ?? 0,
+      }))
+    );
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: e.message || "读取失败" });

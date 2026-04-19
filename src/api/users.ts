@@ -22,6 +22,8 @@ export type PublicUser = {
   /** 未绑定则为空 */
   email?: string;
   mediaQuota: MediaQuotaInfo;
+  /** 仅 GET /api/users：未进回收站笔记的附件 size_bytes 合计（缺省表示旧后端） */
+  attachmentsTotalBytes?: number;
   /** 已申请注销，后台正在清理 COS / 等待删库 */
   deletionPending?: boolean;
   deletionRequestedAt?: string;

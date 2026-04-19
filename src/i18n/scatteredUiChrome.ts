@@ -131,6 +131,15 @@ export type ScatteredUiChrome = {
   adminThLoginId: string;
   adminThEmail: string;
   adminThRole: string;
+  /** 用户列表：附件上传配额（本月累计 / 月上限、单文件上限） */
+  adminThAttachments: string;
+  adminQuotaUnlimitedLabel: string;
+  adminQuotaPerFileMax: (maxFormatted: string) => string;
+  adminQuotaMonthlyRatio: (usedFormatted: string, limitFormatted: string) => string;
+  adminQuotaMonthTitle: (usageMonth: string) => string;
+  /** 管理列表：库内附件已知大小的合计（仅含填了 sizeBytes 的项） */
+  adminAttachmentsStoredTotal: (formattedSize: string) => string;
+  adminAttachmentsStoredHint: string;
   adminThResetPwd: string;
   adminThProfile: string;
   adminThActions: string;
@@ -146,6 +155,7 @@ export type ScatteredUiChrome = {
   adminAriaLoginId: (loginId: string) => string;
   adminAriaEmail: (loginId: string) => string;
   adminAriaRole: (loginId: string) => string;
+  adminAriaAttachments: (loginId: string) => string;
 };
 
 const zh: ScatteredUiChrome = {
@@ -276,6 +286,15 @@ const zh: ScatteredUiChrome = {
   adminThLoginId: "登录 ID",
   adminThEmail: "邮箱",
   adminThRole: "身份",
+  adminThAttachments: "附件配额",
+  adminQuotaUnlimitedLabel: "本月不限（站长）",
+  adminQuotaPerFileMax: (maxFormatted) => `单文件 ≤ ${maxFormatted}`,
+  adminQuotaMonthlyRatio: (usedFormatted, limitFormatted) =>
+    `${usedFormatted} / ${limitFormatted}`,
+  adminQuotaMonthTitle: (usageMonth) => `统计月 ${usageMonth}（上海时区）`,
+  adminAttachmentsStoredTotal: (formattedSize) => `库内附件合计 ${formattedSize}`,
+  adminAttachmentsStoredHint:
+    "仅统计未进回收站、且在附件索引中带有 sizeBytes 的项；未标大小的资源不计入。",
   adminThResetPwd: "重置口令",
   adminThProfile: "资料",
   adminThActions: "",
@@ -291,6 +310,7 @@ const zh: ScatteredUiChrome = {
   adminAriaLoginId: (loginId) => `${loginId} 的登录 ID`,
   adminAriaEmail: (loginId) => `${loginId} 的邮箱`,
   adminAriaRole: (loginId) => `${loginId} 的身份`,
+  adminAriaAttachments: (loginId) => `${loginId} 的附件配额`,
 };
 
 const en: ScatteredUiChrome = {
@@ -428,6 +448,15 @@ const en: ScatteredUiChrome = {
   adminThLoginId: "Login ID",
   adminThEmail: "Email",
   adminThRole: "Role",
+  adminThAttachments: "Media quota",
+  adminQuotaUnlimitedLabel: "No monthly cap (admin)",
+  adminQuotaPerFileMax: (maxFormatted) => `Up to ${maxFormatted} per file`,
+  adminQuotaMonthlyRatio: (usedFormatted, limitFormatted) =>
+    `${usedFormatted} / ${limitFormatted}`,
+  adminQuotaMonthTitle: (usageMonth) => `Usage month ${usageMonth} (Asia/Shanghai)`,
+  adminAttachmentsStoredTotal: (formattedSize) => `Stored attachments: ${formattedSize}`,
+  adminAttachmentsStoredHint:
+    "Non-trashed notes only; sums sizeBytes on indexed attachments. Items without size are excluded.",
   adminThResetPwd: "Reset password",
   adminThProfile: "Profile",
   adminThActions: "",
@@ -443,6 +472,7 @@ const en: ScatteredUiChrome = {
   adminAriaLoginId: (loginId) => `Login ID for ${loginId}`,
   adminAriaEmail: (loginId) => `Email for ${loginId}`,
   adminAriaRole: (loginId) => `Role for ${loginId}`,
+  adminAriaAttachments: (loginId) => `Attachment quota for ${loginId}`,
 };
 
 export function getScatteredUiChrome(lang: LoginUiLang): ScatteredUiChrome {

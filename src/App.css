@@ -7909,10 +7909,10 @@ div.card__text--readonly:not(.card__text--preview) {
 .user-admin-page__body {
   flex: 1;
   overflow: auto;
-  padding: 16px 18px 28px;
-  max-width: 1100px;
-  margin: 0 auto;
+  padding: 16px max(18px, 2.5vw) 28px;
   width: 100%;
+  max-width: none;
+  margin: 0;
   box-sizing: border-box;
 }
 
@@ -8054,7 +8054,7 @@ div.card__text--readonly:not(.card__text--preview) {
 
 .user-admin-page__table {
   width: 100%;
-  min-width: 920px;
+  min-width: 1120px;
   border-collapse: collapse;
   font-size: 0.8125rem;
 }
@@ -8083,10 +8083,43 @@ div.card__text--readonly:not(.card__text--preview) {
   white-space: nowrap;
 }
 
+.user-admin-page__quota-cell {
+  min-width: 7.5rem;
+  max-width: 13rem;
+  vertical-align: top;
+}
+
+.user-admin-page__quota-inner {
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
+.user-admin-page__quota-sub {
+  margin-top: 3px;
+  color: rgba(55, 53, 47, 0.52);
+  font-size: 0.6875rem;
+}
+
+.user-admin-page__quota-month {
+  margin-top: 3px;
+  color: rgba(55, 53, 47, 0.42);
+  font-size: 0.625rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.user-admin-page__quota-stored {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(55, 53, 47, 0.08);
+  font-size: 0.6875rem;
+  color: rgba(55, 53, 47, 0.58);
+  line-height: 1.35;
+}
+
 .user-admin-page__cell-input {
   width: 100%;
   min-width: 5.5rem;
-  max-width: 11rem;
+  max-width: min(14rem, 22vw);
   margin: 0;
   padding: 5px 7px;
   border: 1px solid rgba(55, 53, 47, 0.14);

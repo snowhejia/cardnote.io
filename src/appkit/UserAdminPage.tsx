@@ -1,8 +1,10 @@
 import { createPortal } from "react-dom";
 import { useAppChrome } from "../i18n/useAppChrome";
-import type { Dispatch, SetStateAction } from "react";
+import type { Dispatch, ReactNode, SetStateAction } from "react";
+import type { ScatteredUiChrome } from "../i18n/scatteredUiChrome";
 import type { ProfileDraft } from "./useUserAdmin";
 import type { PublicUser } from "../api/users";
+import { formatByteSize } from "../noteStats";
 
 type Role = "admin" | "user" | "subscriber";
 
@@ -39,6 +41,68 @@ export type UserAdminPageProps = {
 function shortId(id: string) {
   if (id.length <= 18) return id;
   return `${id.slice(0, 14)}…`;
+}
+
+function userQuotaCell(
+  u: PublicUser,
+  c: ScatteredUiChrome
+): { title?: string; body: ReactNode } {
+  const storedBytes = u.attachmentsTotalBytes;
+  const storedLine =
+    typeof storedBytes === "number" && Number.isFinite(storedBytes) ? (
+      <div
+        className="user-admin-page__quota-stored"
+        title={c.adminAttachmentsStoredHint}
+      >
+        {c.adminAttachmentsStoredTotal(formatByteSize(storedBytes))}
+      </div>
+    ) : null;
+
+  const q = u.mediaQuota;
+  if (!q) {
+    return {
+      body: (
+        <>
+          <div>—</div>
+          {storedLine}
+        </>
+      ),
+    };
+  }
+  const single = formatByteSize(q.singleFileMaxBytes);
+  const monthTitle =
+    q.usageMonth?.trim() ? c.adminQuotaMonthTitle(q.usageMonth.trim()) : undefined;
+  if (q.quotaUnlimited) {
+    return {
+      title: monthTitle,
+      body: (
+        <>
+          <div>{c.adminQuotaUnlimitedLabel}</div>
+          <div className="user-admin-page__quota-sub">
+            {c.adminQuotaPerFileMax(single)}
+          </div>
+          {storedLine}
+        </>
+      ),
+    };
+  }
+  const used = formatByteSize(q.uploadedBytesMonth);
+  const lim = formatByteSize(q.monthlyLimitBytes);
+  return {
+    title: monthTitle,
+    body: (
+      <>
+        <div>{c.adminQuotaMonthlyRatio(used, lim)}</div>
+        <div className="user-admin-page__quota-sub">
+          {c.adminQuotaPerFileMax(single)}
+        </div>
+        {q.usageMonth ? (
+          <div className="user-admin-page__quota-month">{q.usageMonth}</div>
+        ) : null}
+        {storedLine}
+      </>
+    ),
+  };
 }
 
 export function UserAdminPage(p: UserAdminPageProps) {
@@ -231,6 +295,7 @@ export function UserAdminPage(p: UserAdminPageProps) {
                     <th>{c.adminThLoginId}</th>
                     <th>{c.adminThEmail}</th>
                     <th>{c.adminThRole}</th>
+                    <th>{c.adminThAttachments}</th>
                     <th>{c.adminThResetPwd}</th>
                     <th>{c.adminThProfile}</th>
                     <th />
@@ -244,6 +309,7 @@ export function UserAdminPage(p: UserAdminPageProps) {
                     const em = draft?.email ?? (u.email ?? "");
                     const busy = rowBusyId === u.id;
                     const pendingDel = Boolean(u.deletionPending);
+                    const quotaCell = userQuotaCell(u, c);
                     return (
                       <tr key={u.id}>
                         <td
@@ -313,6 +379,17 @@ export function UserAdminPage(p: UserAdminPageProps) {
                             <option value="subscriber">{c.adminRoleSubscriber}</option>
                             <option value="admin">{c.adminRoleAdmin}</option>
                           </select>
+                        </td>
+                        <td
+                          className="user-admin-page__quota-cell"
+                          title={quotaCell.title}
+                        >
+                          <div
+                            className="user-admin-page__quota-inner"
+                            aria-label={c.adminAriaAttachments(u.username)}
+                          >
+                            {quotaCell.body}
+                          </div>
                         </td>
                         <td>
                           <div className="user-admin__pwd-inner">

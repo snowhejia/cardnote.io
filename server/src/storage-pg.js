@@ -1360,3 +1360,26 @@ export async function listCardAttachmentsPage(ownerKey, opts = {}) {
   });
   return { items, total };
 }
+
+/**
+ * 每位用户「库内」附件总字节（card_attachments.size_bytes 之和，仅未进回收站的卡片）。
+ * @returns {Promise<Map<string, number>>} userId → bytes（无附件的用户不在 Map 中）
+ */
+export async function attachmentStorageBytesByUserId() {
+  const res = await query(
+    `SELECT c.user_id AS uid, COALESCE(SUM(a.size_bytes), 0)::bigint AS n
+     FROM card_attachments a
+     INNER JOIN cards c ON c.id = a.card_id AND c.trashed_at IS NULL
+     WHERE c.user_id IS NOT NULL
+     GROUP BY c.user_id`
+  );
+  const map = new Map();
+  for (const row of res.rows) {
+    if (row.uid == null) continue;
+    const id = String(row.uid).trim();
+    if (!id) continue;
+    const n = Number(row.n);
+    map.set(id, Number.isFinite(n) && n > 0 ? Math.floor(n) : 0);
+  }
+  return map;
+}
