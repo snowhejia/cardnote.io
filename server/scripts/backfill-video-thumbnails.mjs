@@ -18,6 +18,7 @@
 import dotenv from "dotenv";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
+import { mediaNeedsWorkExists } from "./mediaMetadataPendingSql.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: join(__dirname, "../.env") });
@@ -255,46 +256,6 @@ async function patchMediaArray(media) {
   return { changed, media: next };
 }
 
-/**
- * 待处理行筛选。注意：PG 里 `NOT (NULL::text ~ 'regex')` 为 NULL，会导致含 JSON null 的项永远不命中；
- * 对 ->> 结果用 COALESCE(...,'') 再匹配，避免 durationSec / sizeBytes 为 null 时被整行排除。
- *
- * @param {string} tableAlias @param {string} mediaColumn
- */
-function mediaNeedsWorkExists(tableAlias, mediaColumn) {
-  return `EXISTS (
-  SELECT 1 FROM jsonb_array_elements(COALESCE(${tableAlias}.${mediaColumn}, '[]'::jsonb)) elem
-  WHERE COALESCE(NULLIF(trim(elem->>'url'), ''), '') <> ''
-  AND (
-    (
-      (elem->>'kind' IN ('image', 'video'))
-      AND (elem->>'thumbnailUrl' IS NULL OR btrim(elem->>'thumbnailUrl') = '')
-    )
-    OR (
-      (elem->>'kind' = 'video')
-      AND NOT (
-        jsonb_typeof(elem->'durationSec') = 'number'
-        AND (elem->>'durationSec')::double precision >= 0
-      )
-      AND NOT (
-        COALESCE(elem->>'durationSec', '') ~ '^-?[0-9]+(\\.[0-9]+)?$'
-      )
-    )
-    OR (
-      (elem->>'kind' IN ('image', 'video', 'audio', 'file'))
-      AND NOT (
-        (
-          jsonb_typeof(elem->'sizeBytes') = 'number'
-          AND (elem->>'sizeBytes')::numeric >= 0
-          AND (elem->>'sizeBytes')::numeric = floor((elem->>'sizeBytes')::numeric)
-        )
-        OR (COALESCE(elem->>'sizeBytes', '') ~ '^[0-9]+$')
-      )
-    )
-  )
-)`;
-}
-
 async function runCards() {
   const { rows } = await query(
     `SELECT id, media FROM cards c
@@ -314,7 +275,19 @@ async function runCards() {
     }
   }
   if (dryRun) console.log("[cards] dry-run：未写库");
-  else console.log(`[cards] 共更新 ${updated} 张卡片`);
+  else {
+    console.log(`[cards] 共更新 ${updated} 张卡片`);
+    const { rows: remRows } = await query(
+      `SELECT COUNT(*)::int AS n FROM cards c
+       WHERE c.trashed_at IS NULL AND ${mediaNeedsWorkExists("c", "media")}`
+    );
+    const remaining = remRows[0]?.n ?? 0;
+    if (remaining > 0) {
+      console.log(
+        `[cards] 仍剩 ${remaining} 张卡片含「待补」附件（含外链/本地路径/SVG/本趟探测失败等无法写库的项）；与「本趟更新张数」无必然相等关系。`
+      );
+    }
+  }
 }
 
 async function runTrash() {

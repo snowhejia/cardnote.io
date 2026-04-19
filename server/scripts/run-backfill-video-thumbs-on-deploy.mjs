@@ -2,8 +2,9 @@
 /**
  * 部署时自动跑一次「媒体元数据补全」脚本（缩略图 + sizeBytes 等，见 backfill-video-thumbnails.mjs）。
  *
- * - 已配置 COS 且库中无 `media_metadata_backfill_v1` 标记时执行；成功后写入 mikujar_deploy_hooks，
- *   并删除旧版 `video_thumb_backfill_v1`（仅缩略图阶段曾用的标记）。
+ * - 已配置 COS 且库中无 `media_metadata_backfill_v1` 标记时执行；仅当补全后「待补」卡片数为 0 时写入完成标记。
+ *   若仍有待补行（多为外链等脚本无法写库），不写入标记，下次部署会继续跑。
+ *   成功写入时并删除旧版 `video_thumb_backfill_v1`（仅缩略图阶段曾用的标记）。
  * - SKIP_VIDEO_THUMB_BACKFILL_ON_DEPLOY=1：跳过（沿用旧变量名）。
  * - FORCE_VIDEO_THUMB_BACKFILL_ON_DEPLOY=1 或 FORCE_MEDIA_METADATA_BACKFILL_ON_DEPLOY=1：清除上述标记后重跑。
  */
@@ -11,6 +12,7 @@ import dotenv from "dotenv";
 import { spawnSync } from "child_process";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
+import { mediaNeedsWorkExists } from "./mediaMetadataPendingSql.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const serverDir = join(__dirname, "..");
@@ -89,13 +91,28 @@ async function main() {
       return;
     }
 
+    const { rows: pendingRows } = await query(
+      `SELECT COUNT(*)::int AS n FROM cards c
+       WHERE c.trashed_at IS NULL AND ${mediaNeedsWorkExists("c", "media")}`
+    );
+    const pending = pendingRows[0]?.n ?? 0;
+    if (pending > 0) {
+      console.log(
+        `[deploy/backfill] 补全后仍有 ${pending} 张卡片含待补附件，不写入完成标记，下次部署将继续执行补全。`
+      );
+      console.log(
+        "[deploy/backfill] 若长期无法清零（多为外链占位），可设 SKIP_VIDEO_THUMB_BACKFILL_ON_DEPLOY=1 跳过启动补全。"
+      );
+      return;
+    }
+
     await query(`INSERT INTO mikujar_deploy_hooks (hook_key) VALUES ($1)`, [
       HOOK_KEY,
     ]);
     await query(`DELETE FROM mikujar_deploy_hooks WHERE hook_key = $1`, [
       LEGACY_HOOK_KEY,
     ]);
-    console.log("[deploy/backfill] 已写入完成标记并清理旧版 video_thumb 标记（若有）。");
+    console.log("[deploy/backfill] 待补已清零，已写入完成标记并清理旧版 video_thumb 标记（若有）。");
   } finally {
     await closePool();
   }
