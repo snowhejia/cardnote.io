@@ -13,6 +13,7 @@
  * 非 COS 直链（仅 /uploads/ 本地路径）无法从桶里读大小，会跳过。
  * 外链占位图（如 picsum）不是本桶对象，解析不出 key 属正常，脚本会静默跳过且不刷屏 warn。
  * 以 / 开头但非 /uploads/ 的路径（如微信导入的 /微信图片_xxx.jpg）属客户端本地路径，服务端无法当 COS 处理，同样静默跳过。
+ * card_attachments 由 cards.media 触发器同步；补 duration 只更新 cards.media 即可。
  */
 import dotenv from "dotenv";
 import { dirname, join } from "path";
@@ -254,7 +255,12 @@ async function patchMediaArray(media) {
   return { changed, media: next };
 }
 
-/** @param {string} tableAlias @param {string} mediaColumn */
+/**
+ * 待处理行筛选。注意：PG 里 `NOT (NULL::text ~ 'regex')` 为 NULL，会导致含 JSON null 的项永远不命中；
+ * 对 ->> 结果用 COALESCE(...,'') 再匹配，避免 durationSec / sizeBytes 为 null 时被整行排除。
+ *
+ * @param {string} tableAlias @param {string} mediaColumn
+ */
 function mediaNeedsWorkExists(tableAlias, mediaColumn) {
   return `EXISTS (
   SELECT 1 FROM jsonb_array_elements(COALESCE(${tableAlias}.${mediaColumn}, '[]'::jsonb)) elem
@@ -271,7 +277,7 @@ function mediaNeedsWorkExists(tableAlias, mediaColumn) {
         AND (elem->>'durationSec')::double precision >= 0
       )
       AND NOT (
-        (elem->>'durationSec') ~ '^-?[0-9]+(\\.[0-9]+)?$'
+        COALESCE(elem->>'durationSec', '') ~ '^-?[0-9]+(\\.[0-9]+)?$'
       )
     )
     OR (
@@ -282,7 +288,7 @@ function mediaNeedsWorkExists(tableAlias, mediaColumn) {
           AND (elem->>'sizeBytes')::numeric >= 0
           AND (elem->>'sizeBytes')::numeric = floor((elem->>'sizeBytes')::numeric)
         )
-        OR ((elem->>'sizeBytes') ~ '^[0-9]+$')
+        OR (COALESCE(elem->>'sizeBytes', '') ~ '^[0-9]+$')
       )
     )
   )
