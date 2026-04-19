@@ -144,6 +144,8 @@ const MIME_TO_EXT = {
   "video/mp4": "mp4",
   "video/webm": "webm",
   "video/quicktime": "mov",
+  /** Matroska：扩展名在 EXT_TO_MIME 中需为 video/*，否则 kindFromMime 会当成 file → not_video */
+  "video/x-matroska": "mkv",
   "video/ogg": "ogv",
   "application/pdf": "pdf",
   "audio/mpeg": "mp3",
@@ -342,6 +344,7 @@ function videoTempExt(mimetype) {
   if (m === "video/webm") return "webm";
   if (m === "video/quicktime") return "mov";
   if (m === "video/ogg") return "ogv";
+  if (m === "video/x-matroska") return "mkv";
   return "mp4";
 }
 
@@ -1047,6 +1050,7 @@ function inferMimeFromFilename(originalname) {
     mp4: "video/mp4",
     webm: "video/webm",
     mov: "video/quicktime",
+    mkv: "video/x-matroska",
     mp3: "audio/mpeg",
     wav: "audio/wav",
     m4a: "audio/mp4",
