@@ -876,6 +876,105 @@ export async function updateCard(userId, cardId, patch) {
 }
 
 /**
+ * 是否已有可展示的时长（与前端一致）
+ * @param {unknown} o
+ */
+function mediaItemHasServerDurationSec(o) {
+  if (!o || typeof o !== "object") return false;
+  const d = /** @type {{ durationSec?: unknown }} */ (o).durationSec;
+  if (typeof d === "number" && Number.isFinite(d) && d >= 0) return true;
+  if (typeof d === "string" && /^-?\d+(\.\d+)?$/.test(String(d).trim()))
+    return true;
+  return false;
+}
+
+/**
+ * 合并单条附件元数据（仅填空项）：供浏览器探测到时长后写回，避免整卡 PATCH。
+ * @param {string|null} userId
+ * @param {string} cardId
+ * @param {number} mediaIndex
+ * @param {{ durationSec?: number; sizeBytes?: number }} patch
+ * @returns {Promise<{ updated: boolean }>}
+ */
+export async function patchCardMediaItemAtIndex(
+  userId,
+  cardId,
+  mediaIndex,
+  patch
+) {
+  const cid = String(cardId || "").trim();
+  if (!cid) throw new Error("缺少卡片 id");
+  const idx = Math.floor(Number(mediaIndex));
+  if (!Number.isFinite(idx) || idx < 0) throw new Error("附件索引无效");
+
+  const { sql: cOwnSql, params: cOwnParams } = cardOwnershipCondition(
+    userId,
+    2
+  );
+  const r = await query(
+    `SELECT media FROM cards WHERE id = $1 AND (${cOwnSql}) AND trashed_at IS NULL`,
+    [cid, ...cOwnParams]
+  );
+  if (r.rowCount === 0) throw new Error("笔记不存在或无权限");
+
+  const raw = r.rows[0].media;
+  /** @type {unknown[]} */
+  const media = Array.isArray(raw)
+    ? JSON.parse(JSON.stringify(raw))
+    : [];
+  if (idx >= media.length) throw new Error("附件索引无效");
+
+  const cur = media[idx];
+  if (!cur || typeof cur !== "object") throw new Error("附件数据无效");
+
+  let changed = false;
+  const p = patch && typeof patch === "object" ? patch : {};
+
+  if (
+    typeof p.durationSec === "number" &&
+    Number.isFinite(p.durationSec) &&
+    p.durationSec >= 0 &&
+    p.durationSec <= 86400000
+  ) {
+    if (!mediaItemHasServerDurationSec(cur)) {
+      /** @type {Record<string, unknown>} */ (cur).durationSec = Math.round(
+        p.durationSec
+      );
+      changed = true;
+    }
+  }
+
+  if (
+    typeof p.sizeBytes === "number" &&
+    Number.isFinite(p.sizeBytes) &&
+    p.sizeBytes >= 0 &&
+    p.sizeBytes <= 9223372036854775807
+  ) {
+    const sb = /** @type {Record<string, unknown>} */ (cur).sizeBytes;
+    const has =
+      (typeof sb === "number" &&
+        Number.isFinite(sb) &&
+        sb >= 0 &&
+        Number.isInteger(sb)) ||
+      (typeof sb === "string" && /^[0-9]+$/.test(String(sb).trim()));
+    if (!has) {
+      /** @type {Record<string, unknown>} */ (cur).sizeBytes = Math.floor(
+        p.sizeBytes
+      );
+      changed = true;
+    }
+  }
+
+  if (!changed) return { updated: false };
+
+  await query(
+    `UPDATE cards SET media = $1::jsonb, updated_at = now() WHERE id = $2`,
+    [JSON.stringify(media), cid]
+  );
+  return { updated: true };
+}
+
+/**
  * 从指定合集移除一条 card 归属（多合集）；删后若无任何 placement，卡片在 GET 树中会以「未归类」孤儿形式出现。
  * @param {string|null} userId
  * @param {string} cardId

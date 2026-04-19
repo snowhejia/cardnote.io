@@ -247,6 +247,30 @@ export async function updateCardApi(
   }
 }
 
+/** 仅合并单条附件元数据（durationSec / sizeBytes）；服务端已有值不覆盖 */
+export async function patchCardMediaItemApi(
+  cardId: string,
+  mediaIndex: number,
+  patch: { durationSec?: number; sizeBytes?: number }
+): Promise<{ ok: boolean; updated: boolean }> {
+  const base = apiBase();
+  try {
+    const r = await fetch(
+      `${base}/api/cards/${encodeURIComponent(cardId)}/media/${encodeURIComponent(String(mediaIndex))}`,
+      apiFetchInit({
+        method: "PATCH",
+        headers: buildHeadersPut({ "Content-Type": "application/json" }),
+        body: JSON.stringify(patch),
+      })
+    );
+    if (!r.ok) return { ok: false, updated: false };
+    const j = (await r.json()) as { updated?: unknown };
+    return { ok: true, updated: j.updated === true };
+  } catch {
+    return { ok: false, updated: false };
+  }
+}
+
 /** 删除卡片 */
 export async function deleteCardApi(cardId: string): Promise<boolean> {
   const base = apiBase();

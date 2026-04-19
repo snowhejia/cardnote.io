@@ -66,6 +66,7 @@ import {
   createCard,
   addCardToCollectionPlacement,
   updateCard,
+  patchCardMediaItemAtIndex,
   deleteCard,
   removeCardFromCollectionPlacement,
   listFavoriteCollectionIds,
@@ -1146,6 +1147,36 @@ app.patch("/api/cards/:id", collectionsWriterMw, async (req, res) => {
     res.status(status).json({ error: e.message || "更新失败" });
   }
 });
+
+/**
+ * PATCH /api/cards/:cardId/media/:mediaIndex — 仅合并单条附件元数据（durationSec / sizeBytes），已有值不覆盖
+ */
+app.patch(
+  "/api/cards/:cardId/media/:mediaIndex",
+  collectionsWriterMw,
+  async (req, res) => {
+    try {
+      const mediaIndex = parseInt(String(req.params.mediaIndex || ""), 10);
+      if (!Number.isFinite(mediaIndex) || mediaIndex < 0) {
+        res.status(400).json({ error: "附件索引无效" });
+        return;
+      }
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const out = await patchCardMediaItemAtIndex(
+        getUserId(req),
+        req.params.cardId,
+        mediaIndex,
+        body
+      );
+      notifyCollectionsSync(req);
+      res.json({ ok: true, updated: out.updated });
+    } catch (e) {
+      console.error(e);
+      const status = e.message?.includes("不存在") ? 404 : 400;
+      res.status(status).json({ error: e.message || "更新失败" });
+    }
+  }
+);
 
 /** DELETE /api/cards/:cardId/collections/:collectionId — 从该合集移除笔记（多合集之一） */
 app.delete(

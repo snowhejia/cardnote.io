@@ -5937,6 +5937,7 @@ export default function App() {
                 previewLayout={attachmentsPreviewLayout}
                 remoteListCacheUserKey={currentUser?.id?.trim() || "anon"}
                 remoteListRefreshNonce={attachmentsRemoteListNonce}
+                onRemoteListInvalidate={notifyRemoteAttachmentsChanged}
                 onOpenCard={(colId, cardId, mediaIndex) => {
                   const hit = findCardInTree(collections, colId, cardId);
                   if (hit) {

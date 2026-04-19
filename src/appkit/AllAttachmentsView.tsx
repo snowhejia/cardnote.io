@@ -5,6 +5,7 @@ import {
   resolveCosMediaUrlIfNeeded,
   resolveMediaUrl,
 } from "../api/auth";
+import { patchCardMediaItemApi } from "../api/collections";
 import { useAppChrome } from "../i18n/useAppChrome";
 import { MediaThumbImage, MediaThumbVideo } from "../mediaDisplay";
 import {
@@ -55,7 +56,19 @@ function formatDurationSec(sec: number): string {
 }
 
 /** 仅音/视频：优先展示上传时写入的 durationSec；旧数据再尝试浏览器读 metadata */
-function AttachmentDurationIfAny({ item }: { item: NoteMediaItem }) {
+function AttachmentDurationIfAny({
+  item,
+  cardId,
+  mediaIndex,
+  persistRemoteDuration,
+  onRemoteDurationPersisted,
+}: {
+  item: NoteMediaItem;
+  cardId: string;
+  mediaIndex: number;
+  persistRemoteDuration: boolean;
+  onRemoteDurationPersisted?: () => void;
+}) {
   if (item.kind !== "video" && item.kind !== "audio") return null;
   const sec = item.durationSec;
   if (typeof sec === "number" && Number.isFinite(sec) && sec >= 0) {
@@ -67,13 +80,34 @@ function AttachmentDurationIfAny({ item }: { item: NoteMediaItem }) {
       </span>
     );
   }
-  return <AttachmentDurationProbe item={item} />;
+  return (
+    <AttachmentDurationProbe
+      item={item}
+      cardId={cardId}
+      mediaIndex={mediaIndex}
+      persistRemoteDuration={persistRemoteDuration}
+      onRemoteDurationPersisted={onRemoteDurationPersisted}
+    />
+  );
 }
 
-function AttachmentDurationProbe({ item }: { item: NoteMediaItem }) {
+function AttachmentDurationProbe({
+  item,
+  cardId,
+  mediaIndex,
+  persistRemoteDuration,
+  onRemoteDurationPersisted,
+}: {
+  item: NoteMediaItem;
+  cardId: string;
+  mediaIndex: number;
+  persistRemoteDuration: boolean;
+  onRemoteDurationPersisted?: () => void;
+}) {
   type Phase = "loading" | "hidden" | "ok";
   const [phase, setPhase] = useState<Phase>("loading");
   const [text, setText] = useState("");
+  const persistOnceRef = useRef(false);
 
   useEffect(() => {
     if (item.kind !== "video" && item.kind !== "audio") {
@@ -119,6 +153,21 @@ function AttachmentDurationProbe({ item }: { item: NoteMediaItem }) {
         } else {
           setText(formatted);
           setPhase("ok");
+          const rounded =
+            Number.isFinite(d) && d >= 0 ? Math.min(86400000, Math.round(d)) : -1;
+          if (
+            persistRemoteDuration &&
+            rounded >= 0 &&
+            !persistOnceRef.current &&
+            mightHaveApiSession()
+          ) {
+            persistOnceRef.current = true;
+            void patchCardMediaItemApi(cardId, mediaIndex, {
+              durationSec: rounded,
+            }).then((r) => {
+              if (r.ok && r.updated) onRemoteDurationPersisted?.();
+            });
+          }
         }
       };
       const onErr = () => {
@@ -133,7 +182,14 @@ function AttachmentDurationProbe({ item }: { item: NoteMediaItem }) {
     return () => {
       cancelled = true;
     };
-  }, [item.kind, item.url]);
+  }, [
+    item.kind,
+    item.url,
+    cardId,
+    mediaIndex,
+    persistRemoteDuration,
+    onRemoteDurationPersisted,
+  ]);
 
   if (phase !== "ok" || !text) return null;
   return (
@@ -228,6 +284,8 @@ function AttachmentGridCell({
   item,
   gridIndex,
   onOpenCard,
+  persistRemoteDuration,
+  onRemoteDurationPersisted,
 }: {
   colId: string;
   cardId: string;
@@ -235,6 +293,8 @@ function AttachmentGridCell({
   item: NoteMediaItem;
   gridIndex: number;
   onOpenCard: (colId: string, cardId: string, mediaIndex: number) => void;
+  persistRemoteDuration: boolean;
+  onRemoteDurationPersisted?: () => void;
 }) {
   const c = useAppChrome();
   const name = attachmentDisplayName(item);
@@ -264,7 +324,13 @@ function AttachmentGridCell({
             {name}
           </span>
           <span className="all-attachments-page__meta-line">{sizeLine}</span>
-          <AttachmentDurationIfAny item={item} />
+          <AttachmentDurationIfAny
+            item={item}
+            cardId={cardId}
+            mediaIndex={mediaIndex}
+            persistRemoteDuration={persistRemoteDuration}
+            onRemoteDurationPersisted={onRemoteDurationPersisted}
+          />
         </div>
       </button>
     </li>
@@ -279,6 +345,7 @@ export function AllAttachmentsView({
   remoteListCacheUserKey = "anon",
   remoteListRefreshNonce = 0,
   onOpenCard,
+  onRemoteListInvalidate,
 }: {
   dataMode: "local" | "remote";
   entries: MediaAttachmentListEntry[];
@@ -290,9 +357,12 @@ export function AllAttachmentsView({
   /** 远程模式下附件变更时递增，用于重新拉取当前页 */
   remoteListRefreshNonce?: number;
   onOpenCard: (colId: string, cardId: string, mediaIndex: number) => void;
+  /** 浏览器探测到时长并写库后，使附件列表与笔记树刷新 */
+  onRemoteListInvalidate?: () => void;
 }) {
   const c = useAppChrome();
   const pageRootRef = useRef<HTMLDivElement>(null);
+  const persistRemoteDuration = dataMode === "remote";
 
   const filtered = useMemo(() => {
     if (filterKey === "all") return entries;
@@ -514,6 +584,8 @@ export function AllAttachmentsView({
                       item={ent.item}
                       gridIndex={gridIndex}
                       onOpenCard={onOpenCard}
+                      persistRemoteDuration={persistRemoteDuration}
+                      onRemoteDurationPersisted={onRemoteListInvalidate}
                     />
                   ))
                 : remoteRows.map((ent, gridIndex) => (
@@ -525,6 +597,8 @@ export function AllAttachmentsView({
                       item={ent.item}
                       gridIndex={gridIndex}
                       onOpenCard={onOpenCard}
+                      persistRemoteDuration={persistRemoteDuration}
+                      onRemoteDurationPersisted={onRemoteListInvalidate}
                     />
                   ))}
             </ul>
