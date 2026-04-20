@@ -237,6 +237,12 @@ export const PRESET_OBJECT_TYPES_GROUPS: PresetTypeGroup[] = [
           { id: "sf-person-role", name: "身份", type: "text", order: 1 },
           { id: "sf-person-org", name: "所属组织", type: "collectionLink", order: 2 },
           { id: "sf-person-url", name: "主页链接", type: "url", order: 3 },
+          {
+            id: "sf-person-works",
+            name: "代表作 / 作品",
+            type: "cardLinks",
+            order: 4,
+          },
         ],
       },
       {
@@ -483,20 +489,19 @@ export const PRESET_OBJECT_TYPES_GROUPS: PresetTypeGroup[] = [
         emoji: "📕",
         tint: "rgba(239, 68, 68, 0.12)",
         schemaFields: [
-          { id: "sf-xhs-url", name: "原始链接", type: "url", order: 0 },
           {
             id: "sf-xhs-author",
             name: "作者",
             type: "cardLink",
-            order: 1,
+            order: 2,
             cardLinkFromEdge: "creator",
           },
-          { id: "sf-xhs-date", name: "发布日期", type: "date", order: 2 },
+          { id: "sf-xhs-date", name: "发布日期", type: "date", order: 3 },
           {
             id: "sf-xhs-type",
             name: "类型",
             type: "choice",
-            order: 3,
+            order: 4,
             options: [
               { id: "o-xhs-note", name: "图文", color: "#ef4444" },
               { id: "o-xhs-video", name: "视频", color: "#8b5cf6" },
@@ -534,16 +539,15 @@ export const PRESET_OBJECT_TYPES_GROUPS: PresetTypeGroup[] = [
         emoji: "📺",
         tint: "rgba(0, 161, 214, 0.14)",
         schemaFields: [
-          { id: "sf-bili-url", name: "视频链接", type: "url", order: 0 },
           {
             id: "sf-bili-author",
             name: "UP 主",
             type: "cardLink",
-            order: 1,
+            order: 2,
             cardLinkFromEdge: "creator",
           },
-          { id: "sf-bili-date", name: "发布日期", type: "date", order: 2 },
-          { id: "sf-bili-duration", name: "时长（秒）", type: "number", order: 3 },
+          { id: "sf-bili-date", name: "发布日期", type: "date", order: 3 },
+          { id: "sf-bili-duration", name: "时长（秒）", type: "number", order: 4 },
         ],
         autoLinkRules: [
           {

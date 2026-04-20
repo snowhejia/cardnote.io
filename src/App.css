@@ -11375,6 +11375,40 @@ body.app--card-page-open .app {
   background: rgba(37, 99, 235, 0.16);
 }
 
+.card-page__tags-panel--cardlinks {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+
+.card-page__prop-cardlinks-list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.card-page__prop-cardlink-chip-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.card-page__prop-cardlinks-suggested {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.card-page__prop-cardlinks-manual {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
 .card-page__prop-empty--in-tags-panel {
   display: flex;
   align-items: center;

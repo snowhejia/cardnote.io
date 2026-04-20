@@ -86,12 +86,6 @@ function buildPresetClipCustomProps(
     const out = [
       ...clipBase,
       {
-        id: "sf-bili-url",
-        name: "视频链接",
-        type: "url",
-        value: url || null,
-      },
-      {
         id: "sf-bili-author",
         name: "UP 主",
         type: "cardLink",
@@ -120,12 +114,6 @@ function buildPresetClipCustomProps(
   }
   const out = [
     ...clipBase,
-    {
-      id: "sf-xhs-url",
-      name: "原始链接",
-      type: "url",
-      value: url || null,
-    },
     {
       id: "sf-xhs-author",
       name: "作者",

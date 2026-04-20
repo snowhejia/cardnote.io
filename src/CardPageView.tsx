@@ -108,6 +108,7 @@ const PROP_TYPE_LABELS: Record<CardPropertyType, string> = {
   choice: "选择",
   collectionLink: "关联",
   cardLink: "关联卡片",
+  cardLinks: "关联多张卡片",
   date: "日期",
   checkbox: "勾选",
   url: "链接",
@@ -126,12 +127,50 @@ function parseCardLinkRef(v: unknown): CardLinkRef | null {
   return { colId, cardId };
 }
 
+function dedupeCardLinkRefs(refs: CardLinkRef[]): CardLinkRef[] {
+  const seen = new Set<string>();
+  const out: CardLinkRef[] = [];
+  for (const r of refs) {
+    const k = `${r.colId}\t${r.cardId}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(r);
+  }
+  return out;
+}
+
+function parseCardLinkRefList(v: unknown): CardLinkRef[] {
+  if (!Array.isArray(v)) return [];
+  const parsed = v
+    .map((item) => parseCardLinkRef(item))
+    .filter((x): x is CardLinkRef => x != null);
+  return dedupeCardLinkRefs(parsed);
+}
+
 /** 将 schema 定义的 cardLink 与已存的 customProps 对齐（兼容旧 text 作者字段） */
 function coerceSchemaPropForEditor(
   field: SchemaField,
   matchProp: CardProperty | undefined,
   card: NoteCard
 ): CardProperty | undefined {
+  if (field.type === "cardLinks") {
+    if (!matchProp) return undefined;
+    if (matchProp.type === "cardLinks") return matchProp;
+    if (matchProp.type === "text") {
+      return {
+        id: field.id,
+        name: field.name,
+        type: "cardLinks",
+        value: null,
+      };
+    }
+    return {
+      id: matchProp.id,
+      name: field.name,
+      type: "cardLinks",
+      value: null,
+    };
+  }
   if (field.type !== "cardLink") return matchProp;
   if (!matchProp) return undefined;
   if (matchProp.type === "cardLink") return matchProp;
@@ -140,11 +179,14 @@ function coerceSchemaPropForEditor(
       ? card.relatedRefs?.find((r) => r.linkType === field.cardLinkFromEdge)
       : undefined;
     const ref = edge ? { colId: edge.colId, cardId: edge.cardId } : null;
+    const textVal =
+      typeof matchProp.value === "string" ? matchProp.value.trim() : "";
     return {
       id: field.id,
       name: field.name,
       type: "cardLink",
       value: ref,
+      ...(!ref && textVal ? { seedTitle: textVal } : {}),
     };
   }
   return {
@@ -163,6 +205,145 @@ function cardLinkDisplayLabel(
   if (!hit) return "（未能加载卡片）";
   const h = cardHeadlinePlain(hit.card);
   return h || "卡片";
+}
+
+/** 剪藏扩展等在关联写入前写入的昵称，需在 UI 展示（value 仍为 null 时） */
+function cardLinkSeedTitleText(prop: CardProperty): string {
+  return typeof prop.seedTitle === "string" ? prop.seedTitle.trim() : "";
+}
+
+function CardLinksValueEditor({
+  prop,
+  collections,
+  onChangeValue,
+  onOpenLinkedCard,
+  suggestedRefs,
+}: {
+  prop: CardProperty;
+  collections: Collection[];
+  onChangeValue: (v: CardProperty["value"]) => void;
+  onOpenLinkedCard?: (colId: string, cardId: string) => void;
+  suggestedRefs?: CardLinkRef[];
+}) {
+  const refs = parseCardLinkRefList(prop.value);
+  const [draftCol, setDraftCol] = useState("");
+  const [draftCard, setDraftCard] = useState("");
+
+  const setRefs = (next: CardLinkRef[]) => {
+    onChangeValue(next.length ? next : null);
+  };
+
+  const addRef = (r: CardLinkRef) => {
+    if (refs.some((x) => x.colId === r.colId && x.cardId === r.cardId)) return;
+    setRefs([...refs, r]);
+  };
+
+  const commitManual = () => {
+    const colId = draftCol.trim();
+    const cardId = draftCard.trim();
+    if (!colId || !cardId) return;
+    addRef({ colId, cardId });
+    setDraftCol("");
+    setDraftCard("");
+  };
+
+  return (
+    <div className="card-page__tags-panel card-page__tags-panel--cardlinks">
+      <div className="card-page__prop-cardlinks-list">
+        {refs.length === 0 ? (
+          <span className="card-page__prop-empty card-page__prop-empty--in-tags-panel">
+            —
+          </span>
+        ) : (
+          refs.map((ref) => (
+            <span
+              key={`${ref.colId}-${ref.cardId}`}
+              className="card-page__prop-cardlink-chip-wrap"
+            >
+              {onOpenLinkedCard ? (
+                <button
+                  type="button"
+                  className="card-page__tags-hit-btn card-page__prop-author-link"
+                  onClick={() => onOpenLinkedCard(ref.colId, ref.cardId)}
+                >
+                  {cardLinkDisplayLabel(collections, ref)}
+                </button>
+              ) : (
+                <span className="card-page__prop-val-text card-page__prop-val-text--tags-panel">
+                  {cardLinkDisplayLabel(collections, ref)}
+                </span>
+              )}
+              <button
+                type="button"
+                className="card-page__prop-cardlink-clear"
+                title="移除"
+                aria-label="移除"
+                onClick={() =>
+                  setRefs(
+                    refs.filter(
+                      (x) =>
+                        !(x.colId === ref.colId && x.cardId === ref.cardId)
+                    )
+                  )
+                }
+              >
+                ×
+              </button>
+            </span>
+          ))
+        )}
+      </div>
+      {suggestedRefs && suggestedRefs.length > 0 ? (
+        <div className="card-page__prop-cardlinks-suggested">
+          {suggestedRefs.map((r) => {
+            const inList = refs.some(
+              (x) => x.colId === r.colId && x.cardId === r.cardId
+            );
+            if (inList) return null;
+            return (
+              <button
+                key={`sug-${r.colId}-${r.cardId}`}
+                type="button"
+                className="card-page__tags-hit-btn card-page__tags-hit-btn--placeholder"
+                onClick={() => addRef(r)}
+              >
+                + {cardLinkDisplayLabel(collections, r)}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+      <div className="card-page__prop-cardlinks-manual">
+        <input
+          type="text"
+          className="card-page__tags-add-input card-page__tags-add-input--prop-field"
+          placeholder="合集 ID"
+          value={draftCol}
+          onChange={(e) => setDraftCol(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") commitManual();
+          }}
+        />
+        <input
+          type="text"
+          className="card-page__tags-add-input card-page__tags-add-input--prop-field"
+          placeholder="卡片 ID"
+          value={draftCard}
+          onChange={(e) => setDraftCard(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") commitManual();
+          }}
+        />
+        <button
+          type="button"
+          className="card-page__prop-cardlink-fill"
+          onClick={commitManual}
+        >
+          添加
+        </button>
+      </div>
+    </div>
+  );
 }
 
 /** 与笔记标签一致：按选项名稳定哈希的 pastel，不用 options 里的固定灰 */
@@ -368,6 +549,7 @@ function PropValueEditor({
   collections,
   hideCollectionDots = false,
   linkFillRef = null,
+  suggestedCardLinks = undefined,
   onOpenLinkedCard,
 }: {
   prop: CardProperty;
@@ -378,6 +560,8 @@ function PropValueEditor({
   hideCollectionDots?: boolean;
   /** cardLink：可从图谱边一键填入（如 creator） */
   linkFillRef?: { colId: string; cardId: string } | null;
+  /** cardLinks：一键加入相关笔记里非 creator/source 的边 */
+  suggestedCardLinks?: CardLinkRef[];
   onOpenLinkedCard?: (colId: string, cardId: string) => void;
 }) {
   const ui = useAppChrome();
@@ -434,9 +618,56 @@ function PropValueEditor({
         />
       );
     }
+    if (prop.type === "cardLinks") {
+      const refs = parseCardLinkRefList(prop.value);
+      if (refs.length === 0) {
+        return (
+          <div className="card-page__tags-panel card-page__tags-panel--single-hit">
+            <span className="card-page__prop-empty card-page__prop-empty--in-tags-panel">
+              —
+            </span>
+          </div>
+        );
+      }
+      return (
+        <div className="card-page__tags-panel card-page__tags-panel--single-hit">
+          <div className="card-page__prop-cardlinks-list">
+            {refs.map((ref) =>
+              onOpenLinkedCard ? (
+                <button
+                  key={`${ref.colId}-${ref.cardId}`}
+                  type="button"
+                  className="card-page__tags-hit-btn card-page__prop-author-link"
+                  onClick={() => onOpenLinkedCard(ref.colId, ref.cardId)}
+                >
+                  {cardLinkDisplayLabel(collections, ref)}
+                </button>
+              ) : (
+                <span
+                  key={`${ref.colId}-${ref.cardId}`}
+                  className="card-page__prop-val-text card-page__prop-val-text--tags-panel"
+                >
+                  {cardLinkDisplayLabel(collections, ref)}
+                </span>
+              )
+            )}
+          </div>
+        </div>
+      );
+    }
     if (prop.type === "cardLink") {
       const ref = parseCardLinkRef(prop.value);
+      const seed = cardLinkSeedTitleText(prop);
       if (!ref) {
+        if (seed) {
+          return (
+            <div className="card-page__tags-panel card-page__tags-panel--single-hit">
+              <span className="card-page__prop-val-text card-page__prop-val-text--tags-panel">
+                {seed}
+              </span>
+            </div>
+          );
+        }
         return (
           <div className="card-page__tags-panel card-page__tags-panel--single-hit">
             <span className="card-page__prop-empty card-page__prop-empty--in-tags-panel">
@@ -594,8 +825,21 @@ function PropValueEditor({
     );
   }
 
+  if (prop.type === "cardLinks") {
+    return (
+      <CardLinksValueEditor
+        prop={prop}
+        collections={collections}
+        onChangeValue={onChangeValue}
+        onOpenLinkedCard={onOpenLinkedCard}
+        suggestedRefs={suggestedCardLinks}
+      />
+    );
+  }
+
   if (prop.type === "cardLink") {
     const ref = parseCardLinkRef(prop.value);
+    const seed = cardLinkSeedTitleText(prop);
     const label = ref ? cardLinkDisplayLabel(collections, ref) : "";
     const showFillFromEdge =
       Boolean(
@@ -619,6 +863,10 @@ function PropValueEditor({
           ) : ref ? (
             <span className="card-page__prop-val-text card-page__prop-val-text--tags-panel">
               {label}
+            </span>
+          ) : seed ? (
+            <span className="card-page__prop-val-text card-page__prop-val-text--tags-panel">
+              {seed}
             </span>
           ) : (
             <span className="card-page__prop-empty card-page__prop-empty--in-tags-panel">
@@ -1573,6 +1821,17 @@ export function CardPageView({
                     (r) => r.linkType === field.cardLinkFromEdge
                   )
                 : undefined;
+            const suggestedCardLinks =
+              field.type === "cardLinks"
+                ? dedupeCardLinkRefs(
+                    (card.relatedRefs ?? [])
+                      .filter(
+                        (r) =>
+                          r.linkType !== "creator" && r.linkType !== "source"
+                      )
+                      .map((r) => ({ colId: r.colId, cardId: r.cardId }))
+                  )
+                : undefined;
             return (
               <div
                 key={`schema-${field.id}`}
@@ -1589,6 +1848,7 @@ export function CardPageView({
                       collections={collections}
                       hideCollectionDots={hideCollectionDots}
                       linkFillRef={linkFillRef}
+                      suggestedCardLinks={suggestedCardLinks}
                       onOpenLinkedCard={onOpenLinkedCard}
                       onChangeValue={(v) => {
                         const baseId = editorProp.id;
@@ -1644,7 +1904,11 @@ export function CardPageView({
                           updateCustomProps([...customProps, seedProp]);
                         }}
                       >
-                        {field.type === "date" ? "设置日期…" : "填写…"}
+                        {field.type === "date"
+                          ? "设置日期…"
+                          : field.type === "cardLinks"
+                            ? "添加作品关联…"
+                            : "填写…"}
                       </button>
                     </div>
                   ) : (

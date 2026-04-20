@@ -362,6 +362,40 @@ function scrapeAuthorDom() {
   return "";
 }
 
+/** ld+json 常见 VideoObject.author */
+function scrapeAuthorFromLdJson() {
+  for (const script of document.querySelectorAll(
+    'script[type="application/ld+json"]'
+  )) {
+    let text = script.textContent?.trim() || "";
+    if (!text || text.length > 1_000_000) continue;
+    try {
+      const j = JSON.parse(text);
+      const nodes = Array.isArray(j) ? j : [j];
+      for (const node of nodes) {
+        if (!node || typeof node !== "object") continue;
+        const a = node.author;
+        if (typeof a === "string" && a.trim()) {
+          const s = a.trim();
+          if (s.length <= 64) return s;
+          return s.slice(0, 64);
+        }
+        if (a && typeof a === "object") {
+          const n = a.name;
+          if (typeof n === "string" && n.trim()) {
+            const s = n.trim();
+            if (s.length <= 64) return s;
+            return s.slice(0, 64);
+          }
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  return "";
+}
+
 function scrapeCoverFromLdJson() {
   for (const script of document.querySelectorAll(
     'script[type="application/ld+json"]'
@@ -764,6 +798,9 @@ async function scrapeBilibiliVideoPageAsync(mainWorldPlay) {
     fromJson.author ||
     scrapeAuthorDom() ||
     metaName("author") ||
+    metaProp("og:video:actor") ||
+    metaProp("article:author") ||
+    scrapeAuthorFromLdJson() ||
     "";
 
   const clipCid = (() => {

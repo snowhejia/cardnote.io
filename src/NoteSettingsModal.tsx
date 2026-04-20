@@ -91,6 +91,7 @@ const CUSTOM_SCHEMA_TYPE_OPTIONS: SchemaField["type"][] = [
   "date",
   "checkbox",
   "cardLink",
+  "cardLinks",
   "collectionLink",
 ];
 

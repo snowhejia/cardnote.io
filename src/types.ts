@@ -36,6 +36,8 @@ export type CardPropertyType =
   | "collectionLink"
   /** 关联另一张卡片（如作者 → 人物卡）：值为 { colId, cardId } | null */
   | "cardLink"
+  /** 关联多张卡片（如人物 → 多部作品卡）：值为 CardLinkRef[] | null */
+  | "cardLinks"
   | "date"
   | "checkbox"
   | "url";
@@ -56,7 +58,7 @@ export type CardProperty = {
   id: string;
   name: string;
   type: CardPropertyType;
-  value: string | number | boolean | string[] | CardLinkRef | null;
+  value: string | number | boolean | string[] | CardLinkRef | CardLinkRef[] | null;
   options?: CardPropertyOption[];
   /**
    * 可选：`cardLink` 尚未指向卡片时，供服务端自动关联（如人物卡）生成初始标题。
@@ -110,7 +112,8 @@ export type SchemaFieldType =
   | "checkbox"
   | "url"
   | "collectionLink"
-  | "cardLink";
+  | "cardLink"
+  | "cardLinks";
 
 /**
  * 合集类型 schema 中的单个属性定义。

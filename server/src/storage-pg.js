@@ -2159,6 +2159,7 @@ function customPropValueAsAutoLinkTitle(prop) {
     if (seed) return seed;
     return "";
   }
+  if (t === "cardLinks") return "";
   if (t === "collectionLink") {
     if (Array.isArray(v)) return v.length ? v.join(", ") : "";
     return "";
@@ -2785,8 +2786,12 @@ export async function getEffectiveSchemaForCard(userId, cardId) {
   const notePrefs = await getNotePrefsForOwnerKey(prefsOwnerKey);
   applyNotePrefsToAutoLinkRuleMap(mergedRules, notePrefs);
 
+  /** 与父级 sf-clip-url 重复，已由 catalog 移除；旧合集 card_schema 仍可能含此 id */
+  const deprecatedSchemaFieldIds = new Set(["sf-xhs-url", "sf-bili-url"]);
   return {
-    fields: [...mergedFields.values()].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
+    fields: [...mergedFields.values()]
+      .filter((f) => f && !deprecatedSchemaFieldIds.has(f.id))
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
     autoLinkRules: [...mergedRules.values()],
   };
 }
@@ -3557,9 +3562,15 @@ function patchClipParentFieldsIntoProps(rawProps, url, clipTitle) {
   const list = Array.isArray(rawProps) ? [...rawProps] : [];
   const u = typeof url === "string" ? url.trim() : "";
   const t = typeof clipTitle === "string" ? clipTitle.trim() : "";
-  const idxX = list.findIndex((p) => p && p.id === "sf-xhs-url");
-  const idxB = list.findIndex((p) => p && p.id === "sf-bili-url");
-  const anchor = idxX >= 0 ? idxX : idxB >= 0 ? idxB : list.length;
+  const idxAuthor = list.findIndex(
+    (p) =>
+      p &&
+      (p.id === "sf-xhs-author" ||
+        p.id === "sf-bili-author" ||
+        p.id === "sf-xhs-url" ||
+        p.id === "sf-bili-url")
+  );
+  const anchor = idxAuthor >= 0 ? idxAuthor : list.length;
 
   if (u && !list.some((p) => p && p.id === "sf-clip-url")) {
     list.splice(anchor, 0, {
@@ -3599,7 +3610,6 @@ function buildPresetClipCustomPropsArray(presetTypeId, url, authorText, clipTitl
   if (presetTypeId === "post_xhs") {
     return [
       ...clipBase,
-      { id: "sf-xhs-url", name: "原始链接", type: "url", value: u || null },
       {
         id: "sf-xhs-author",
         name: "作者",
@@ -3613,7 +3623,6 @@ function buildPresetClipCustomPropsArray(presetTypeId, url, authorText, clipTitl
   if (presetTypeId === "post_bilibili") {
     return [
       ...clipBase,
-      { id: "sf-bili-url", name: "视频链接", type: "url", value: u || null },
       {
         id: "sf-bili-author",
         name: "UP 主",
