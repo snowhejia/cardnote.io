@@ -2174,16 +2174,47 @@ function truncateAutoLinkCardTitle(s) {
   return t.slice(0, AUTO_LINK_NEW_CARD_TITLE_MAX);
 }
 
+/** 去掉简单 HTML 标签与常见实体，供自动建卡标题回退（剪藏正文多为 HTML） */
+function autoLinkPlainTextFromHtmlSnippet(html) {
+  const raw = String(html ?? "").trim();
+  if (!raw) return "";
+  const noTags = raw.replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ");
+  const decoded = noTags
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"');
+  return decoded.replace(/\s+/g, " ").trim();
+}
+
+function sanitizeAutoLinkTitleRaw(raw, forPerson) {
+  let t = String(raw ?? "").trim();
+  if (!t) return "";
+  if (/<[^>]+>/.test(t)) {
+    t = autoLinkPlainTextFromHtmlSnippet(t);
+  }
+  if (!t) return "";
+  if (forPerson && t.length > 80) {
+    return t.slice(0, 80).trim();
+  }
+  return t;
+}
+
 /**
  * 自动建卡：用源卡 schema 属性作为目标卡标题（cards.text）。
  * 优先 step.syncSchemaFieldId；无则 source 类目标尝试源上首个 url 字段；再回落正文首行。
+ * 人物卡：不得用正文 HTML 作昵称回退（避免整段 <p> 写入人物名）。
  *
- * @param {{ syncSchemaFieldId?: string, linkType?: string, targetKey?: string }} step
+ * @param {{ syncSchemaFieldId?: string, linkType?: string, targetKey?: string, targetObjectKind?: string }} step
  * @param {{ text?: string, custom_props?: unknown }} sourceCardRow
  * @param {Map<string, object>} mergedFieldMap
  */
 function autoLinkNewCardTitleFromSource(step, sourceCardRow, mergedFieldMap) {
   const props = Array.isArray(sourceCardRow.custom_props) ? sourceCardRow.custom_props : [];
+  const tgtKind =
+    typeof step.targetObjectKind === "string" ? step.targetObjectKind.trim() : "";
+  const forPerson = tgtKind === "person";
+
   const readByFieldId = (fid) => {
     const id = typeof fid === "string" ? fid.trim() : "";
     if (!id) return "";
@@ -2196,7 +2227,8 @@ function autoLinkNewCardTitleFromSource(step, sourceCardRow, mergedFieldMap) {
       ? step.syncSchemaFieldId.trim()
       : "";
   if (syncId) {
-    const fromSync = readByFieldId(syncId);
+    let fromSync = readByFieldId(syncId);
+    fromSync = sanitizeAutoLinkTitleRaw(fromSync, forPerson);
     if (fromSync) return truncateAutoLinkCardTitle(fromSync);
   }
 
@@ -2207,14 +2239,21 @@ function autoLinkNewCardTitleFromSource(step, sourceCardRow, mergedFieldMap) {
     urlFields.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
     for (const f of urlFields) {
       const t = readByFieldId(f.id);
-      if (t) return truncateAutoLinkCardTitle(t);
+      if (t) return truncateAutoLinkCardTitle(sanitizeAutoLinkTitleRaw(t, false));
     }
+  }
+
+  if (forPerson) {
+    return "";
   }
 
   const body = typeof sourceCardRow.text === "string" ? sourceCardRow.text.trim() : "";
   if (body) {
+    const fromStrong = titleFromClipNoteHtml(body);
+    if (fromStrong) return truncateAutoLinkCardTitle(fromStrong);
     const line = body.split("\n")[0].trim();
-    if (line) return truncateAutoLinkCardTitle(line);
+    const plain = autoLinkPlainTextFromHtmlSnippet(line || body);
+    if (plain) return truncateAutoLinkCardTitle(plain);
   }
   return "";
 }
@@ -2688,6 +2727,7 @@ export async function runAutoLinkRulesForCard(userId, cardId) {
             await client.query("BEGIN");
             let linkedColId;
             let linkedCardId;
+            let skipCommit = false;
 
             if (existLink.rowCount > 0) {
               linkedCardId = existLink.rows[0].to_card_id;
@@ -2733,98 +2773,108 @@ export async function runAutoLinkRulesForCard(userId, cardId) {
                 cardRow,
                 mergedFieldMap
               );
-              /** 人物卡列表标题读 sf-person-name；网页卡可读 sf-web-url */
-              let initialCustomProps = [];
-              if (newCardTitle && effectiveObjectKind === "person") {
-                initialCustomProps = [
+              const personNoTitle =
+                effectiveObjectKind === "person" &&
+                !String(newCardTitle ?? "").trim();
+              if (personNoTitle) {
+                await client.query("ROLLBACK");
+                skipCommit = true;
+              } else {
+                /** 人物卡列表标题读 sf-person-name；网页卡可读 sf-web-url */
+                let initialCustomProps = [];
+                if (newCardTitle && effectiveObjectKind === "person") {
+                  initialCustomProps = [
+                    {
+                      id: "sf-person-name",
+                      name: "名称",
+                      type: "text",
+                      value: newCardTitle,
+                    },
+                  ];
+                } else if (
+                  newCardTitle &&
+                  (effectiveObjectKind === "web" ||
+                    effectiveObjectKind === "web_page") &&
+                  /^https?:\/\//i.test(newCardTitle)
+                ) {
+                  initialCustomProps = [
+                    {
+                      id: "sf-web-url",
+                      name: "链接",
+                      type: "url",
+                      value: newCardTitle,
+                    },
+                  ];
+                }
+
+                await createCard(
+                  userId,
+                  targetColId,
                   {
-                    id: "sf-person-name",
-                    name: "名称",
-                    type: "text",
-                    value: newCardTitle,
+                    id: newId,
+                    text: newCardTitle,
+                    minutesOfDay,
+                    addedOn,
+                    objectKind: effectiveObjectKind,
+                    tags: [],
+                    relatedRefs: [],
+                    media: [],
+                    customProps: initialCustomProps,
+                    insertAtStart: false,
                   },
-                ];
-              } else if (
-                newCardTitle &&
-                (effectiveObjectKind === "web" ||
-                  effectiveObjectKind === "web_page") &&
-                /^https?:\/\//i.test(newCardTitle)
-              ) {
-                initialCustomProps = [
-                  {
-                    id: "sf-web-url",
-                    name: "链接",
-                    type: "url",
-                    value: newCardTitle,
-                  },
-                ];
+                  client
+                );
+                await client.query(
+                  `INSERT INTO card_links (user_id, from_card_id, to_card_id, link_type)
+                   VALUES ($1, $2, $3, $4)
+                   ON CONFLICT (from_card_id, to_card_id, link_type) DO NOTHING`,
+                  [uid, cardId, newId, step.linkType]
+                );
+                await client.query(
+                  `INSERT INTO card_links (user_id, from_card_id, to_card_id, link_type)
+                   VALUES ($1, $2, $3, $4)
+                   ON CONFLICT (from_card_id, to_card_id, link_type) DO NOTHING`,
+                  [uid, newId, cardId, step.linkType]
+                );
+                linkedColId = targetColId;
+                linkedCardId = newId;
+              }
+            }
+
+            if (!skipCommit) {
+              if (step.syncSchemaFieldId) {
+                await mergeCardLinkCustomPropWithClient(
+                  client,
+                  userId,
+                  cardId,
+                  step.syncSchemaFieldId,
+                  { colId: linkedColId, cardId: linkedCardId },
+                  mergedFieldMap
+                );
               }
 
-              await createCard(
-                userId,
-                targetColId,
-                {
-                  id: newId,
-                  text: newCardTitle,
-                  minutesOfDay,
-                  addedOn,
-                  objectKind: effectiveObjectKind,
-                  tags: [],
-                  relatedRefs: [],
-                  media: [],
-                  customProps: initialCustomProps,
-                  insertAtStart: false,
-                },
-                client
-              );
-              await client.query(
-                `INSERT INTO card_links (user_id, from_card_id, to_card_id, link_type)
-                 VALUES ($1, $2, $3, $4)
-                 ON CONFLICT (from_card_id, to_card_id, link_type) DO NOTHING`,
-                [uid, cardId, newId, step.linkType]
-              );
-              await client.query(
-                `INSERT INTO card_links (user_id, from_card_id, to_card_id, link_type)
-                 VALUES ($1, $2, $3, $4)
-                 ON CONFLICT (from_card_id, to_card_id, link_type) DO NOTHING`,
-                [uid, newId, cardId, step.linkType]
-              );
-              linkedColId = targetColId;
-              linkedCardId = newId;
-            }
+              if (step.targetSyncSchemaFieldId) {
+                const targetMerged = new Map();
+                const { fields: tf } = resolveSchemaFromChain(colMap, linkedColId);
+                for (const f of tf) targetMerged.set(f.id, f);
+                const srcColForRef =
+                  typeof rule.sourceCollectionId === "string" &&
+                  rule.sourceCollectionId.trim() &&
+                  colIds.includes(rule.sourceCollectionId.trim())
+                    ? rule.sourceCollectionId.trim()
+                    : colIds[0];
+                await mergeCardLinkCustomPropWithClient(
+                  client,
+                  userId,
+                  linkedCardId,
+                  step.targetSyncSchemaFieldId,
+                  { colId: srcColForRef, cardId: cardId },
+                  targetMerged
+                );
+              }
 
-            if (step.syncSchemaFieldId) {
-              await mergeCardLinkCustomPropWithClient(
-                client,
-                userId,
-                cardId,
-                step.syncSchemaFieldId,
-                { colId: linkedColId, cardId: linkedCardId },
-                mergedFieldMap
-              );
+              await client.query("COMMIT");
             }
-
-            if (step.targetSyncSchemaFieldId) {
-              const targetMerged = new Map();
-              const { fields: tf } = resolveSchemaFromChain(colMap, linkedColId);
-              for (const f of tf) targetMerged.set(f.id, f);
-              const srcColForRef =
-                typeof rule.sourceCollectionId === "string" &&
-                rule.sourceCollectionId.trim() &&
-                colIds.includes(rule.sourceCollectionId.trim())
-                  ? rule.sourceCollectionId.trim()
-                  : colIds[0];
-              await mergeCardLinkCustomPropWithClient(
-                client,
-                userId,
-                linkedCardId,
-                step.targetSyncSchemaFieldId,
-                { colId: srcColForRef, cardId: cardId },
-                targetMerged
-              );
-            }
-
-            await client.query("COMMIT");
           } catch (e) {
             await safeRollback(client);
             console.error(
