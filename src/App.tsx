@@ -5854,6 +5854,7 @@ export default function App() {
           ) : null}
         </div>
 
+        <div className="sidebar__tail">
         <div
           className={
             "sidebar__files-section" +
@@ -6312,6 +6313,7 @@ export default function App() {
               </span>
             ) : null}
           </button>
+        </div>
         </div>
       </aside>
 
