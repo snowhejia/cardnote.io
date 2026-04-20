@@ -348,6 +348,23 @@ function sidebarTypeSectionHasChildCollections(
   return plainFolderRootsCount > 0;
 }
 
+/**
+ * 「文件」区：子行与附件分类入口一致；远程等场景树上可能没有 file_* preset 合集，
+ * 仍应视为有子行（与侧栏列表渲染一致）。
+ */
+function sidebarFilesSectionHasChildCollections(
+  collections: Collection[],
+  fileSubtypeItems: readonly { id: string }[]
+): boolean {
+  if (fileSubtypeItems.length === 0) return false;
+  if (sidebarTypeSectionHasChildCollections(collections, fileSubtypeItems, 0)) {
+    return true;
+  }
+  return fileSubtypeItems.some(
+    (item) => presetFileSubtypeIdToAttachmentFilterKey(item.id) != null
+  );
+}
+
 /** 作品 / 任务下子类型圆点（与 catalog 色相接近的纯色） */
 const WORK_TASK_PRESET_SUBTYPE_DOT: Record<string, string> = {
   work_book: "#8b5cf6",
@@ -2006,10 +2023,9 @@ export default function App() {
 
   const filesSectionHasChildCollections = useMemo(
     () =>
-      sidebarTypeSectionHasChildCollections(
+      sidebarFilesSectionHasChildCollections(
         collections,
-        FILE_PRESET_SUBTYPE_ITEMS,
-        0
+        FILE_PRESET_SUBTYPE_ITEMS
       ),
     [collections]
   );
