@@ -2103,6 +2103,58 @@ export async function softTrashCard(ownerKey, row) {
     if (chk.rows[0].trashed_at != null) throw new Error("卡片已在回收站中");
 
     await client.query(`DELETE FROM card_placements WHERE card_id = $1`, [cardId]);
+    // 移入回收站时同步断开连接：删除所有入/出边，避免人物等对象被旧连接复现。
+    await client.query(
+      `DELETE FROM card_links
+        WHERE user_id = $1 AND (from_card_id = $2 OR to_card_id = $2)`,
+      [userId, cardId]
+    );
+    // 清理其它卡 custom_props 中指向该卡的 cardLink / cardLinks 值（含 seedTitle），保持属性面板一致。
+    const refs = await client.query(
+      `SELECT id, custom_props
+         FROM cards
+        WHERE user_id = $1
+          AND id <> $2
+          AND trashed_at IS NULL
+          AND custom_props IS NOT NULL`,
+      [userId, cardId]
+    );
+    for (const r of refs.rows) {
+      const raw = Array.isArray(r.custom_props) ? r.custom_props : [];
+      let changed = false;
+      const next = raw.map((p) => {
+        if (!p || typeof p !== "object") return p;
+        if (p.type === "cardLink" && p.value && typeof p.value === "object") {
+          const refCardId =
+            typeof p.value.cardId === "string" ? p.value.cardId.trim() : "";
+          if (refCardId === cardId) {
+            changed = true;
+            const { seedTitle: _seed, ...rest } = p;
+            return { ...rest, value: null };
+          }
+          return p;
+        }
+        if (p.type === "cardLinks" && Array.isArray(p.value)) {
+          const filtered = p.value.filter((x) => {
+            if (!x || typeof x !== "object") return false;
+            const refCardId =
+              typeof x.cardId === "string" ? x.cardId.trim() : "";
+            return refCardId !== cardId;
+          });
+          if (filtered.length !== p.value.length) {
+            changed = true;
+            return { ...p, value: filtered.length ? filtered : null };
+          }
+        }
+        return p;
+      });
+      if (changed) {
+        await client.query(
+          `UPDATE cards SET custom_props = $2::jsonb WHERE id = $1`,
+          [r.id, JSON.stringify(next)]
+        );
+      }
+    }
     const ts = deletedAt ? new Date(deletedAt) : new Date();
     const snap = { colId: String(colId), pathLabel: String(colPathLabel ?? "") };
     const up = await client.query(
