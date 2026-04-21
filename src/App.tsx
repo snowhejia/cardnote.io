@@ -226,6 +226,7 @@ import {
   pickPlacementColIdForCard,
   patchNoteCardByIdInTree,
   removeCardIdFromAllCollections,
+  stripCardsMediaByUrl,
   stripRelatedRefsToCardId,
   persistMergeCollectionsRemote,
   persistCollectionTreeLayoutRemoteWithRetry,
@@ -3272,6 +3273,31 @@ export default function App() {
       );
     },
     [canEdit, collections, trashStorageKey, dataMode, c.errTrashMove]
+  );
+
+  /** 「文件」网格右键删除：连带把其它笔记卡里指向同 URL 的附件也抹掉 */
+  const deleteFileCardFromAttachmentsView = useCallback(
+    async (colId: string, cardId: string, item: NoteMediaItem) => {
+      if (!canEdit) return;
+      if (!window.confirm(c.uiDeleteAttachmentConfirm)) return;
+      const url = item.url?.trim() ?? "";
+      await deleteCard(colId, cardId);
+      if (url) {
+        setCollections((prev) => stripCardsMediaByUrl(prev, url));
+      }
+      if (dataMode === "remote") {
+        notifyRemoteAttachmentsChanged();
+        await resyncRemoteCollectionsTree({ skipPreferenceRefresh: true });
+      }
+    },
+    [
+      canEdit,
+      c.uiDeleteAttachmentConfirm,
+      deleteCard,
+      dataMode,
+      notifyRemoteAttachmentsChanged,
+      resyncRemoteCollectionsTree,
+    ]
   );
 
   const handlePurgeBlankCards = useCallback(async () => {
@@ -7437,6 +7463,9 @@ export default function App() {
                 remoteListRefreshNonce={attachmentsRemoteListNonce}
                 onRemoteListInvalidate={notifyRemoteAttachmentsChanged}
                 onOpenCard={openAttachmentFromAllAttachmentsView}
+                onDeleteFile={
+                  canEdit ? deleteFileCardFromAttachmentsView : undefined
+                }
               />
             </Suspense>
           ) : remindersViewActive ? (

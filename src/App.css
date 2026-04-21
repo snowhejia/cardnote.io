@@ -1474,11 +1474,19 @@
   flex-direction: column;
   min-height: 0;
   max-height: 100%;
-  /* visible：账户下拉可越过侧栏盒子绘制；合集滚动仍在 .sidebar__nav 内 */
-  overflow: visible;
+  /* 内层不再套 .sidebar__nav，滚动直接在 aside 上；隐藏滚动条与原内层一致 */
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
   padding: 10px 8px 16px;
   border-right: 1px solid rgba(55, 53, 47, 0.09);
   background: #fbfbfa;
+}
+
+.sidebar::-webkit-scrollbar {
+  display: none;
 }
 
 .sidebar__header {

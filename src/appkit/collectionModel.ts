@@ -729,6 +729,27 @@ export function appendCardCopyToCollection(
   });
 }
 
+/** 从全树所有非文件卡的 media[] 中移除匹配 URL 的附件（文件卡删除后级联清理引用） */
+export function stripCardsMediaByUrl(
+  cols: Collection[],
+  url: string
+): Collection[] {
+  const key = url.trim();
+  if (!key) return cols;
+  return mapEveryCard(cols, (_col, card) => {
+    if (isFileCard(card)) return card;
+    const media = card.media;
+    if (!media?.length) return card;
+    const nextMedia = media.filter((m) => m.url?.trim() !== key);
+    if (nextMedia.length === media.length) return card;
+    if (nextMedia.length === 0) {
+      const { media: _m, ...rest } = card;
+      return rest;
+    }
+    return { ...card, media: nextMedia };
+  });
+}
+
 /** 从全树移除所有该 cardId 的卡片行 */
 export function removeCardIdFromAllCollections(
   cols: Collection[],
