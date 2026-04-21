@@ -28,6 +28,18 @@ function isInTopNavOrSidebar(el) {
  */
 function scrapeAuthorNickname() {
   const bad = /^(关注|粉丝|主页|私信|更多|查看|Follow|登录|注册)/;
+  const isValidAuthor = (t) =>
+    !!t &&
+    t.length >= 1 &&
+    t.length <= 48 &&
+    !bad.test(t) &&
+    !/^\d+$/.test(t) &&
+    !/^[\d\s:.-]+$/.test(t);
+  const decodeJsonEscaped = (s) =>
+    String(s || "")
+      .replace(/\\"/g, '"')
+      .replace(/\\\\/g, "\\")
+      .trim();
 
   const roots = [];
   const pushRoot = (n) => {
@@ -58,20 +70,23 @@ function scrapeAuthorNickname() {
       for (const el of root.querySelectorAll(sel)) {
         if (isInTopNavOrSidebar(el)) continue;
         const t = textOf(el);
-        if (t && t.length <= 48 && t.length >= 1 && !bad.test(t)) return t;
+        if (isValidAuthor(t)) return t;
       }
     }
     for (const a of root.querySelectorAll('a[href*="/user/profile/"]')) {
       if (isInTopNavOrSidebar(a)) continue;
       const t = textOf(a);
-      if (
-        t &&
-        t.length > 0 &&
-        t.length <= 48 &&
-        !bad.test(t) &&
-        !/^\d+$/.test(t)
-      ) {
-        return t;
+      if (isValidAuthor(t)) return t;
+    }
+    // 新版右侧详情常在「关注」按钮同层出现作者名
+    for (const btn of root.querySelectorAll("button")) {
+      const bt = textOf(btn);
+      if (!/^(关注|已关注|回关|Follow)$/i.test(bt)) continue;
+      const box = btn.closest("section, article, div");
+      if (!box) continue;
+      for (const a of box.querySelectorAll('a[href*="/user/profile/"], [class*="name"]')) {
+        const t = textOf(a);
+        if (isValidAuthor(t)) return t;
       }
     }
     return "";
@@ -89,35 +104,65 @@ function scrapeAuthorNickname() {
       if (t.length < 80 || t.length > 500_000) continue;
       const idx = t.indexOf(noteId);
       if (idx === -1) continue;
-      const chunk = t.slice(Math.max(0, idx - 2000), Math.min(t.length, idx + 12000));
+      const chunk = t.slice(Math.max(0, idx - 5000), Math.min(t.length, idx + 120000));
       let anchor = chunk.indexOf(`"noteId":"${noteId}"`);
       if (anchor === -1) anchor = chunk.indexOf(`"id":"${noteId}"`);
       if (anchor === -1) anchor = chunk.indexOf(noteId);
-      const tail = anchor === -1 ? chunk : chunk.slice(anchor, Math.min(chunk.length, anchor + 28000));
-      /** 锚在本条笔记之后，优先取 user 块内昵称，避免 chunk 里更早出现的他人 nickName */
-      const anchoredNick = tail.match(
-        /"user"\s*:\s*\{[\s\S]{0,12000}?"nickName"\s*:\s*"((?:[^"\\]|\\.)*)"/i
-      );
-      const anchoredNickname = tail.match(
-        /"user"\s*:\s*\{[\s\S]{0,12000}?"nickname"\s*:\s*"((?:[^"\\]|\\.)*)"/i
-      );
-      for (const m0 of [anchoredNick, anchoredNickname]) {
-        if (m0?.[1]) {
-          const raw = m0[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\");
-          if (raw.length > 0 && raw.length <= 64 && !bad.test(raw)) return raw;
-        }
-      }
-      const m = chunk.match(/"nickName"\s*:\s*"((?:[^"\\]|\\.)*)"/);
-      if (m && m[1]) {
-        const raw = m[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\");
-        if (raw.length > 0 && raw.length <= 64 && !bad.test(raw)) return raw;
-      }
-      const m2 = chunk.match(/"nickname"\s*:\s*"((?:[^"\\]|\\.)*)"/i);
-      if (m2 && m2[1]) {
-        const raw = m2[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\");
-        if (raw.length > 0 && raw.length <= 64 && !bad.test(raw)) return raw;
+      const tail =
+        anchor === -1 ? chunk : chunk.slice(anchor, Math.min(chunk.length, anchor + 70000));
+      /** 锚在本条笔记附近，优先从 user/author 对象里取昵称 */
+      const patterns = [
+        /"(?:user|author)"\s*:\s*\{[\s\S]{0,22000}?"nickName"\s*:\s*"((?:[^"\\]|\\.)*)"/i,
+        /"(?:user|author)"\s*:\s*\{[\s\S]{0,22000}?"nickname"\s*:\s*"((?:[^"\\]|\\.)*)"/i,
+        /"(?:user|author)"\s*:\s*\{[\s\S]{0,22000}?"name"\s*:\s*"((?:[^"\\]|\\.)*)"/i,
+        /"nickName"\s*:\s*"((?:[^"\\]|\\.)*)"/i,
+        /"nickname"\s*:\s*"((?:[^"\\]|\\.)*)"/i,
+      ];
+      for (const re of patterns) {
+        const m = tail.match(re) || chunk.match(re);
+        if (!m?.[1]) continue;
+        const raw = decodeJsonEscaped(m[1]);
+        if (isValidAuthor(raw)) return raw;
       }
     }
+  }
+
+  for (const script of document.querySelectorAll('script[type="application/ld+json"]')) {
+    const txt = String(script.textContent || "").trim();
+    if (!txt) continue;
+    let parsed = null;
+    try {
+      parsed = JSON.parse(txt);
+    } catch {
+      parsed = null;
+    }
+    if (!parsed) continue;
+    const queue = Array.isArray(parsed) ? [...parsed] : [parsed];
+    while (queue.length > 0) {
+      const cur = queue.shift();
+      if (!cur || typeof cur !== "object") continue;
+      const author = cur.author;
+      if (author && typeof author === "object") {
+        const nm = decodeJsonEscaped(author.name || author.nickname || author.nickName);
+        if (isValidAuthor(nm)) return nm;
+      }
+      const direct = decodeJsonEscaped(cur.authorName || cur.nickname || cur.nickName);
+      if (isValidAuthor(direct)) return direct;
+      for (const v of Object.values(cur)) {
+        if (v && typeof v === "object") queue.push(v);
+      }
+    }
+  }
+
+  const metaAuthorSelectors = [
+    'meta[name="author"]',
+    'meta[property="article:author"]',
+    'meta[property="og:article:author"]',
+    'meta[name="xhs:author"]',
+  ];
+  for (const sel of metaAuthorSelectors) {
+    const v = document.querySelector(sel)?.getAttribute("content")?.trim();
+    if (isValidAuthor(v)) return v;
   }
 
   return "";
@@ -136,18 +181,130 @@ function xhsTimestampToYmd(raw) {
   return `${y}-${m}-${day}`;
 }
 
+function toYmd(y, m, d) {
+  const dt = new Date(y, m - 1, d);
+  if (
+    Number.isNaN(dt.getTime()) ||
+    dt.getFullYear() !== y ||
+    dt.getMonth() + 1 !== m ||
+    dt.getDate() !== d
+  ) {
+    return null;
+  }
+  return `${String(y).padStart(4, "0")}-${String(m).padStart(2, "0")}-${String(
+    d
+  ).padStart(2, "0")}`;
+}
+
+function shiftDaysYmd(base, deltaDays) {
+  const dt = new Date(base.getFullYear(), base.getMonth(), base.getDate());
+  dt.setDate(dt.getDate() + deltaDays);
+  return toYmd(dt.getFullYear(), dt.getMonth() + 1, dt.getDate());
+}
+
+function inferYmdWithoutYear(month, day, now = new Date()) {
+  const thisYear = now.getFullYear();
+  const c1 = toYmd(thisYear, month, day);
+  if (!c1) return null;
+  const d1 = new Date(`${c1}T00:00:00`);
+  // 若推断到未来较远日期，视为去年（常见于跨年后看旧帖）
+  if (d1.getTime() - now.getTime() > 45 * 24 * 60 * 60 * 1000) {
+    return toYmd(thisYear - 1, month, day);
+  }
+  return c1;
+}
+
+function parseXhsDateTextToYmd(text) {
+  const s = String(text || "").trim();
+  if (!s) return null;
+  const now = new Date();
+
+  const full = s.match(/(\d{4})[./-](\d{1,2})[./-](\d{1,2})/);
+  if (full) {
+    const ymd = toYmd(Number(full[1]), Number(full[2]), Number(full[3]));
+    if (ymd) return ymd;
+  }
+
+  const md1 = s.match(/(?:^|[^\d])(\d{1,2})[./-](\d{1,2})(?:[^\d]|$)/);
+  if (md1) {
+    const ymd = inferYmdWithoutYear(Number(md1[1]), Number(md1[2]), now);
+    if (ymd) return ymd;
+  }
+
+  const md2 = s.match(/(\d{1,2})月(\d{1,2})日/);
+  if (md2) {
+    const ymd = inferYmdWithoutYear(Number(md2[1]), Number(md2[2]), now);
+    if (ymd) return ymd;
+  }
+
+  if (/(今天|刚刚|\d+\s*分钟前|\d+\s*小时前)/.test(s)) {
+    return shiftDaysYmd(now, 0);
+  }
+  if (/昨天/.test(s)) {
+    return shiftDaysYmd(now, -1);
+  }
+  if (/前天/.test(s)) {
+    return shiftDaysYmd(now, -2);
+  }
+  const daysAgo = s.match(/(\d+)\s*天前/);
+  if (daysAgo) {
+    return shiftDaysYmd(now, -Number(daysAgo[1]));
+  }
+
+  return null;
+}
+
+function extractXhsPublishTextSnippet(text) {
+  const s = String(text || "").replace(/\s+/g, " ").trim();
+  if (!s) return "";
+  const re =
+    /(\d{4}[./-]\d{1,2}[./-]\d{1,2}|\d{1,2}[./-]\d{1,2}|\d{1,2}月\d{1,2}日|今天|昨天|前天|\d+\s*天前|\d+\s*小时前|\d+\s*分钟前|刚刚)(?:\s+\d{1,2}:\d{2})?/;
+  const m = s.match(re);
+  return m?.[0]?.trim() || "";
+}
+
+function scrapeXhsPublishTimeText() {
+  const roots = [
+    document.querySelector("#noteContainer"),
+    document.querySelector(".note-detail"),
+    document.querySelector('[class*="note-detail"]'),
+    document.querySelector("main"),
+    document.body,
+  ].filter(Boolean);
+  const selectors = [
+    ".date",
+    ".time",
+    ".note-date",
+    ".publish-time",
+    '[class*="publish"]',
+    '[class*="create"]',
+    '[class*="date"]',
+    '[class*="time"]',
+    '[data-time]',
+  ];
+  for (const root of roots) {
+    for (const sel of selectors) {
+      for (const el of root.querySelectorAll(sel)) {
+        const t = extractXhsPublishTextSnippet(el.textContent || "");
+        if (t) return t;
+      }
+    }
+    const t = extractXhsPublishTextSnippet(root.textContent || "");
+    if (t) return t;
+  }
+  return "";
+}
+
 function scrapeXhsPublishDateYmd() {
   const noteId = extractNoteIdFromUrl();
-  if (!noteId) return null;
   for (const script of document.querySelectorAll("script:not([src])")) {
     const t = script.textContent || "";
     if (t.length < 80 || t.length > 500_000) continue;
-    const idx = t.indexOf(noteId);
-    if (idx === -1) continue;
-    const chunk = t.slice(
-      Math.max(0, idx - 2500),
-      Math.min(t.length, idx + 35000)
-    );
+    const idx = noteId ? t.indexOf(noteId) : -1;
+    const chunk =
+      idx >= 0
+        ? t.slice(Math.max(0, idx - 2500), Math.min(t.length, idx + 35000))
+        : t.slice(0, Math.min(t.length, 60000));
     const reNum =
       /"(?:time|timestamp|lastUpdateTime|pubTime|publish_time)"\s*:\s*(\d{10,13})\b/g;
     let m;
@@ -160,6 +317,35 @@ function scrapeXhsPublishDateYmd() {
     );
     if (iso?.[1]) return iso[1];
   }
+
+  const roots = [
+    document.querySelector("#noteContainer"),
+    document.querySelector(".note-detail"),
+    document.querySelector('[class*="note-detail"]'),
+    document.querySelector("main"),
+  ].filter(Boolean);
+
+  const selectors = [
+    ".date",
+    ".time",
+    ".note-date",
+    ".publish-time",
+    '[class*="publish"]',
+    '[class*="create"]',
+    '[class*="date"]',
+    '[class*="time"]',
+  ];
+  for (const root of roots) {
+    for (const sel of selectors) {
+      for (const el of root.querySelectorAll(sel)) {
+        const ymd = parseXhsDateTextToYmd(el.textContent || "");
+        if (ymd) return ymd;
+      }
+    }
+    const ymd = parseXhsDateTextToYmd(root.textContent || "");
+    if (ymd) return ymd;
+  }
+
   return null;
 }
 
@@ -316,14 +502,24 @@ function scrapeNotePage() {
     return true;
   }
 
+  function canonicalImageKey(src) {
+    try {
+      const u = new URL(src);
+      return `${u.origin}${u.pathname}`.toLowerCase();
+    } catch {
+      return String(src || "").toLowerCase();
+    }
+  }
+
   const seen = new Set();
   const imageUrls = [];
 
   function tryPushImage(img) {
     const src = imgDisplaySrc(img);
     if (!isUsableNoteImage(img, src)) return false;
-    if (seen.has(src)) return false;
-    seen.add(src);
+    const key = canonicalImageKey(src);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
     imageUrls.push(src);
     return true;
   }
@@ -366,7 +562,26 @@ function scrapeNotePage() {
         ".swiper-slide:not(.swiper-slide-duplicate)"
       );
     }
-    for (const slide of slides) {
+    const orderedSlides = Array.from(slides)
+      .map((slide, domOrder) => {
+        const raw = slide.getAttribute("data-swiper-slide-index");
+        const idx = Number.parseInt(raw || "", 10);
+        return {
+          slide,
+          domOrder,
+          realIndex: Number.isFinite(idx) ? idx : null,
+        };
+      })
+      .sort((a, b) => {
+        const ai = a.realIndex;
+        const bi = b.realIndex;
+        if (ai == null && bi == null) return a.domOrder - b.domOrder;
+        if (ai == null) return 1;
+        if (bi == null) return -1;
+        if (ai !== bi) return ai - bi;
+        return a.domOrder - b.domOrder;
+      });
+    for (const { slide } of orderedSlides) {
       const imgs = slide.querySelectorAll("img");
       for (const img of imgs) {
         if (tryPushImage(img)) break;
@@ -394,7 +609,11 @@ function scrapeNotePage() {
   const authorNickname = scrapeAuthorNickname();
   const noteIdForType = extractNoteIdFromUrl();
   const publishDateYmd = scrapeXhsPublishDateYmd();
+  const publishTimeText = scrapeXhsPublishTimeText();
   const xhsPostType = inferXhsPostType(noteIdForType, videoUrls);
+  const introParts = [];
+  if (authorNickname) introParts.push(`作者：${authorNickname}`);
+  if (publishTimeText) introParts.push(`发布时间：${publishTimeText}`);
   return {
     title,
     body,
@@ -403,6 +622,7 @@ function scrapeNotePage() {
     pageUrl,
     authorNickname,
     publishDateYmd,
+    intro: introParts.join("；") || null,
     xhsPostType,
   };
 }

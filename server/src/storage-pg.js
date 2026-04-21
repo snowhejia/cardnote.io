@@ -2571,8 +2571,8 @@ async function runBuiltinClipCreatorAutoLink(userId, card, disabledRuleIds) {
       ? prop.value.cardId.trim()
       : "";
 
+  const seed = personSeedFromProp(prop);
   if (!personCardId) {
-    const seed = personSeedFromProp(prop);
     if (!seed) return;
     const personTypeId = await resolvePresetCardTypeId(userId, "person");
     const hit = await query(
@@ -2656,6 +2656,18 @@ async function runBuiltinClipCreatorAutoLink(userId, card, disabledRuleIds) {
       [card.id]
     );
     personColId = srcPl.rows[0]?.collection_id || "";
+    // 兜底：若人物卡当前没有 placement，但我们回退使用了源卡 colId，
+    // 则顺手把人物卡放入该合集，避免前端按 {colId,cardId} 找不到目标卡。
+    if (personColId) {
+      await query(
+        `INSERT INTO card_placements (card_id, collection_id, pinned, sort_order)
+         SELECT $1, $2, false, COALESCE(MAX(sort_order), -1) + 1
+           FROM card_placements
+          WHERE collection_id = $2
+         ON CONFLICT (card_id, collection_id) DO NOTHING`,
+        [personCardId, personColId]
+      );
+    }
   }
   const curCardId =
     prop.value &&
@@ -2674,6 +2686,7 @@ async function runBuiltinClipCreatorAutoLink(userId, card, disabledRuleIds) {
       ...prop,
       type: "cardLink",
       value: { colId: personColId, cardId: personCardId },
+      ...(seed ? { seedTitle: seed } : {}),
     };
     await query(`UPDATE cards SET custom_props = $2::jsonb WHERE id = $1`, [
       card.id,

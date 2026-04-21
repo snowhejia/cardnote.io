@@ -85,14 +85,21 @@ function buildPresetClipCustomProps(
   if (isBili) {
     const out = [
       ...clipBase,
-      {
-        id: "sf-bili-author",
-        name: "UP 主",
-        type: "cardLink",
-        value: null,
-        cardLinkFromEdge: "creator",
-        ...(author ? { seedTitle: author } : {}),
-      },
+      author
+        ? {
+            id: "sf-bili-author",
+            name: "UP 主",
+            type: "text",
+            value: author,
+            cardLinkFromEdge: "creator",
+          }
+        : {
+            id: "sf-bili-author",
+            name: "UP 主",
+            type: "cardLink",
+            value: null,
+            cardLinkFromEdge: "creator",
+          },
     ];
     if (publishDateYmd) {
       out.push({
@@ -114,14 +121,21 @@ function buildPresetClipCustomProps(
   }
   const out = [
     ...clipBase,
-    {
-      id: "sf-xhs-author",
-      name: "作者",
-      type: "cardLink",
-      value: null,
-      cardLinkFromEdge: "creator",
-      ...(author ? { seedTitle: author } : {}),
-    },
+    author
+      ? {
+          id: "sf-xhs-author",
+          name: "作者",
+          type: "text",
+          value: author,
+          cardLinkFromEdge: "creator",
+        }
+      : {
+          id: "sf-xhs-author",
+          name: "作者",
+          type: "cardLink",
+          value: null,
+          cardLinkFromEdge: "creator",
+        },
   ];
   if (publishDateYmd) {
     out.push({
@@ -1260,14 +1274,20 @@ async function runSave(tabId, emit) {
   }
 
   for (let i = 0; i < imgs.length; i++) {
-    const url = imgs[i];
+    /**
+     * 后端当前按附件目标文件卡 created_at 倒序回传（新的在前）。
+     * 为让小红书多图最终展示顺序与原帖一致（1→N），这里对 XHS 反向上传：
+     * 先传最后一张，最后传第一张。B 站仍保持原顺序（封面优先）。
+     */
+    const sourceIdx = isBili ? i : imgs.length - 1 - i;
+    const url = imgs[sourceIdx];
     emitStepProgress(i, `图片 ${i + 1} / ${imgs.length}…`);
     try {
       let blob;
       let pickedUrl = url;
       if (
         isBili &&
-        i === 0 &&
+        sourceIdx === 0 &&
         Array.isArray(coverFetchCandidates) &&
         coverFetchCandidates.length > 0
       ) {
@@ -1287,9 +1307,9 @@ async function runSave(tabId, emit) {
         continue;
       }
       const filename =
-        isBili && i === 0
+        isBili && sourceIdx === 0
           ? biliCoverUploadFilename(title, pickedUrl)
-          : guessFilename(pickedUrl, i, isBili ? "bili" : "xhs");
+          : guessFilename(pickedUrl, sourceIdx, isBili ? "bili" : "xhs");
       const contentType = guessContentType(blob, filename);
       const up = await presignAndUpload(
         settings.apiBase,
@@ -1307,7 +1327,7 @@ async function runSave(tabId, emit) {
         sizeBytes: Math.floor(blob.size),
       });
     } catch (e) {
-      errors.push(`图${i + 1}：${e?.message || e}`);
+      errors.push(`图${sourceIdx + 1}：${e?.message || e}`);
     }
   }
 
