@@ -230,7 +230,18 @@ export async function postMeTrashEntry(
         body: JSON.stringify(entry),
       })
     );
-    return r.ok;
+    if (r.ok) return true;
+    try {
+      const j = (await r.json()) as { error?: unknown };
+      const err =
+        typeof j.error === "string" ? j.error.trim() : String(j.error ?? "");
+      if (/已在回收站|already.*trash/i.test(err)) {
+        return true;
+      }
+    } catch {
+      // ignore
+    }
+    return false;
   } catch {
     return false;
   }

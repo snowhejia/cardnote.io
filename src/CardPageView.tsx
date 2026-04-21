@@ -42,8 +42,14 @@ import {
 } from "./notePlainText";
 import {
   fetchCardEffectiveSchema,
+  patchCardMediaItemApi,
   postCardAutoLinkApi,
 } from "./api/collections";
+import {
+  needsCosReadUrl,
+  resolveCosMediaUrlIfNeeded,
+  resolveMediaUrl,
+} from "./api/auth";
 import type { ReminderPickerTarget } from "./ReminderPickerModal";
 import { useAppUiLang } from "./appUiLang";
 import { useAppChrome } from "./i18n/useAppChrome";
@@ -1183,6 +1189,7 @@ export function CardPageView({
   const [rerunAutoLinkMessage, setRerunAutoLinkMessage] = useState<
     string | null
   >(null);
+  const mediaMetaPersistAttemptedRef = useRef<Set<string>>(new Set());
 
   const PROPS_WIDTH_KEY = "mikujar-card-page-props-width";
   const [propsWidth, setPropsWidth] = useState(() => {
@@ -1336,6 +1343,138 @@ export function CardPageView({
   const mediaKey = media
     .map((x) => `${x.kind}:${x.url}:${x.name ?? ""}`)
     .join("|");
+
+  useEffect(() => {
+    const normalizeStableMediaUrl = (v: string | undefined): string => {
+      const s = (v ?? "").trim();
+      if (!s) return "";
+      const lower = s.toLowerCase();
+      // 不把临时签名 URL 回写数据库，避免过期
+      if (
+        lower.includes("x-amz-signature=") ||
+        lower.includes("x-amz-security-token=") ||
+        lower.includes("x-cos-signature=") ||
+        lower.includes("x-cos-security-token=") ||
+        lower.includes("signature=")
+      ) {
+        return "";
+      }
+      return s;
+    };
+
+    for (let i = 0; i < media.length; i++) {
+      const item = media[i];
+      const needDur =
+        (item.kind === "video" || item.kind === "audio") &&
+        !(
+          typeof item.durationSec === "number" &&
+          Number.isFinite(item.durationSec) &&
+          item.durationSec >= 0
+        );
+      const needRes =
+        (item.kind === "video" || item.kind === "image") &&
+        !(
+          typeof item.widthPx === "number" &&
+          typeof item.heightPx === "number" &&
+          Number.isFinite(item.widthPx) &&
+          Number.isFinite(item.heightPx) &&
+          item.widthPx > 0 &&
+          item.heightPx > 0 &&
+          item.widthPx <= 32767 &&
+          item.heightPx <= 32767
+        );
+      const needThumb = !((item.thumbnailUrl ?? "").trim()) && (item.kind === "image" || item.kind === "video");
+      if (!needDur && !needRes && !needThumb) continue;
+      const key = `${card.id}:${i}:${item.url}:${needDur ? "d" : ""}${needRes ? "r" : ""}${needThumb ? "t" : ""}`;
+      if (mediaMetaPersistAttemptedRef.current.has(key)) continue;
+      mediaMetaPersistAttemptedRef.current.add(key);
+      void (async () => {
+        try {
+          let src = resolveMediaUrl(item.url);
+          if (needsCosReadUrl(src)) {
+            src = await resolveCosMediaUrlIfNeeded(src);
+          }
+          if (!src) return;
+          const patch: {
+            durationSec?: number;
+            widthPx?: number;
+            heightPx?: number;
+            thumbnailUrl?: string;
+          } = {};
+          if (needThumb) {
+            const fallbackThumb = normalizeStableMediaUrl(
+              item.coverUrl || (item.kind === "image" ? item.url : "")
+            );
+            if (fallbackThumb) {
+              patch.thumbnailUrl = fallbackThumb;
+            }
+          }
+          if (item.kind === "image" && needRes) {
+            const dim = await new Promise<{ w: number; h: number } | null>((resolve) => {
+              const img = new Image();
+              img.onload = () =>
+                resolve({
+                  w: Number(img.naturalWidth) || 0,
+                  h: Number(img.naturalHeight) || 0,
+                });
+              img.onerror = () => resolve(null);
+              img.src = src;
+            });
+            if (
+              dim &&
+              dim.w > 0 &&
+              dim.h > 0 &&
+              dim.w <= 32767 &&
+              dim.h <= 32767
+            ) {
+              patch.widthPx = Math.round(dim.w);
+              patch.heightPx = Math.round(dim.h);
+            }
+          } else if (item.kind === "video" || item.kind === "audio") {
+            const meta = await new Promise<{ d: number; w: number; h: number } | null>(
+              (resolve) => {
+                const el = document.createElement(item.kind === "audio" ? "audio" : "video");
+                el.preload = "metadata";
+                el.src = src;
+                const done = (v: { d: number; w: number; h: number } | null) => {
+                  el.removeAttribute("src");
+                  el.load();
+                  resolve(v);
+                };
+                el.onloadedmetadata = () =>
+                  done({
+                    d: Number(el.duration) || NaN,
+                    w: Number((el as HTMLVideoElement).videoWidth) || 0,
+                    h: Number((el as HTMLVideoElement).videoHeight) || 0,
+                  });
+                el.onerror = () => done(null);
+              }
+            );
+            if (meta) {
+              if (needDur && Number.isFinite(meta.d) && meta.d >= 0) {
+                patch.durationSec = Math.min(86400000, Math.round(meta.d));
+              }
+              if (
+                item.kind === "video" &&
+                needRes &&
+                meta.w > 0 &&
+                meta.h > 0 &&
+                meta.w <= 32767 &&
+                meta.h <= 32767
+              ) {
+                patch.widthPx = Math.round(meta.w);
+                patch.heightPx = Math.round(meta.h);
+              }
+            }
+          }
+          if (Object.keys(patch).length === 0) return;
+          void patchCardMediaItemApi(card.id, i, patch);
+        } catch {
+          // ignore metadata probe failures
+        }
+      })();
+    }
+  }, [card.id, media]);
 
   const goLightbox = useCallback(
     (delta: number) => {

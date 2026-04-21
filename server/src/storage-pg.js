@@ -1858,6 +1858,24 @@ export async function patchCardMediaItemAtIndex(userIdIn, cardId, mediaIndex, pa
 
   const p = patch && typeof patch === "object" ? patch : {};
 
+  const normalizeStableMediaUrl = (v) => {
+    if (typeof v !== "string") return "";
+    const s = v.trim();
+    if (!s) return "";
+    // 不持久化临时签名地址（如 COS/S3 预签名），避免过期后污染数据
+    const lower = s.toLowerCase();
+    if (
+      lower.includes("x-amz-signature=") ||
+      lower.includes("x-amz-security-token=") ||
+      lower.includes("x-cos-signature=") ||
+      lower.includes("x-cos-security-token=") ||
+      lower.includes("signature=")
+    ) {
+      return "";
+    }
+    return s;
+  };
+
   // 1) card_files.bytes（仅在当前为空时写入）
   let updatedBytes = false;
   if (
@@ -1871,6 +1889,31 @@ export async function patchCardMediaItemAtIndex(userIdIn, cardId, mediaIndex, pa
       [targetFileCardId, Math.floor(p.sizeBytes)]
     );
     updatedBytes = r.rowCount > 0;
+  }
+
+  // 1.5) card_files.thumb_url / cover_url（仅在当前为空时写入）
+  const thumbnailUrl = normalizeStableMediaUrl(p.thumbnailUrl);
+  const coverUrl = normalizeStableMediaUrl(p.coverUrl);
+  let updatedThumbMeta = false;
+  if (thumbnailUrl || coverUrl) {
+    const r = await query(
+      `UPDATE card_files
+          SET thumb_url = CASE
+                           WHEN (thumb_url IS NULL OR thumb_url = '') AND $2 <> '' THEN $2
+                           ELSE thumb_url
+                         END,
+              cover_url = CASE
+                           WHEN (cover_url IS NULL OR cover_url = '') AND $3 <> '' THEN $3
+                           ELSE cover_url
+                         END
+        WHERE card_id = $1
+          AND (
+            ((thumb_url IS NULL OR thumb_url = '') AND $2 <> '')
+            OR ((cover_url IS NULL OR cover_url = '') AND $3 <> '')
+          )`,
+      [targetFileCardId, thumbnailUrl, coverUrl]
+    );
+    updatedThumbMeta = r.rowCount > 0;
   }
 
   // 2) duration / resolution → 写到对应 schema 字段（与 catalog 一致）
@@ -1959,7 +2002,7 @@ export async function patchCardMediaItemAtIndex(userIdIn, cardId, mediaIndex, pa
     }
   }
 
-  return { updated: updatedBytes || updatedProps };
+  return { updated: updatedBytes || updatedThumbMeta || updatedProps };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2100,7 +2143,11 @@ export async function softTrashCard(ownerKey, row) {
       [cardId, userId]
     );
     if (chk.rowCount === 0) throw new Error("卡片不存在或无权限");
-    if (chk.rows[0].trashed_at != null) throw new Error("卡片已在回收站中");
+    if (chk.rows[0].trashed_at != null) {
+      // 幂等：重复删除同一卡片时视为成功，避免前端误报失败。
+      await client.query("COMMIT");
+      return;
+    }
 
     await client.query(`DELETE FROM card_placements WHERE card_id = $1`, [cardId]);
     // 移入回收站时同步断开连接：删除所有入/出边，避免人物等对象被旧连接复现。

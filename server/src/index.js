@@ -1351,7 +1351,7 @@ app.post(
 );
 
 /**
- * PATCH /api/cards/:cardId/media/:mediaIndex — 仅合并单条附件元数据（durationSec / sizeBytes / widthPx+heightPx），已有值不覆盖
+ * PATCH /api/cards/:cardId/media/:mediaIndex — 仅合并单条附件元数据（时长/分辨率/大小/缩略图），已有值不覆盖
  */
 app.patch(
   "/api/cards/:cardId/media/:mediaIndex",

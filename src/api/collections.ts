@@ -422,7 +422,7 @@ export async function postAutoLinkRuleBackfillApi(
   }
 }
 
-/** 仅合并单条附件元数据（durationSec / sizeBytes / widthPx+heightPx）；服务端已有值不覆盖 */
+/** 仅合并单条附件元数据（时长/分辨率/大小/缩略图）；服务端已有值不覆盖 */
 export async function patchCardMediaItemApi(
   cardId: string,
   mediaIndex: number,
@@ -431,6 +431,8 @@ export async function patchCardMediaItemApi(
     sizeBytes?: number;
     widthPx?: number;
     heightPx?: number;
+    thumbnailUrl?: string;
+    coverUrl?: string;
   }
 ): Promise<{ ok: boolean; updated: boolean }> {
   const base = apiBase();
