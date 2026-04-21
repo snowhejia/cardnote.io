@@ -11326,6 +11326,11 @@ body.app--card-page-open .app {
   padding-left: 8px;
 }
 
+/* 只把「属性」标题行视觉上挪到更左上，不改动下方属性值的布局 */
+.card-page .card-page__props-sidebar-row.sidebar__section-row {
+  transform: translate(-10px, -10px);
+}
+
 /* 属性区与目录区之间的分隔线（展开属性时：面板后接目录） */
 .card-page .card-page__props-panel-inner + .card-page__props-sidebar-row--toc,
 /* 折叠属性时：「属性」标题行后紧接「目录」行 */
