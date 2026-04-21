@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   mightHaveApiSession,
   needsCosReadUrl,
@@ -633,6 +634,7 @@ function AttachmentGridCell({
   item,
   gridIndex,
   onOpenCard,
+  onRequestContextMenu,
   persistRemoteDuration,
   onRemoteDurationPersisted,
 }: {
@@ -646,6 +648,14 @@ function AttachmentGridCell({
     cardId: string,
     mediaIndex: number
   ) => void | Promise<void>;
+  onRequestContextMenu?: (
+    x: number,
+    y: number,
+    colId: string,
+    cardId: string,
+    mediaIndex: number,
+    item: NoteMediaItem
+  ) => void;
   persistRemoteDuration: boolean;
   onRemoteDurationPersisted?: () => void;
 }) {
@@ -668,6 +678,21 @@ function AttachmentGridCell({
         type="button"
         className="all-attachments-page__cell"
         onClick={() => onOpenCard(colId, cardId, mediaIndex)}
+        onContextMenu={
+          onRequestContextMenu
+            ? (e) => {
+                e.preventDefault();
+                onRequestContextMenu(
+                  e.clientX,
+                  e.clientY,
+                  colId,
+                  cardId,
+                  mediaIndex,
+                  item
+                );
+              }
+            : undefined
+        }
       >
         <div className="all-attachments-page__preview-box">
           <AttachmentPreview item={item} gridIndex={gridIndex} />
@@ -705,6 +730,7 @@ export function AllAttachmentsView({
   remoteListCacheUserKey = "anon",
   remoteListRefreshNonce = 0,
   onOpenCard,
+  onDeleteFile,
   onRemoteListInvalidate,
 }: {
   dataMode: "local" | "remote";
@@ -721,12 +747,61 @@ export function AllAttachmentsView({
     cardId: string,
     mediaIndex: number
   ) => void | Promise<void>;
+  /** 右键菜单删除：连带去除其它笔记卡里对此附件的引用 */
+  onDeleteFile?: (
+    colId: string,
+    cardId: string,
+    item: NoteMediaItem
+  ) => void | Promise<void>;
   /** 浏览器探测到时长并写库后，使附件列表与笔记树刷新 */
   onRemoteListInvalidate?: () => void;
 }) {
   const c = useAppChrome();
   const pageRootRef = useRef<HTMLDivElement>(null);
   const persistRemoteDuration = dataMode === "remote";
+
+  type CtxMenuState = {
+    x: number;
+    y: number;
+    colId: string;
+    cardId: string;
+    mediaIndex: number;
+    item: NoteMediaItem;
+  };
+  const [ctxMenu, setCtxMenu] = useState<CtxMenuState | null>(null);
+  const openCtxMenu = onDeleteFile
+    ? (
+        x: number,
+        y: number,
+        colId: string,
+        cardId: string,
+        mediaIndex: number,
+        item: NoteMediaItem
+      ) => {
+        setCtxMenu({ x, y, colId, cardId, mediaIndex, item });
+      }
+    : undefined;
+
+  useEffect(() => {
+    if (!ctxMenu) return;
+    const onDown = (e: PointerEvent) => {
+      const el = document.querySelector("[data-attachments-page-ctx-menu]");
+      if (el?.contains(e.target as Node)) return;
+      setCtxMenu(null);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setCtxMenu(null);
+    };
+    const t = window.setTimeout(() => {
+      document.addEventListener("pointerdown", onDown, true);
+    }, 0);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      clearTimeout(t);
+      document.removeEventListener("pointerdown", onDown, true);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [ctxMenu]);
 
   const filtered = useMemo(() => {
     if (filterKey === "all") return entries;
@@ -948,6 +1023,7 @@ export function AllAttachmentsView({
                       item={ent.item}
                       gridIndex={gridIndex}
                       onOpenCard={onOpenCard}
+                      onRequestContextMenu={openCtxMenu}
                       persistRemoteDuration={persistRemoteDuration}
                       onRemoteDurationPersisted={onRemoteListInvalidate}
                     />
@@ -961,6 +1037,7 @@ export function AllAttachmentsView({
                       item={ent.item}
                       gridIndex={gridIndex}
                       onOpenCard={onOpenCard}
+                      onRequestContextMenu={openCtxMenu}
                       persistRemoteDuration={persistRemoteDuration}
                       onRemoteDurationPersisted={onRemoteListInvalidate}
                     />
@@ -999,6 +1076,42 @@ export function AllAttachmentsView({
           ) : null}
         </>
       )}
+      {ctxMenu && onDeleteFile
+        ? createPortal(
+            <div
+              data-attachments-page-ctx-menu
+              className="attachment-ctx-menu"
+              style={{
+                position: "fixed",
+                left: Math.min(
+                  ctxMenu.x,
+                  typeof window !== "undefined"
+                    ? window.innerWidth - 180
+                    : ctxMenu.x
+                ),
+                top: ctxMenu.y,
+                zIndex: 10002,
+              }}
+              role="menu"
+            >
+              <button
+                type="button"
+                className="attachment-ctx-menu__item attachment-ctx-menu__item--danger"
+                role="menuitem"
+                onClick={() => {
+                  const snap = ctxMenu;
+                  setCtxMenu(null);
+                  void Promise.resolve(
+                    onDeleteFile(snap.colId, snap.cardId, snap.item)
+                  );
+                }}
+              >
+                {c.uiDelete}
+              </button>
+            </div>,
+            document.body
+          )
+        : null}
     </div>
   );
 }

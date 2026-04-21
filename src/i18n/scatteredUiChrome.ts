@@ -64,6 +64,7 @@ export type ScatteredUiChrome = {
   uiCopyImage: string;
   uiDownloadAttachment: string;
   uiDeleteAttachment: string;
+  uiDeleteAttachmentConfirm: string;
   uiGalleryThumbTitleImageRich: string;
   uiGalleryThumbTitleFileRich: string;
   uiGalleryThumbTitleAudioRich: string;
@@ -220,6 +221,8 @@ const zh: ScatteredUiChrome = {
   uiCopyImage: "复制图片",
   uiDownloadAttachment: "下载附件",
   uiDeleteAttachment: "删除附件",
+  uiDeleteAttachmentConfirm:
+    "删除该文件？关联此文件的笔记附件也会同时消失。",
   uiGalleryThumbTitleImageRich: "点击放大，右键可复制图片或更多",
   uiGalleryThumbTitleFileRich: "点击查看，右键更多",
   uiGalleryThumbTitleAudioRich: "点击放大播放音频，右键更多",
@@ -382,6 +385,8 @@ const en: ScatteredUiChrome = {
   uiCopyImage: "Copy image",
   uiDownloadAttachment: "Download attachment",
   uiDeleteAttachment: "Remove attachment",
+  uiDeleteAttachmentConfirm:
+    "Delete this file? Attachments referencing it in other notes will also disappear.",
   uiGalleryThumbTitleImageRich:
     "Click to enlarge; right‑click for image options",
   uiGalleryThumbTitleFileRich: "Click to view; right‑click for more",
