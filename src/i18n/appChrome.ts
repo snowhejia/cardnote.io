@@ -444,7 +444,7 @@ const zh: AppChrome = {
   cardPageRerunAutoLink: "重新执行自动建卡",
   cardPageRerunAutoLinkBusy: "正在处理…",
   cardPageRerunAutoLinkTitle:
-    "按当前合集上的自动建卡规则，补建缺失的关联卡（如人物、网页）并写回关联属性",
+    "按当前合集上的自动建卡规则，补建缺失的关联卡（如人物、网页剪藏）并写回关联属性",
   cardPageRerunAutoLinkOk: "已执行自动建卡并刷新本页数据。",
   cardPageRerunAutoLinkFail: (detail) => `未能完成：${detail}`,
   connectionsLinkRailAria: "从此处拖动连线到另一张笔记",
@@ -761,7 +761,7 @@ const en: AppChrome = {
   cardPageRerunAutoLink: "Run auto-link rules again",
   cardPageRerunAutoLinkBusy: "Working…",
   cardPageRerunAutoLinkTitle:
-    "Re-run preset auto-link rules to create missing linked cards (e.g. person, web) and update link fields",
+    "Re-run preset auto-link rules to create missing linked cards (e.g. person, bookmark clip) and update link fields",
   cardPageRerunAutoLinkOk: "Auto-link finished; data refreshed.",
   cardPageRerunAutoLinkFail: (detail) => `Couldn’t complete: ${detail}`,
   connectionsLinkRailAria: "Drag a line from here to another note",

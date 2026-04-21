@@ -25,5 +25,31 @@ export function findLinkedFileCardForNoteMedia(
     const m0 = hit.card.media?.[0];
     if (m0?.url?.trim() === url) return { colId: hit.col.id, card: hit.card };
   }
-  return null;
+
+  // 兜底：某些数据中 attachment 关系未并入 relatedRefs；
+  // 改为按 URL 命中 file 卡，并优先匹配 sf-file-source 指回当前 noteCard。
+  const candidates: { colId: string; card: NoteCard }[] = [];
+  const walk = (cols: Collection[]) => {
+    for (const col of cols) {
+      for (const card of col.cards ?? []) {
+        if (!isFileCard(card)) continue;
+        const m0 = card.media?.[0];
+        if (m0?.url?.trim() !== url) continue;
+        candidates.push({ colId: col.id, card });
+      }
+      if (col.children?.length) walk(col.children);
+    }
+  };
+  walk(collections);
+  if (candidates.length === 0) return null;
+
+  const sourceMatched = candidates.find(({ card }) => {
+    const p = (card.customProps ?? []).find((x) => x?.id === "sf-file-source");
+    if (!p || !p.value || typeof p.value !== "object") return false;
+    const v = p.value as { cardId?: unknown };
+    return typeof v.cardId === "string" && v.cardId.trim() === noteCard.id;
+  });
+  if (sourceMatched) return sourceMatched;
+
+  return candidates[0] ?? null;
 }

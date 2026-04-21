@@ -391,7 +391,7 @@ const zh: ExtraModalChrome = {
   noteSettingsNavObjectTypes: "对象类型",
   noteSettingsObjectTypesTitle: "对象类型",
   noteSettingsObjectTypesLead:
-    "以下为内置对象类型目录（笔记、文件、网页、主题、作品、剪藏、任务等）。剪藏含网页剪藏、小红书与 B 站；启用「网页」后自动关联可为内容再建链接对象卡与人物卡。未启用的预设不会出现在侧栏。旧数据主要是笔记与附件；可在下方将附件迁为文件卡，或将仍留在 JSON 里的「相关笔记」迁入图谱边表。",
+    "以下为内置对象类型目录（笔记、文件、主题、作品、剪藏、任务等）。剪藏含网页剪藏、小红书与 B 站；自动关联可为内容补建人物卡与网页剪藏卡。未启用的预设不会出现在侧栏。旧数据主要是笔记与附件；可在下方将附件迁为文件卡，或将仍留在 JSON 里的「相关笔记」迁入图谱边表。",
   noteSettingsEnableAllPresets: "启用全部预设类型",
   noteSettingsEnableAllPresetsBusy: "正在启用…",
   noteSettingsSyncBuiltinSchemaTitle: "同步内置类型的属性定义",
@@ -645,7 +645,7 @@ const en: ExtraModalChrome = {
   noteSettingsNavObjectTypes: "Object types",
   noteSettingsObjectTypesTitle: "Object types",
   noteSettingsObjectTypesLead:
-    "Below is the built-in catalog of object types (notes, files, web, topics, works, clips, tasks, …). Clips include web bookmarks, Xiaohongshu, and Bilibili; with “Web” enabled, auto-link can add URL object cards and person cards. Disabled presets stay out of the sidebar. Legacy data is mostly notes and attachments — migrate attachments to file cards below, or push any remaining related_refs JSON into card_links.",
+    "Below is the built-in catalog of object types (notes, files, topics, works, clips, tasks, …). Clips include web bookmarks, Xiaohongshu, and Bilibili; auto-link can add person cards and bookmark clip cards when needed. Disabled presets stay out of the sidebar. Legacy data is mostly notes and attachments — migrate attachments to file cards below, or push any remaining related_refs JSON into card_links.",
   noteSettingsEnableAllPresets: "Enable all preset types",
   noteSettingsEnableAllPresetsBusy: "Enabling…",
   noteSettingsSyncBuiltinSchemaTitle: "Sync built-in type fields",

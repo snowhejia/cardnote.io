@@ -45,8 +45,9 @@ export async function consumeAiNoteAssistQuota(userId) {
   try {
     await client.query("BEGIN");
     const r = await client.query(
-      `SELECT id, role, ai_usage_month, ai_note_assist_calls_month
-       FROM users WHERE id = $1 FOR UPDATE`,
+      `SELECT id, role, TO_CHAR(usage_month, 'YYYY-MM') AS ai_usage_month,
+              ai_assist_calls_month AS ai_note_assist_calls_month
+         FROM users WHERE id = $1 FOR UPDATE`,
       [uid]
     );
     if (r.rowCount === 0) {
@@ -108,7 +109,11 @@ export async function consumeAiNoteAssistQuota(userId) {
 
     const next = used + 1;
     await client.query(
-      `UPDATE users SET ai_usage_month = $2, ai_note_assist_calls_month = $3 WHERE id = $1`,
+      // 跨月时顺带重置 media 计数（与 usage_month 共享）
+      `UPDATE users SET usage_month = ($2::text || '-01')::date,
+                        ai_assist_calls_month = $3,
+                        media_uploaded_bytes_month = CASE WHEN TO_CHAR(usage_month, 'YYYY-MM') = $2 THEN media_uploaded_bytes_month ELSE 0 END
+         WHERE id = $1`,
       [uid, monthKey, next]
     );
     await client.query("COMMIT");
@@ -143,8 +148,9 @@ export async function refundAiNoteAssistQuota(userId) {
   try {
     await client.query("BEGIN");
     const r = await client.query(
-      `SELECT role, ai_usage_month, ai_note_assist_calls_month
-       FROM users WHERE id = $1 FOR UPDATE`,
+      `SELECT role, TO_CHAR(usage_month, 'YYYY-MM') AS ai_usage_month,
+              ai_assist_calls_month AS ai_note_assist_calls_month
+         FROM users WHERE id = $1 FOR UPDATE`,
       [uid]
     );
     if (r.rowCount === 0) {
@@ -164,7 +170,7 @@ export async function refundAiNoteAssistQuota(userId) {
     }
     const next = Math.max(0, used - 1);
     await client.query(
-      `UPDATE users SET ai_note_assist_calls_month = $2 WHERE id = $1`,
+      `UPDATE users SET ai_assist_calls_month = $2 WHERE id = $1`,
       [uid, next]
     );
     await client.query("COMMIT");

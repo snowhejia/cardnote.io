@@ -4,8 +4,9 @@
  */
 
 import bcrypt from "bcryptjs";
-import { query } from "./db.js";
+import { query, getClient } from "./db.js";
 import { snapshotMediaQuota } from "./mediaQuota.js";
+import { seedPresetCardTypesForUser } from "./cardTypePresets.js";
 import {
   buildObjectPublicUrl,
   cosAvatarPrefix,
@@ -189,8 +190,8 @@ export function toPublicUser(u) {
 export async function readUsersList(_filePath) {
   const res = await query(
     `SELECT id, username, password_hash, display_name, role, avatar_url, avatar_thumb_url, email,
-            media_usage_month, media_uploaded_bytes_month,
-            COALESCE(deletion_pending, false) AS deletion_pending,
+            TO_CHAR(usage_month, 'YYYY-MM') AS media_usage_month, media_uploaded_bytes_month,
+            (deletion_state = 'pending') AS deletion_pending,
             deletion_requested_at
      FROM users ORDER BY created_at`
   );
@@ -219,8 +220,8 @@ export async function readUserById(_filePath, userId) {
   if (!id) return null;
   const res = await query(
     `SELECT id, username, display_name, role, avatar_url, avatar_thumb_url, email,
-            media_usage_month, media_uploaded_bytes_month
-     FROM users WHERE id = $1 AND COALESCE(deletion_pending, false) = false`,
+            TO_CHAR(usage_month, 'YYYY-MM') AS media_usage_month, media_uploaded_bytes_month
+     FROM users WHERE id = $1 AND deletion_state = 'active'`,
     [id]
   );
   const r = res.rows[0];
@@ -249,12 +250,26 @@ export async function ensureBootstrapAdmin(_filePath, adminPassword) {
 
   const hash = await bcrypt.hash(adminPassword, 10);
   const id = `u-${Date.now()}`;
-  await query(
-    `INSERT INTO users (id, username, password_hash, display_name, role, avatar_url, avatar_thumb_url)
-     VALUES ($1, $2, $3, $4, 'admin', '', '')
-     ON CONFLICT (username) DO NOTHING`,
-    [id, BOOTSTRAP_ADMIN_USERNAME, hash, "管理员"]
-  );
+  const client = await getClient();
+  try {
+    await client.query("BEGIN");
+    const ins = await client.query(
+      `INSERT INTO users (id, username, password_hash, display_name, role, avatar_url, avatar_thumb_url)
+       VALUES ($1, $2, $3, $4, 'admin', '', '')
+       ON CONFLICT (username) DO NOTHING
+       RETURNING id`,
+      [id, BOOTSTRAP_ADMIN_USERNAME, hash, "管理员"]
+    );
+    if (ins.rowCount > 0) {
+      await seedPresetCardTypesForUser(ins.rows[0].id, client);
+    }
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
 }
 
 export async function verifyLogin(_filePath, usernameOrEmail, password) {
@@ -262,10 +277,10 @@ export async function verifyLogin(_filePath, usernameOrEmail, password) {
   if (!key) return null;
   const res = await query(
     `SELECT id, username, password_hash, display_name, role, avatar_url, avatar_thumb_url, email,
-            media_usage_month, media_uploaded_bytes_month
+            TO_CHAR(usage_month, 'YYYY-MM') AS media_usage_month, media_uploaded_bytes_month
      FROM users
      WHERE (username = $1 OR (email IS NOT NULL AND LOWER(email) = LOWER($2)))
-       AND COALESCE(deletion_pending, false) = false`,
+       AND deletion_state = 'active'`,
     [key, key]
   );
   const u = res.rows[0];
@@ -328,11 +343,22 @@ export async function createUserRecord(_filePath, body) {
   const id = `u-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
   const hash = await bcrypt.hash(password, 10);
 
-  await query(
-    `INSERT INTO users (id, username, password_hash, display_name, role, avatar_url, avatar_thumb_url, email)
-     VALUES ($1, $2, $3, $4, $5, '', '', $6)`,
-    [id, username, hash, displayName, role, emailNorm]
-  );
+  const client = await getClient();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `INSERT INTO users (id, username, password_hash, display_name, role, avatar_url, avatar_thumb_url, email)
+       VALUES ($1, $2, $3, $4, $5, '', '', $6)`,
+      [id, username, hash, displayName, role, emailNorm]
+    );
+    await seedPresetCardTypesForUser(id, client);
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
 
   return toPublicUser({
     id,
@@ -369,11 +395,22 @@ export async function createUserWithEmail({ email, password, displayName }) {
   const id = `u-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
   const hash = await bcrypt.hash(password, 10);
 
-  await query(
-    `INSERT INTO users (id, username, password_hash, display_name, role, avatar_url, avatar_thumb_url, email)
-     VALUES ($1, $2, $3, $4, 'user', '', '', $5)`,
-    [id, username, hash, disp, emailNorm]
-  );
+  const client = await getClient();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `INSERT INTO users (id, username, password_hash, display_name, role, avatar_url, avatar_thumb_url, email)
+       VALUES ($1, $2, $3, $4, 'user', '', '', $5)`,
+      [id, username, hash, disp, emailNorm]
+    );
+    await seedPresetCardTypesForUser(id, client);
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
 
   return toPublicUser({
     id,
@@ -412,8 +449,8 @@ export async function updateUserRecord(_filePath, id, body) {
   // 先取当前记录
   const cur = await query(
     `SELECT id, username, display_name, role, avatar_url, avatar_thumb_url, email,
-            media_usage_month, media_uploaded_bytes_month,
-            COALESCE(deletion_pending, false) AS deletion_pending
+            TO_CHAR(usage_month, 'YYYY-MM') AS media_usage_month, media_uploaded_bytes_month,
+            (deletion_state = 'pending') AS deletion_pending
      FROM users WHERE id = $1`,
     [id]
   );
@@ -461,7 +498,7 @@ export async function updateUserRecord(_filePath, id, body) {
     if (u.role === "admin" && body.role !== "admin") {
       const others = await query(
         `SELECT COUNT(*) AS cnt FROM users WHERE role = 'admin' AND id <> $1
-         AND COALESCE(deletion_pending, false) = false`,
+         AND deletion_state = 'active'`,
         [id]
       );
       if (Number(others.rows[0].cnt) === 0) throw new Error("不能取消最后一位管理员的权限");
@@ -485,8 +522,8 @@ export async function updateUserRecord(_filePath, id, body) {
   // 返回最新记录
   const updated = await query(
     `SELECT id, username, display_name, role, avatar_url, avatar_thumb_url, email,
-            media_usage_month, media_uploaded_bytes_month,
-            COALESCE(deletion_pending, false) AS deletion_pending,
+            TO_CHAR(usage_month, 'YYYY-MM') AS media_usage_month, media_uploaded_bytes_month,
+            (deletion_state = 'pending') AS deletion_pending,
             deletion_requested_at
      FROM users WHERE id = $1`,
     [id]
@@ -500,7 +537,7 @@ export async function updateUserRecord(_filePath, id, body) {
  */
 export async function verifyUserPassword(userId, plainPassword) {
   const res = await query(
-    `SELECT password_hash FROM users WHERE id = $1 AND COALESCE(deletion_pending, false) = false`,
+    `SELECT password_hash FROM users WHERE id = $1 AND deletion_state = 'active'`,
     [userId]
   );
   if (res.rowCount === 0) return false;
@@ -516,7 +553,7 @@ export async function userExistsAndNotPendingDeletion(userId) {
   const id = String(userId || "").trim();
   if (!id) return false;
   const res = await query(
-    `SELECT 1 FROM users WHERE id = $1 AND COALESCE(deletion_pending, false) = false`,
+    `SELECT 1 FROM users WHERE id = $1 AND deletion_state = 'active'`,
     [id]
   );
   return res.rowCount > 0;
@@ -527,7 +564,7 @@ export async function userExistsAndNotPendingDeletion(userId) {
  */
 export async function markUserDeletionPending(_filePath, id) {
   const cur = await query(
-    `SELECT role, COALESCE(deletion_pending, false) AS deletion_pending FROM users WHERE id = $1`,
+    `SELECT role, (deletion_state = 'pending') AS deletion_pending FROM users WHERE id = $1`,
     [id]
   );
   if (cur.rowCount === 0) throw new Error("用户不存在");
@@ -535,13 +572,13 @@ export async function markUserDeletionPending(_filePath, id) {
   if (cur.rows[0].role === "admin") {
     const others = await query(
       `SELECT COUNT(*) AS cnt FROM users WHERE role = 'admin' AND id <> $1
-       AND COALESCE(deletion_pending, false) = false`,
+       AND deletion_state = 'active'`,
       [id]
     );
     if (Number(others.rows[0].cnt) === 0) throw new Error("不能删除最后一位管理员");
   }
   await query(
-    `UPDATE users SET deletion_pending = true, deletion_requested_at = now() WHERE id = $1`,
+    `UPDATE users SET deletion_state = 'pending', deletion_requested_at = now() WHERE id = $1`,
     [id]
   );
 }
@@ -553,12 +590,12 @@ export async function finalizeUserDeletionInDb(userId) {
   const id = String(userId || "").trim();
   if (!id) return 0;
   const check = await query(
-    `SELECT id FROM users WHERE id = $1 AND COALESCE(deletion_pending, false) = true`,
+    `SELECT id FROM users WHERE id = $1 AND deletion_state = 'pending'`,
     [id]
   );
   if (check.rowCount === 0) return 0;
   const del = await query(
-    `DELETE FROM users WHERE id = $1 AND COALESCE(deletion_pending, false) = true`,
+    `DELETE FROM users WHERE id = $1 AND deletion_state = 'pending'`,
     [id]
   );
   return del.rowCount ?? 0;

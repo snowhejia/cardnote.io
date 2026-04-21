@@ -13,12 +13,14 @@ export function UserAccountMenuDropdown({
   onOpenProfile,
   onOpenNoteSettings,
   onOpenDataStats,
+  onLogout,
 }: {
   dataMode: AppDataMode;
   profileBusy: boolean;
   onOpenProfile: () => void;
   onOpenNoteSettings: () => void;
   onOpenDataStats: () => void;
+  onLogout: () => void;
 }) {
   const c = useAppChrome();
   return (
@@ -56,6 +58,17 @@ export function UserAccountMenuDropdown({
         }}
       >
         {c.menuDataStats}
+      </button>
+      <div className="sidebar__user-menu-sep" role="separator" />
+      <button
+        type="button"
+        className="sidebar__user-menu-item"
+        role="menuitem"
+        onClick={() => {
+          onLogout();
+        }}
+      >
+        {c.logout}
       </button>
     </div>
   );

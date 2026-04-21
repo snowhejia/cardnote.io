@@ -23,6 +23,7 @@ import {
   isFileCard,
   LOOSE_NOTES_COLLECTION_ID,
 } from "./appkit/collectionModel";
+import { mergedTemplateSchemaFieldsForPlacements } from "./appkit/schemaTemplateFields";
 import { formatByteSize } from "./noteStats";
 import { migrateCustomPropsList } from "./noteCardCustomProps";
 import type {
@@ -105,17 +106,107 @@ function safeHttpHrefFromPropValue(raw: unknown): string | null {
   }
 }
 
+const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+const DATE_TIME_LOCAL_RE = /^(\d{4}-\d{2}-\d{2})[T\s](\d{2}:\d{2})(?::\d{2})?$/;
+
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+function toDateTimeLocalInputValue(raw: unknown): string {
+  const t = typeof raw === "string" ? raw.trim() : "";
+  if (!t) return "";
+  if (DATE_ONLY_RE.test(t)) return `${t}T00:00`;
+  const m = t.match(DATE_TIME_LOCAL_RE);
+  if (m) return `${m[1]}T${m[2]}`;
+  const ms = Date.parse(t);
+  if (!Number.isFinite(ms)) return "";
+  const d = new Date(ms);
+  const yyyy = d.getFullYear();
+  const mm = pad2(d.getMonth() + 1);
+  const dd = pad2(d.getDate());
+  const hh = pad2(d.getHours());
+  const mi = pad2(d.getMinutes());
+  return `${yyyy}-${mm}-${dd}T${hh}:${mi}`;
+}
+
+function formatDatePropDisplay(raw: unknown): string {
+  const t = typeof raw === "string" ? raw.trim() : "";
+  if (!t) return "";
+  if (DATE_ONLY_RE.test(t)) return t;
+  const m = t.match(DATE_TIME_LOCAL_RE);
+  if (m) return `${m[1]} ${m[2]}`;
+  const ms = Date.parse(t);
+  if (!Number.isFinite(ms)) return t;
+  const d = new Date(ms);
+  const yyyy = d.getFullYear();
+  const mm = pad2(d.getMonth() + 1);
+  const dd = pad2(d.getDate());
+  const hh = pad2(d.getHours());
+  const mi = pad2(d.getMinutes());
+  return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
+}
+
+function splitDateTimeLocalParts(raw: unknown): { date: string; time: string } {
+  const dt = toDateTimeLocalInputValue(raw);
+  if (!dt) return { date: "", time: "00:00" };
+  const [date, time = "00:00"] = dt.split("T");
+  return { date: date || "", time: time || "00:00" };
+}
+
+function hasDraggedFiles(dt: DataTransfer | null): boolean {
+  if (!dt) return false;
+  if (Array.from(dt.types ?? []).includes("Files")) return true;
+  const items = Array.from(dt.items ?? []);
+  return items.some((it) => it.kind === "file");
+}
+
+function isDurationSecondsProp(prop: CardProperty): boolean {
+  if (prop.type !== "number") return false;
+  const id = prop.id.trim().toLowerCase();
+  return id.includes("duration");
+}
+
+function formatDurationHms(raw: unknown): string {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) return "—";
+  const total = Math.floor(n);
+  const s = total % 60;
+  const mins = Math.floor(total / 60);
+  const h = Math.floor(mins / 60);
+  const mm = mins % 60;
+  return `${h}:${String(mm).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
 const PROP_TYPE_LABELS: Record<CardPropertyType, string> = {
   text: "文字",
   number: "数字",
   choice: "选择",
   collectionLink: "关联",
-  cardLink: "关联卡片",
-  cardLinks: "关联多张卡片",
+  cardLink: "关联",
+  cardLinks: "关联",
   date: "日期",
   checkbox: "勾选",
   url: "链接",
 };
+
+const PROP_TYPE_PICKER_TYPES: CardPropertyType[] = [
+  "text",
+  "number",
+  "choice",
+  "date",
+  "checkbox",
+  "url",
+  "collectionLink",
+  "cardLinks",
+];
+
+function propTypePickerLabel(type: CardPropertyType, lang: "zh" | "en"): string {
+  if (type === "cardLink") return lang === "en" ? "Link Card" : "关联单张卡片";
+  if (type === "collectionLink") return lang === "en" ? "Link Collection" : "关联合集";
+  if (type === "cardLinks") return lang === "en" ? "Link Cards" : "关联卡片";
+  return PROP_TYPE_LABELS[type];
+}
 
 function genId() {
   return `p-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -229,8 +320,7 @@ function CardLinksValueEditor({
   suggestedRefs?: CardLinkRef[];
 }) {
   const refs = parseCardLinkRefList(prop.value);
-  const [draftCol, setDraftCol] = useState("");
-  const [draftCard, setDraftCard] = useState("");
+  const [draftQuery, setDraftQuery] = useState("");
 
   const setRefs = (next: CardLinkRef[]) => {
     onChangeValue(next.length ? next : null);
@@ -241,24 +331,49 @@ function CardLinksValueEditor({
     setRefs([...refs, r]);
   };
 
-  const commitManual = () => {
-    const colId = draftCol.trim();
-    const cardId = draftCard.trim();
-    if (!colId || !cardId) return;
-    addRef({ colId, cardId });
-    setDraftCol("");
-    setDraftCard("");
-  };
+  const searchCandidates = useMemo(() => {
+    const q = draftQuery.trim().toLowerCase();
+    if (!q) return [] as { colId: string; cardId: string; label: string }[];
+    const tokens = q.split(/\s+/).filter(Boolean);
+    const selected = new Set(refs.map((r) => `${r.colId}\t${r.cardId}`));
+    const out: { colId: string; cardId: string; label: string }[] = [];
+    function walk(nodes: Collection[], path: string[]) {
+      for (const col of nodes) {
+        const nextPath = [...path, col.name];
+        for (const c of col.cards ?? []) {
+          const key = `${col.id}\t${c.id}`;
+          if (selected.has(key)) continue;
+          const title = cardHeadlinePlain(c).trim() || c.id;
+          const pathLabel = nextPath.join(" / ");
+          const hay = `${title} ${c.id} ${pathLabel}`.toLowerCase();
+          if (!tokens.every((t) => hay.includes(t))) continue;
+          out.push({
+            colId: col.id,
+            cardId: c.id,
+            label: `${title} · ${pathLabel}`,
+          });
+          if (out.length >= 12) return;
+        }
+        walk(col.children ?? [], nextPath);
+        if (out.length >= 12) return;
+      }
+    }
+    walk(collections, []);
+    return out;
+  }, [collections, draftQuery, refs]);
+  const suggestedRefsVisible = useMemo(
+    () =>
+      (suggestedRefs ?? []).filter(
+        (r) => !refs.some((x) => x.colId === r.colId && x.cardId === r.cardId)
+      ),
+    [suggestedRefs, refs]
+  );
 
   return (
     <div className="card-page__tags-panel card-page__tags-panel--cardlinks">
-      <div className="card-page__prop-cardlinks-list">
-        {refs.length === 0 ? (
-          <span className="card-page__prop-empty card-page__prop-empty--in-tags-panel">
-            —
-          </span>
-        ) : (
-          refs.map((ref) => (
+      {refs.length > 0 ? (
+        <div className="card-page__prop-cardlinks-list">
+          {refs.map((ref) => (
             <span
               key={`${ref.colId}-${ref.cardId}`}
               className="card-page__prop-cardlink-chip-wrap"
@@ -293,57 +408,54 @@ function CardLinksValueEditor({
                 ×
               </button>
             </span>
-          ))
-        )}
-      </div>
-      {suggestedRefs && suggestedRefs.length > 0 ? (
+          ))}
+        </div>
+      ) : null}
+      {suggestedRefsVisible.length > 0 ? (
         <div className="card-page__prop-cardlinks-suggested">
-          {suggestedRefs.map((r) => {
-            const inList = refs.some(
-              (x) => x.colId === r.colId && x.cardId === r.cardId
-            );
-            if (inList) return null;
-            return (
-              <button
-                key={`sug-${r.colId}-${r.cardId}`}
-                type="button"
-                className="card-page__tags-hit-btn card-page__tags-hit-btn--placeholder"
-                onClick={() => addRef(r)}
-              >
-                + {cardLinkDisplayLabel(collections, r)}
-              </button>
-            );
-          })}
+          {suggestedRefsVisible.map((r) => (
+            <button
+              key={`sug-${r.colId}-${r.cardId}`}
+              type="button"
+              className="card-page__tags-hit-btn card-page__tags-hit-btn--placeholder"
+              onClick={() => addRef(r)}
+            >
+              + {cardLinkDisplayLabel(collections, r)}
+            </button>
+          ))}
         </div>
       ) : null}
       <div className="card-page__prop-cardlinks-manual">
         <input
           type="text"
           className="card-page__tags-add-input card-page__tags-add-input--prop-field"
-          placeholder="合集 ID"
-          value={draftCol}
-          onChange={(e) => setDraftCol(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") commitManual();
-          }}
+          placeholder="搜索卡片名称…"
+          value={draftQuery}
+          onChange={(e) => setDraftQuery(e.target.value)}
         />
-        <input
-          type="text"
-          className="card-page__tags-add-input card-page__tags-add-input--prop-field"
-          placeholder="卡片 ID"
-          value={draftCard}
-          onChange={(e) => setDraftCard(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") commitManual();
-          }}
-        />
-        <button
-          type="button"
-          className="card-page__prop-cardlink-fill"
-          onClick={commitManual}
-        >
-          添加
-        </button>
+        {draftQuery.trim() ? (
+          <div className="card-page__prop-cardlinks-suggested">
+            {searchCandidates.length > 0 ? (
+              searchCandidates.map((r) => (
+                <button
+                  key={`search-${r.colId}-${r.cardId}`}
+                  type="button"
+                  className="card-page__tags-hit-btn card-page__tags-hit-btn--placeholder"
+                  onClick={() => {
+                    addRef({ colId: r.colId, cardId: r.cardId });
+                    setDraftQuery("");
+                  }}
+                >
+                  + {r.label}
+                </button>
+              ))
+            ) : (
+              <span className="card-page__prop-empty card-page__prop-empty--in-tags-panel">
+                无匹配结果
+              </span>
+            )}
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -366,6 +478,13 @@ function collectionLinkIds(value: unknown): string[] {
       )
     ),
   ];
+}
+
+function computeFallbackSchemaFieldsFromPlacements(
+  collections: Collection[],
+  placementIds: string[]
+): SchemaField[] {
+  return mergedTemplateSchemaFieldsForPlacements(collections, placementIds);
 }
 
 /** 与 CardGallery 相同解析链（COS 预签名、本地 tauri: 等），避免直链 img 裂图 */
@@ -445,6 +564,10 @@ function AudioGlyphIcon({ className }: { className?: string }) {
 }
 
 /** 右侧附件栏：各类型均展示缩略图（与 CardGallery 同一套媒体解析） */
+function attachmentCaption(item: NoteMediaItem, fileFallback: string): string {
+  return item.name?.trim() || fileLabelFromUrl(item.url, fileFallback);
+}
+
 function CardPageAttachmentThumb({
   item,
   fileFallback,
@@ -453,8 +576,6 @@ function CardPageAttachmentThumb({
   fileFallback: string;
 }) {
   const thumbClass = "card-page__attachment-thumb";
-  const caption =
-    item.name?.trim() || fileLabelFromUrl(item.url, fileFallback);
 
   let thumb: ReactNode;
   if (item.kind === "image") {
@@ -492,10 +613,7 @@ function CardPageAttachmentThumb({
   }
 
   return (
-    <>
-      {thumb}
-      <span className="card-page__attachment-label">{caption}</span>
-    </>
+    <span className="card-page__attachment-thumb-wrap">{thumb}</span>
   );
 }
 
@@ -539,7 +657,7 @@ export interface CardPageViewProps {
   onCreateFileCardFromAttachment?: (item: NoteMediaItem) => void;
   attachmentHasLinkedFileCard?: (item: NoteMediaItem) => boolean;
   /** 已有文件卡时点击直接打开卡片页 */
-  onOpenFileCard?: (item: NoteMediaItem) => void;
+  onOpenFileCard?: (item: NoteMediaItem) => boolean;
   /** 打开属性面板中链到的人物卡（如作者 → person） */
   onOpenLinkedCard?: (targetColId: string, targetCardId: string) => void;
   /** 云端：自动建卡请求成功后拉取合集树（刷新 custom_props / 关联） */
@@ -700,6 +818,22 @@ function PropValueEditor({
         </div>
       );
     }
+    if (prop.type === "date") {
+      const text = formatDatePropDisplay(prop.value);
+      return (
+        <div className="card-page__tags-panel card-page__tags-panel--single-hit">
+          {text ? (
+            <span className="card-page__prop-val-text card-page__prop-val-text--tags-panel">
+              {text}
+            </span>
+          ) : (
+            <span className="card-page__prop-empty card-page__prop-empty--in-tags-panel">
+              —
+            </span>
+          )}
+        </div>
+      );
+    }
     if (prop.type === "url") {
       const raw = typeof prop.value === "string" ? prop.value.trim() : "";
       if (!raw) {
@@ -735,6 +869,16 @@ function PropValueEditor({
           >
             {raw}
           </a>
+        </div>
+      );
+    }
+    if (isDurationSecondsProp(prop)) {
+      const text = formatDurationHms(prop.value);
+      return (
+        <div className="card-page__tags-panel card-page__tags-panel--single-hit">
+          <span className="card-page__prop-val-text card-page__prop-val-text--tags-panel">
+            {text}
+          </span>
         </div>
       );
     }
@@ -909,19 +1053,45 @@ function PropValueEditor({
   }
 
   if (prop.type === "date") {
+    const { date, time } = splitDateTimeLocalParts(prop.value);
     return (
       <div className="card-page__tags-panel card-page__tags-panel--single-hit">
-        <input
-          type="date"
-          className="card-page__tags-add-input card-page__tags-add-input--prop-field"
-          value={typeof prop.value === "string" ? prop.value : ""}
-          onChange={(e) => onChangeValue(e.target.value || null)}
-        />
+        <div className="card-page__prop-datetime-inline">
+          <input
+            type="date"
+            className="card-page__tags-add-input card-page__tags-add-input--prop-field card-page__tags-add-input--date"
+            value={date}
+            onChange={(e) => {
+              const d = e.target.value;
+              onChangeValue(d ? `${d}T${time || "00:00"}` : null);
+            }}
+          />
+          <input
+            type="time"
+            className="card-page__tags-add-input card-page__tags-add-input--prop-field card-page__tags-add-input--time"
+            value={time}
+            disabled={!date}
+            onChange={(e) => {
+              if (!date) return;
+              const t = e.target.value || "00:00";
+              onChangeValue(`${date}T${t}`);
+            }}
+          />
+        </div>
       </div>
     );
   }
 
   if (prop.type === "number") {
+    if (isDurationSecondsProp(prop)) {
+      return (
+        <div className="card-page__tags-panel card-page__tags-panel--single-hit">
+          <span className="card-page__prop-val-text card-page__prop-val-text--tags-panel">
+            {formatDurationHms(prop.value)}
+          </span>
+        </div>
+      );
+    }
     return (
       <div className="card-page__tags-panel card-page__tags-panel--single-hit">
         <input
@@ -1002,7 +1172,6 @@ export function CardPageView({
   setCardTags,
   setCardCustomProps,
   setReminderPicker,
-  setRelatedPanel,
   uploadFilesToCard,
   removeCardMediaItem,
   onRemoveCardFromCollection,
@@ -1035,6 +1204,7 @@ export function CardPageView({
   const propsPanelInnerClassName =
     "card-page__props-panel-inner" +
     (isFileCard(card) ? " card-page__props-panel-inner--file-card" : "");
+  const showTocPanel = !isFileCard(card);
   /** 小屏：软键盘占位时隐藏底部附件栏（visualViewport 与 layout viewport 高度差） */
   const [compactKeyboardHidesAttachments, setCompactKeyboardHidesAttachments] =
     useState(false);
@@ -1052,6 +1222,8 @@ export function CardPageView({
     item: NoteMediaItem;
   } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const attachmentDropDepthRef = useRef(0);
+  const [attachmentDropActive, setAttachmentDropActive] = useState(false);
   const editorAreaRef = useRef<HTMLDivElement>(null);
   const cardPageRootRef = useRef<HTMLDivElement>(null);
   const [showTypePicker, setShowTypePicker] = useState(false);
@@ -1060,7 +1232,7 @@ export function CardPageView({
   const [effectiveSchema, setEffectiveSchema] = useState<{
     fields: SchemaField[];
     autoLinkRules: unknown[];
-  } | null>(null);
+  } | null | undefined>(undefined);
   const [tocPanelOpen, setTocPanelOpen] = useState(true);
   const [tocActiveIndex, setTocActiveIndex] = useState(0);
   const [rerunAutoLinkBusy, setRerunAutoLinkBusy] = useState(false);
@@ -1119,11 +1291,17 @@ export function CardPageView({
     () => collectionIdsContainingCardId(collections, card.id),
     [collections, card.id]
   );
+  const fallbackSchemaFields = useMemo(() => {
+    const placementIds = [
+      colId,
+      ...collectionIdsContainingCardId(collections, card.id),
+    ].filter((id) => id && id !== LOOSE_NOTES_COLLECTION_ID);
+    return computeFallbackSchemaFieldsFromPlacements(collections, placementIds);
+  }, [collections, card.id, colId]);
   const tagLibrary = useMemo(
     () => collectAllTagsFromCollections(collections),
     [collections]
   );
-  const relatedCount = (card.relatedRefs ?? []).length;
   const hasReminder = Boolean(card.reminderOn);
 
   const tocHeadings = useMemo(
@@ -1582,6 +1760,7 @@ export function CardPageView({
   // 拉取当前卡片在所有合集（含父链）上的合并有效 Schema
   useEffect(() => {
     let cancelled = false;
+    setEffectiveSchema(undefined);
     fetchCardEffectiveSchema(card.id).then((s) => {
       if (!cancelled) setEffectiveSchema(s);
     });
@@ -1590,9 +1769,36 @@ export function CardPageView({
 
   /** 文件卡：服务端 schema 可能尚未含父级「标题」时，补一条便于展示与编辑 */
   const schemaFieldsForPanel = useMemo(() => {
-    const fields = effectiveSchema?.fields ?? [];
+    const remoteFields =
+      effectiveSchema && Array.isArray(effectiveSchema.fields)
+        ? effectiveSchema.fields
+        : [];
+    const map = new Map<string, SchemaField>();
+    for (const f of fallbackSchemaFields) {
+      if (!f?.id?.trim()) continue;
+      map.set(f.id, f);
+    }
+    for (const f of remoteFields) {
+      if (!f?.id?.trim()) continue;
+      map.set(f.id, f);
+    }
+    const fields =
+      map.size > 0
+        ? [...map.values()].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+        : [];
     if (!isFileCard(card)) return fields;
-    if (fields.some((f) => f.id === "sf-file-title")) return fields;
+    const hiddenFileMetaFieldIds = new Set([
+      "sf-vid-duration-sec",
+      "sf-aud-duration-sec",
+      "sf-vid-resolution",
+      "sf-file-resolution",
+    ]);
+    const visibleFields = fields.filter(
+      (f) => !hiddenFileMetaFieldIds.has(f.id)
+    );
+    if (visibleFields.some((f) => f.id === "sf-file-title")) {
+      return visibleFields;
+    }
     const titleName = lang === "en" ? "Title" : "标题";
     const titleField: SchemaField = {
       id: "sf-file-title",
@@ -1600,10 +1806,10 @@ export function CardPageView({
       type: "text",
       order: -1,
     };
-    return [...fields, titleField].sort(
+    return [...visibleFields, titleField].sort(
       (a, b) => (a.order ?? 0) - (b.order ?? 0)
     );
-  }, [effectiveSchema, card, lang]);
+  }, [effectiveSchema, fallbackSchemaFields, card, lang]);
 
   function updateCustomProps(next: CardProperty[]) {
     setCardCustomProps(card.id, migrateCustomPropsList(next));
@@ -1653,18 +1859,16 @@ export function CardPageView({
         </button>
         {showTypePicker ? (
           <div className="card-page__prop-type-menu">
-            {(Object.keys(PROP_TYPE_LABELS) as CardPropertyType[]).map(
-              (type) => (
-                <button
-                  key={type}
-                  type="button"
-                  className="card-page__prop-type-option"
-                  onClick={() => addProperty(type)}
-                >
-                  {PROP_TYPE_LABELS[type]}
-                </button>
-              )
-            )}
+            {PROP_TYPE_PICKER_TYPES.map((type) => (
+              <button
+                key={type}
+                type="button"
+                className="card-page__prop-type-option"
+                onClick={() => addProperty(type)}
+              >
+                {propTypePickerLabel(type, lang)}
+              </button>
+            ))}
           </div>
         ) : null}
       </div>
@@ -1698,17 +1902,10 @@ export function CardPageView({
       rows.push(metaRow(lang === "en" ? "Size" : "大小", formatByteSize(m.sizeBytes)));
     }
     if (m.durationSec != null && m.durationSec >= 0) {
-      const s = Math.floor(m.durationSec % 60);
-      const mins = Math.floor(m.durationSec / 60);
-      const h = Math.floor(mins / 60);
-      const mm = mins % 60;
-      const t = h > 0
-        ? `${h}:${String(mm).padStart(2, "0")}:${String(s).padStart(2, "0")}`
-        : `${mm}:${String(s).padStart(2, "0")}`;
+      const t = formatDurationHms(m.durationSec);
       rows.push(metaRow(lang === "en" ? "Duration" : "时长", t));
     }
     if (
-      (m.kind === "image" || m.kind === "video") &&
       typeof m.widthPx === "number" &&
       typeof m.heightPx === "number" &&
       Number.isFinite(m.widthPx) &&
@@ -1727,10 +1924,130 @@ export function CardPageView({
     return <>{rows}</>;
   }
 
+  function renderSchemaFieldRow(field: SchemaField) {
+    const matchProp = customProps.find((p) => p.id === field.id);
+    const editorProp = coerceSchemaPropForEditor(field, matchProp, card);
+    const linkFillRef =
+      field.type === "cardLink" && field.cardLinkFromEdge
+        ? card.relatedRefs?.find((r) => r.linkType === field.cardLinkFromEdge)
+        : undefined;
+    const suggestedCardLinks =
+      field.type === "cardLinks"
+        ? dedupeCardLinkRefs(
+            (card.relatedRefs ?? [])
+              .filter((r) => r.linkType !== "creator" && r.linkType !== "source")
+              .map((r) => ({ colId: r.colId, cardId: r.cardId }))
+          )
+        : undefined;
+    return (
+      <div
+        key={`schema-${field.id}`}
+        className="card-page__prop-row card-page__prop-row--tags card-page__prop-row--custom"
+      >
+        <div className="card-page__prop-label-wrap">
+          <span className="card-page__prop-label">{field.name}</span>
+        </div>
+        <div className="card-page__prop-content">
+          {editorProp ? (
+            <PropValueEditor
+              prop={editorProp}
+              canEdit={canEdit}
+              collections={collections}
+              hideCollectionDots={hideCollectionDots}
+              linkFillRef={linkFillRef}
+              suggestedCardLinks={suggestedCardLinks}
+              onOpenLinkedCard={onOpenLinkedCard}
+              onChangeValue={(v) => {
+                const baseId = editorProp.id;
+                const nextType = field.type as CardPropertyType;
+                const nextName = field.name;
+                if (matchProp) {
+                  updateCustomProps(
+                    customProps.map((p) =>
+                      p.id === baseId
+                        ? {
+                            ...p,
+                            type: nextType,
+                            name: nextName,
+                            value: v,
+                          }
+                        : p
+                    )
+                  );
+                } else {
+                  updateCustomProps([
+                    ...customProps,
+                    {
+                      id: baseId,
+                      name: nextName,
+                      type: nextType,
+                      value: v as CardProperty["value"],
+                      options: field.options,
+                    },
+                  ]);
+                }
+              }}
+              onChangeOptions={(opts) =>
+                updateCustomProps(
+                  customProps.map((p) =>
+                    p.id === editorProp.id ? { ...p, options: opts } : p
+                  )
+                )
+              }
+            />
+          ) : canEdit ? (
+            <div className="card-page__tags-panel card-page__tags-panel--single-hit">
+              <button
+                type="button"
+                className="card-page__tags-hit-btn card-page__tags-hit-btn--placeholder"
+                onClick={() => {
+                  const seedProp: CardProperty = {
+                    id: field.id,
+                    name: field.name,
+                    type: field.type as CardPropertyType,
+                    value: field.type === "checkbox" ? false : null,
+                    options: field.options,
+                  };
+                  updateCustomProps([...customProps, seedProp]);
+                }}
+              >
+                {field.type === "date"
+                  ? "设置日期时间…"
+                  : field.type === "cardLinks"
+                    ? "添加作品关联…"
+                    : "填写…"}
+              </button>
+            </div>
+          ) : (
+            <span className="card-page__prop-empty card-page__prop-empty--in-tags-panel">
+              —
+            </span>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   function renderPropsFieldsBlock() {
     const isFile = isFileCard(card);
+    const titleField =
+      schemaFieldsForPanel.find((f) => f.id === "sf-file-title") ??
+      schemaFieldsForPanel.find(
+        (f) => f.id === "sf-clip-title" || f.name.trim() === "标题" || f.name.trim().toLowerCase() === "title"
+      ) ??
+      null;
+    const schemaFieldsBody = titleField
+      ? schemaFieldsForPanel.filter((f) => f.id !== titleField.id)
+      : schemaFieldsForPanel;
+    const hiddenFileMetaPropIds = new Set([
+      "sf-vid-duration-sec",
+      "sf-aud-duration-sec",
+      "sf-vid-resolution",
+      "sf-file-resolution",
+    ]);
     return (
       <>
+        {titleField ? renderSchemaFieldRow(titleField) : null}
         {isFile ? renderFileMetaBlock() : (
           <div className="card-page__prop-row card-page__prop-row--tags">
             <span className="card-page__prop-label">标签</span>
@@ -1781,180 +2098,18 @@ export function CardPageView({
             </div>
           </div>
 
-          <div className="card-page__prop-row card-page__prop-row--tags">
-            <span className="card-page__prop-label">合集</span>
-            <div className="card-page__prop-content">
-              <CardPageCollectionTagsPanel
-                instanceId={`${card.id}-placement`}
-                collections={collections}
-                selectedCollectionIds={colIds}
-                pickerExcludeIds={placementPickerExclude}
-                canEdit={Boolean(canEdit && onRemoveCardFromCollection)}
-                hideCollectionDots={hideCollectionDots}
-                onAdd={(targetColId) => void onAddCardPlacement?.(targetColId)}
-                onRemove={(placementColId) =>
-                  onRemoveCardFromCollection?.(placementColId)
-                }
-                addInputPlaceholder={ui.cardCollectionTagInputPlaceholder}
-                dropdownEmptyText={ui.cardCollectionTagDropdownEmpty}
-                dropdownAriaLabel={ui.cardCollectionTagDropdownAria}
-                removePillAriaLabel={ui.cardRemoveFromCollectionChipAria}
-                unknownLabel={ui.propUnknownCollection}
-                chipShape="rect"
-              />
-            </div>
-          </div>
-
-          <div className="card-page__prop-row card-page__prop-row--tags">
-            <span className="card-page__prop-label">相关笔记</span>
-            <div className="card-page__prop-content">
-              <div className="card-page__tags-panel card-page__tags-panel--single-hit">
-                {relatedCount > 0 ? (
-                  <button
-                    type="button"
-                    className="card-page__tags-hit-btn"
-                    onClick={() =>
-                      setRelatedPanel({ colId, cardId: card.id })
-                    }
-                  >
-                    {relatedCount} 条相关
-                  </button>
-                ) : canEdit ? (
-                  <button
-                    type="button"
-                    className="card-page__tags-hit-btn card-page__tags-hit-btn--placeholder"
-                    onClick={() =>
-                      setRelatedPanel({ colId, cardId: card.id })
-                    }
-                  >
-                    添加关联…
-                  </button>
-                ) : (
-                  <span className="card-page__prop-empty card-page__prop-empty--in-tags-panel">
-                    —
-                  </span>
-                )}
-              </div>
-            </div>
-          </div>
         </>
         )}
 
         {/* ── Schema 字段区：来自合集类型定义，优先展示（含文件卡） ── */}
-        {schemaFieldsForPanel.map((field) => {
-            const matchProp = customProps.find((p) => p.id === field.id);
-            const editorProp = coerceSchemaPropForEditor(field, matchProp, card);
-            const linkFillRef =
-              field.type === "cardLink" && field.cardLinkFromEdge
-                ? card.relatedRefs?.find(
-                    (r) => r.linkType === field.cardLinkFromEdge
-                  )
-                : undefined;
-            const suggestedCardLinks =
-              field.type === "cardLinks"
-                ? dedupeCardLinkRefs(
-                    (card.relatedRefs ?? [])
-                      .filter(
-                        (r) =>
-                          r.linkType !== "creator" && r.linkType !== "source"
-                      )
-                      .map((r) => ({ colId: r.colId, cardId: r.cardId }))
-                  )
-                : undefined;
-            return (
-              <div
-                key={`schema-${field.id}`}
-                className="card-page__prop-row card-page__prop-row--tags card-page__prop-row--custom"
-              >
-                <div className="card-page__prop-label-wrap">
-                  <span className="card-page__prop-label">{field.name}</span>
-                </div>
-                <div className="card-page__prop-content">
-                  {editorProp ? (
-                    <PropValueEditor
-                      prop={editorProp}
-                      canEdit={canEdit}
-                      collections={collections}
-                      hideCollectionDots={hideCollectionDots}
-                      linkFillRef={linkFillRef}
-                      suggestedCardLinks={suggestedCardLinks}
-                      onOpenLinkedCard={onOpenLinkedCard}
-                      onChangeValue={(v) => {
-                        const baseId = editorProp.id;
-                        const nextType = field.type as CardPropertyType;
-                        const nextName = field.name;
-                        if (matchProp) {
-                          updateCustomProps(
-                            customProps.map((p) =>
-                              p.id === baseId
-                                ? {
-                                    ...p,
-                                    type: nextType,
-                                    name: nextName,
-                                    value: v,
-                                  }
-                                : p
-                            )
-                          );
-                        } else {
-                          updateCustomProps([
-                            ...customProps,
-                            {
-                              id: baseId,
-                              name: nextName,
-                              type: nextType,
-                              value: v as CardProperty["value"],
-                              options: field.options,
-                            },
-                          ]);
-                        }
-                      }}
-                      onChangeOptions={(opts) =>
-                        updateCustomProps(
-                          customProps.map((p) =>
-                            p.id === editorProp.id ? { ...p, options: opts } : p
-                          )
-                        )
-                      }
-                    />
-                  ) : canEdit ? (
-                    <div className="card-page__tags-panel card-page__tags-panel--single-hit">
-                      <button
-                        type="button"
-                        className="card-page__tags-hit-btn card-page__tags-hit-btn--placeholder"
-                        onClick={() => {
-                          const seedProp: CardProperty = {
-                            id: field.id,
-                            name: field.name,
-                            type: field.type as CardPropertyType,
-                            value: field.type === "checkbox" ? false : null,
-                            options: field.options,
-                          };
-                          updateCustomProps([...customProps, seedProp]);
-                        }}
-                      >
-                        {field.type === "date"
-                          ? "设置日期…"
-                          : field.type === "cardLinks"
-                            ? "添加作品关联…"
-                            : "填写…"}
-                      </button>
-                    </div>
-                  ) : (
-                    <span className="card-page__prop-empty card-page__prop-empty--in-tags-panel">
-                      —
-                    </span>
-                  )}
-                </div>
-              </div>
-            );
-          })}
+        {schemaFieldsBody.map((field) => renderSchemaFieldRow(field))}
 
           {/* ── 卡片自有属性区：id 不在 schema 字段集合内的额外属性 ── */}
         {customProps
             .filter(
               (prop) =>
-                !schemaFieldsForPanel.some((f) => f.id === prop.id)
+                !schemaFieldsForPanel.some((f) => f.id === prop.id) &&
+                !(isFile && hiddenFileMetaPropIds.has(prop.id))
             )
             .map((prop) => (
             <div
@@ -2023,7 +2178,10 @@ export function CardPageView({
             </div>
           ))}
 
-        {canEdit && onAfterRemoteAutoLink ? (
+        {(globalThis as { __MIKUJAR_SHOW_CARD_RERUN_AUTO_LINK__?: boolean })
+          .__MIKUJAR_SHOW_CARD_RERUN_AUTO_LINK__ === true &&
+        canEdit &&
+        onAfterRemoteAutoLink ? (
           <div className="card-page__prop-row card-page__prop-row--tags card-page__prop-row--custom">
             <span className="card-page__prop-label">
               {ui.cardPageRerunAutoLinkSection}
@@ -2098,6 +2256,70 @@ export function CardPageView({
 
   const labelFromUrl = (url: string) =>
     fileLabelFromUrl(url, ui.uiFileFallback);
+
+  /** 文件卡中央预览：图片/视频/音频/PDF/通用下载占位；没有附件时返回 null */
+  function renderFilePrimaryAttachment(): ReactNode {
+    const m = media[0];
+    if (!m) return null;
+    const kind = m.kind;
+    if (kind === "image") {
+      return (
+        <div className="card-page__file-primary card-page__file-primary--image">
+          <MediaLightboxImage
+            url={m.url}
+            className="card-page__file-primary-img"
+          />
+        </div>
+      );
+    }
+    if (kind === "video") {
+      return (
+        <div className="card-page__file-primary card-page__file-primary--video">
+          <MediaLightboxVideo
+            url={m.url}
+            className="card-page__file-primary-video"
+          />
+        </div>
+      );
+    }
+    if (kind === "audio") {
+      return (
+        <div className="card-page__file-primary card-page__file-primary--audio">
+          {(m.coverUrl ?? m.thumbnailUrl)?.trim() ? (
+            <MediaLightboxImage
+              url={(m.coverUrl ?? m.thumbnailUrl)!}
+              className="card-page__file-primary-img"
+            />
+          ) : null}
+          <MediaLightboxAudio
+            url={m.url}
+            className="card-page__file-primary-audio"
+          />
+        </div>
+      );
+    }
+    if (isPdfAttachment(m)) {
+      return (
+        <div className="card-page__file-primary card-page__file-primary--pdf">
+          <MediaLightboxPdf
+            url={m.url}
+            className="card-page__file-primary-pdf"
+            title={m.name ?? labelFromUrl(m.url)}
+          />
+        </div>
+      );
+    }
+    const caption = m.name?.trim() || labelFromUrl(m.url);
+    return (
+      <div className="card-page__file-primary card-page__file-primary--doc">
+        <FileDocIcon className="card-page__file-primary-icon" />
+        <div className="card-page__file-primary-name">{caption}</div>
+        <MediaOpenLink url={m.url} className="card-page__file-primary-open">
+          {lang === "en" ? "Open" : "打开"}
+        </MediaOpenLink>
+      </div>
+    );
+  }
 
   function previewTitle(kind: NoteMediaItem["kind"]): string {
     const thumbCtx = Boolean(
@@ -2332,7 +2554,7 @@ export function CardPageView({
         >
           {ui.uiDownloadAttachment}
         </button>
-        {onOpenFileCard && attachmentHasLinkedFileCard?.(attachMenu.item) ? (
+        {onOpenFileCard ? (
           <button
             type="button"
             className="attachment-ctx-menu__item"
@@ -2341,13 +2563,14 @@ export function CardPageView({
               const it = attachMenu.item;
               setAttachMenu(null);
               setLightbox(null);
-              onOpenFileCard(it);
+              if (!onOpenFileCard(it)) {
+                onCreateFileCardFromAttachment?.(it);
+              }
             }}
           >
             {ui.uiOpenFileCard}
           </button>
-        ) : onCreateFileCardFromAttachment &&
-          !attachmentHasLinkedFileCard?.(attachMenu.item) ? (
+        ) : onCreateFileCardFromAttachment ? (
           <button
             type="button"
             className="attachment-ctx-menu__item"
@@ -2423,9 +2646,31 @@ export function CardPageView({
             </span>
           ) : null}
         </div>
-        <span className="card-page__time">
-          {formatCardTimeLabel(card, lang)}
-        </span>
+        <div className="card-page__header-meta">
+          {colIds.length > 0 ? (
+            <div className="card-page__header-collections" aria-label="合集">
+              <CardPageCollectionTagsPanel
+                instanceId={`${card.id}-placement-header`}
+                collections={collections}
+                selectedCollectionIds={colIds}
+                pickerExcludeIds={placementPickerExclude}
+                canEdit={false}
+                hideCollectionDots={hideCollectionDots}
+                onAdd={() => {}}
+                onRemove={() => {}}
+                addInputPlaceholder={ui.cardCollectionTagInputPlaceholder}
+                dropdownEmptyText={ui.cardCollectionTagDropdownEmpty}
+                dropdownAriaLabel={ui.cardCollectionTagDropdownAria}
+                removePillAriaLabel={ui.cardRemoveFromCollectionChipAria}
+                unknownLabel={ui.propUnknownCollection}
+                chipShape="rect"
+              />
+            </div>
+          ) : null}
+          <span className="card-page__time">
+            {formatCardTimeLabel(card, lang)}
+          </span>
+        </div>
         {compactLayout ? (
           <nav
             className="card-page__header-panels"
@@ -2444,19 +2689,21 @@ export function CardPageView({
             >
               属性
             </button>
-            <button
-              type="button"
-              className={
-                "card-page__header-panel-btn" +
-                (mobileOverlay === "toc" ? " is-active" : "")
-              }
-              aria-pressed={mobileOverlay === "toc"}
-              onClick={() =>
-                setMobileOverlay((o) => (o === "toc" ? null : "toc"))
-              }
-            >
-              目录
-            </button>
+            {showTocPanel ? (
+              <button
+                type="button"
+                className={
+                  "card-page__header-panel-btn" +
+                  (mobileOverlay === "toc" ? " is-active" : "")
+                }
+                aria-pressed={mobileOverlay === "toc"}
+                onClick={() =>
+                  setMobileOverlay((o) => (o === "toc" ? null : "toc"))
+                }
+              >
+                目录
+              </button>
+            ) : null}
           </nav>
         ) : null}
         {compactLayout ? (
@@ -2506,27 +2753,29 @@ export function CardPageView({
                 </div>
               ) : null}
 
-              <div className="sidebar__section-row sidebar__section-row--collapsible card-page__props-sidebar-row card-page__props-sidebar-row--toc">
-                <button
-                  type="button"
-                  className="sidebar__section-hit"
-                  aria-expanded={tocPanelOpen}
-                  onClick={() => setTocPanelOpen((v) => !v)}
-                >
-                  <span
-                    className={
-                      "sidebar__chevron" +
-                      (tocPanelOpen ? " is-expanded" : "")
-                    }
-                    aria-hidden
-                  >
-                    <span className="sidebar__chevron-icon">›</span>
-                  </span>
-                  <span className="sidebar__section">目录</span>
-                </button>
-              </div>
-              {tocPanelOpen ? (
-                renderTocNavBlock()
+              {showTocPanel ? (
+                <>
+                  <div className="sidebar__section-row sidebar__section-row--collapsible card-page__props-sidebar-row card-page__props-sidebar-row--toc">
+                    <button
+                      type="button"
+                      className="sidebar__section-hit"
+                      aria-expanded={tocPanelOpen}
+                      onClick={() => setTocPanelOpen((v) => !v)}
+                    >
+                      <span
+                        className={
+                          "sidebar__chevron" +
+                          (tocPanelOpen ? " is-expanded" : "")
+                        }
+                        aria-hidden
+                      >
+                        <span className="sidebar__chevron-icon">›</span>
+                      </span>
+                      <span className="sidebar__section">目录</span>
+                    </button>
+                  </div>
+                  {tocPanelOpen ? renderTocNavBlock() : null}
+                </>
               ) : null}
             </div>
 
@@ -2546,6 +2795,10 @@ export function CardPageView({
           }
         >
           <div className="card-page__center">
+          {isFileCard(card) ? (
+            renderFilePrimaryAttachment()
+          ) : (
+            <>
           <div className="card-page__editor-area" ref={editorAreaRef}>
             <NoteCardTiptap
               id={card.id}
@@ -2570,9 +2823,47 @@ export function CardPageView({
                 (compactLayout &&
                 (compactKeyboardHidesAttachments || compactEditorAreaFocused)
                   ? " card-page__attachments-rail--keyboard-hidden"
-                  : "")
+                  : "") +
+                (attachmentDropActive ? " card-page__attachments-rail--drop-active" : "")
               }
               aria-label="附件"
+              onDragEnter={(e) => {
+                if (!canAttachMedia || !canEdit) return;
+                if (!hasDraggedFiles(e.dataTransfer)) return;
+                e.preventDefault();
+                attachmentDropDepthRef.current += 1;
+                setAttachmentDropActive(true);
+              }}
+              onDragOver={(e) => {
+                if (!canAttachMedia || !canEdit) return;
+                if (!hasDraggedFiles(e.dataTransfer)) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "copy";
+                if (!attachmentDropActive) setAttachmentDropActive(true);
+              }}
+              onDragLeave={(e) => {
+                if (!canAttachMedia || !canEdit) return;
+                if (!hasDraggedFiles(e.dataTransfer)) return;
+                e.preventDefault();
+                attachmentDropDepthRef.current = Math.max(
+                  0,
+                  attachmentDropDepthRef.current - 1
+                );
+                if (attachmentDropDepthRef.current === 0) {
+                  setAttachmentDropActive(false);
+                }
+              }}
+              onDrop={(e) => {
+                if (!canAttachMedia || !canEdit) return;
+                if (!hasDraggedFiles(e.dataTransfer)) return;
+                e.preventDefault();
+                attachmentDropDepthRef.current = 0;
+                setAttachmentDropActive(false);
+                const files = Array.from(e.dataTransfer.files ?? []);
+                if (files.length > 0) {
+                  void uploadFilesToCard(colId, card.id, files);
+                }
+              }}
             >
               <div className="card-page__attachments-rail-scroll">
                 <div className="card-page__attachments-rail-head-row">
@@ -2616,7 +2907,7 @@ export function CardPageView({
                       if (!canEdit || compactLayout) return;
                       if (
                         (e.target as HTMLElement).closest(
-                          ".card-page__attachment-remove"
+                          ".card-page__attachment-remove, .card-page__attachment-open-card"
                         )
                       ) {
                         e.preventDefault();
@@ -2649,6 +2940,31 @@ export function CardPageView({
                         fileFallback={ui.uiFileFallback}
                       />
                     </button>
+                    <div className="card-page__attachment-meta">
+                      <span
+                        className="card-page__attachment-label"
+                        title={attachmentCaption(item, ui.uiFileFallback)}
+                      >
+                        {attachmentCaption(item, ui.uiFileFallback)}
+                      </span>
+                      <button
+                        type="button"
+                        className="card-page__attachment-open-card"
+                        title="打开文件卡"
+                        aria-label="打开文件卡"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (onOpenFileCard?.(item)) return;
+                          if (canEdit && onCreateFileCardFromAttachment) {
+                            onCreateFileCardFromAttachment(item);
+                            return;
+                          }
+                          setLightbox({ index: idx });
+                        }}
+                      >
+                        ↗
+                      </button>
+                    </div>
                     {canEdit && (
                       <button
                         type="button"
@@ -2667,6 +2983,8 @@ export function CardPageView({
               </div>
             </aside>
           ) : null}
+            </>
+          )}
         </div>
         </div>
       </div>
@@ -2677,7 +2995,7 @@ export function CardPageView({
             role="presentation"
             onClick={() => setMobileOverlay(null)}
           />
-          {mobileOverlay === "toc" ? (
+          {mobileOverlay === "toc" && showTocPanel ? (
             <aside
               className="card-page__sheet card-page__sheet--from-left is-open"
               aria-label="正文目录"

@@ -21,6 +21,7 @@ import {
   type PresetTypeGroup,
 } from "./notePresetTypesCatalog";
 import {
+  createCollectionApi,
   enablePresetTypeApi,
   updateCollectionApi,
   deleteCollectionApi,
@@ -35,6 +36,7 @@ import {
   walkCollections,
   walkCollectionsWithPath,
 } from "./appkit/collectionModel";
+import { mergedTemplateSchemaFieldsForCollection } from "./appkit/schemaTemplateFields";
 import { NOTE_SETTINGS_POST_MIGRATE_HINTS } from "./noteSettingsPostMigrateHints";
 
 const CATALOG_PRESET_IDS: Set<string> = (() => {
@@ -115,37 +117,13 @@ function flattenCollectionsForPicker(
   return out;
 }
 
-function findCollectionChain(
-  roots: Collection[],
-  id: string,
-  chain: Collection[] = []
-): Collection[] | null {
-  for (const c of roots) {
-    const next = [...chain, c];
-    if (c.id === id) return next;
-    if (c.children?.length) {
-      const hit = findCollectionChain(c.children, id, next);
-      if (hit) return hit;
-    }
-  }
-  return null;
-}
-
 /** 沿父链合并 card_schema，只取「关联卡片」类型字段 */
 function mergedCardLinkFieldsForCollection(
   colId: string,
   roots: Collection[] | undefined
 ): SchemaField[] {
   if (!colId.trim() || !roots?.length) return [];
-  const chain = findCollectionChain(roots, colId);
-  if (!chain) return [];
-  const map = new Map<string, SchemaField>();
-  for (const c of chain) {
-    for (const f of c.cardSchema?.fields ?? []) {
-      map.set(f.id, f);
-    }
-  }
-  return [...map.values()]
+  return mergedTemplateSchemaFieldsForCollection(roots, colId)
     .filter((f) => f.type === "cardLink")
     .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 }
@@ -363,7 +341,9 @@ export function NoteSettingsModal({
   }, [targetColLinkFields]);
   const [customRuleErr, setCustomRuleErr] = useState<string | null>(null);
   const [customTypeModal, setCustomTypeModal] = useState<
-    null | { mode: "create" } | { mode: "edit"; collection: Collection }
+    | null
+    | { mode: "create"; parentId?: string }
+    | { mode: "edit"; collection: Collection }
   >(null);
   const [customTypeDraft, setCustomTypeDraft] = useState<{
     name: string;
@@ -435,10 +415,10 @@ export function NoteSettingsModal({
     };
   }, [collections]);
 
-  const categoryObjectContainers = useMemo(() => {
+  const templateParentContainers = useMemo(() => {
     if (!collections?.length) return [];
     return walkCollectionsWithPath(collections, [])
-      .filter((x) => x.col.isCategory && x.col.presetTypeId)
+      .filter((x) => x.col.isCategory)
       .map((x) => ({ id: x.col.id, label: x.path }));
   }, [collections]);
 
@@ -447,8 +427,10 @@ export function NoteSettingsModal({
     if (customTypeModal.mode === "create") {
       setCustomTypeDraft({
         name: "",
-        parentId: "",
-        fields: [{ name: lang === "en" ? "Title" : "标题", type: "text" }],
+        parentId: customTypeModal.parentId ?? "",
+        fields: customTypeModal.parentId
+          ? []
+          : [{ name: lang === "en" ? "Title" : "标题", type: "text" }],
       });
     } else {
       const col = customTypeModal.collection;
@@ -477,6 +459,14 @@ export function NoteSettingsModal({
     });
   }
 
+  const openCreateSubtypeModal = useCallback(
+    (parentId?: string) => {
+      if (collections == null || dataMode !== "remote") return;
+      setCustomTypeModal({ mode: "create", ...(parentId ? { parentId } : {}) });
+    },
+    [collections, dataMode]
+  );
+
   async function handleEnablePresetType(group: PresetTypeGroup, child?: PresetObjectTypeItem) {
     const presetTypeId = child ? child.id : group.baseId;
     const name = lang === "en"
@@ -484,40 +474,31 @@ export function NoteSettingsModal({
       : (child ? child.nameZh : group.baseLabelZh);
     const dotColor = child ? child.tint : group.baseTint;
     const cardSchema = buildSchemaFromPreset(group, child);
-    const collectionId = `preset-${presetTypeId}-${Date.now()}`;
     setTypeActionLoading(presetTypeId);
     try {
-      let parentId: string | undefined;
-      if (child) {
-        const existingParent = enabledByPresetTypeId.get(group.baseId);
-        if (existingParent) {
-          parentId = existingParent.id;
-        } else {
-          const parentCollectionId = `preset-${group.baseId}-${Date.now()}`;
-          const pRes = await enablePresetTypeApi({
-            presetTypeId: group.baseId,
-            collectionId: parentCollectionId,
-            name: lang === "en" ? group.baseLabelEn : group.baseLabelZh,
-            dotColor: group.baseTint,
-            cardSchema: buildSchemaFromPreset(group),
-          });
-          if (!pRes) return;
-          parentId = pRes.id;
-        }
+      const presetIdToColId = new Map<string, string>();
+      for (const [pid, col] of enabledByPresetTypeId) {
+        presetIdToColId.set(pid, col.id);
       }
 
-      const res = await enablePresetTypeApi({
+      let parentId: string | undefined;
+      if (child) {
+        const pid = await ensurePresetCollectionEnabled(presetIdToColId, {
+          presetTypeId: group.baseId,
+          name: lang === "en" ? group.baseLabelEn : group.baseLabelZh,
+          dotColor: group.baseTint,
+          cardSchema: buildSchemaFromPreset(group),
+        });
+        if (!pid) return;
+        parentId = pid;
+      }
+
+      await ensurePresetCollectionEnabled(presetIdToColId, {
         presetTypeId,
-        collectionId,
         name,
         dotColor,
         cardSchema,
         ...(parentId ? { parentId } : {}),
-      });
-      if (!res || !("id" in res) || !res.id) return;
-      await onCollectionsChange?.({
-        enabledCollectionId: res.id,
-        presetTypeId,
       });
     } finally {
       setTypeActionLoading(null);
@@ -534,8 +515,44 @@ export function NoteSettingsModal({
     }
   }
 
-  /** 按目录顺序启用全部内置预设（云端）；「文件」仅建父级，子类随 UI 视为已包含 */
-  async function handleEnableAllPresetTypes() {
+  function createPresetCollectionId(presetTypeId: string): string {
+    return `preset-${presetTypeId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  }
+
+  async function ensurePresetCollectionEnabled(
+    presetIdToColId: Map<string, string>,
+    params: {
+      presetTypeId: string;
+      name: string;
+      dotColor: string;
+      cardSchema: CollectionCardSchema;
+      parentId?: string;
+    }
+  ): Promise<string | null> {
+    const existing = presetIdToColId.get(params.presetTypeId);
+    if (existing) return existing;
+
+    const res = await enablePresetTypeApi({
+      presetTypeId: params.presetTypeId,
+      collectionId: createPresetCollectionId(params.presetTypeId),
+      name: params.name,
+      dotColor: params.dotColor,
+      cardSchema: params.cardSchema,
+      ...(params.parentId ? { parentId: params.parentId } : {}),
+    });
+    const id = collectionIdFromEnablePresetResponse(res);
+    if (!id) return null;
+
+    presetIdToColId.set(params.presetTypeId, id);
+    await onCollectionsChange?.({
+      enabledCollectionId: id,
+      presetTypeId: params.presetTypeId,
+    });
+    return id;
+  }
+
+  /** 按目录顺序补齐内置预设对应的模板合集（云端） */
+  async function handleEnableAllCatalogPresetCollections() {
     if (collections == null || dataMode !== "remote") return;
 
     const presetIdToColId = new Map<string, string>();
@@ -550,82 +567,41 @@ export function NoteSettingsModal({
           lang === "en" ? group.baseLabelEn : group.baseLabelZh;
 
         if (group.baseId === "file") {
-          if (!presetIdToColId.has("file")) {
-            const res = await enablePresetTypeApi({
-              presetTypeId: "file",
-              collectionId: `preset-file-${Date.now()}`,
-              name: nameBase,
-              dotColor: group.baseTint,
-              cardSchema: buildSchemaFromPreset(group),
-            });
-            const id = collectionIdFromEnablePresetResponse(res);
-            if (id) {
-              presetIdToColId.set("file", id);
-              await onCollectionsChange?.({
-                enabledCollectionId: id,
-                presetTypeId: "file",
-              });
-            }
-          }
+          await ensurePresetCollectionEnabled(presetIdToColId, {
+            presetTypeId: "file",
+            name: nameBase,
+            dotColor: group.baseTint,
+            cardSchema: buildSchemaFromPreset(group),
+          });
           continue;
         }
 
         if (group.children.length === 0) {
-          if (!presetIdToColId.has(group.baseId)) {
-            const res = await enablePresetTypeApi({
-              presetTypeId: group.baseId,
-              collectionId: `preset-${group.baseId}-${Date.now()}`,
-              name: nameBase,
-              dotColor: group.baseTint,
-              cardSchema: buildSchemaFromPreset(group),
-            });
-            const id = collectionIdFromEnablePresetResponse(res);
-            if (id) {
-              presetIdToColId.set(group.baseId, id);
-              await onCollectionsChange?.({
-                enabledCollectionId: id,
-                presetTypeId: group.baseId,
-              });
-            }
-          }
+          await ensurePresetCollectionEnabled(presetIdToColId, {
+            presetTypeId: group.baseId,
+            name: nameBase,
+            dotColor: group.baseTint,
+            cardSchema: buildSchemaFromPreset(group),
+          });
           continue;
         }
 
+        const parentId = await ensurePresetCollectionEnabled(presetIdToColId, {
+          presetTypeId: group.baseId,
+          name: nameBase,
+          dotColor: group.baseTint,
+          cardSchema: buildSchemaFromPreset(group),
+        });
+        if (!parentId) continue;
+
         for (const child of group.children) {
-          if (presetIdToColId.has(child.id)) continue;
-
-          if (!presetIdToColId.has(group.baseId)) {
-            const pRes = await enablePresetTypeApi({
-              presetTypeId: group.baseId,
-              collectionId: `preset-${group.baseId}-${Date.now()}`,
-              name: nameBase,
-              dotColor: group.baseTint,
-              cardSchema: buildSchemaFromPreset(group),
-            });
-            const pid = collectionIdFromEnablePresetResponse(pRes);
-            if (!pid) continue;
-            presetIdToColId.set(group.baseId, pid);
-          }
-
-          const parentId = presetIdToColId.get(group.baseId);
-          if (!parentId) continue;
-
-          const chRes = await enablePresetTypeApi({
+          await ensurePresetCollectionEnabled(presetIdToColId, {
             presetTypeId: child.id,
-            collectionId: `preset-${child.id}-${Date.now()}`,
             name: lang === "en" ? child.nameEn : child.nameZh,
             dotColor: child.tint,
             cardSchema: buildSchemaFromPreset(group, child),
-            parentId,
+            parentId: parentId,
           });
-          const cid = collectionIdFromEnablePresetResponse(chRes);
-          if (cid) {
-            presetIdToColId.set(child.id, cid);
-            await onCollectionsChange?.({
-              enabledCollectionId: cid,
-              presetTypeId: child.id,
-            });
-          }
         }
       }
     } finally {
@@ -670,7 +646,7 @@ export function NoteSettingsModal({
     }
   }
 
-  async function handleSyncBuiltinPresetSchemas() {
+  async function handleSyncCatalogPresetTemplates() {
     if (collections == null || dataMode !== "remote") return;
     setSyncBuiltinSchemaLoading(true);
     setSyncBuiltinSchemaResult(null);
@@ -797,7 +773,10 @@ export function NoteSettingsModal({
           order: ord++,
         });
       }
-      if (builtFields.length === 0) {
+      const hasParentInCreate =
+        customTypeModal.mode === "create" &&
+        Boolean(customTypeDraft.parentId.trim());
+      if (builtFields.length === 0 && !hasParentInCreate) {
         builtFields.push({
           id: `sf-u-${Date.now()}-0`,
           name: lang === "en" ? "Title" : "标题",
@@ -810,26 +789,35 @@ export function NoteSettingsModal({
         fields: builtFields,
       };
       if (customTypeModal.mode === "create") {
-        const presetTypeId = `custom-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-        const collectionId = `preset-${presetTypeId}`;
+        const collectionId = `custom-col-${Date.now()}-${Math.random()
+          .toString(36)
+          .slice(2, 9)}`;
         const parentId = customTypeDraft.parentId.trim() || undefined;
-        const res = await enablePresetTypeApi({
-          presetTypeId,
-          collectionId,
+        const created = await createCollectionApi({
+          id: collectionId,
           name,
           dotColor: dotColorFromName(name),
-          cardSchema,
           ...(parentId ? { parentId } : {}),
         });
-        if (!res || !("id" in res) || !res.id) {
+        if (!created) {
+          setCustomTypeFormErr(
+            lang === "en" ? "Could not save. Try again." : "保存失败，请重试。"
+          );
+          return;
+        }
+        const ok = await updateCollectionApi(collectionId, {
+          isCategory: true,
+          cardSchema,
+        });
+        if (!ok) {
+          await deleteCollectionApi(collectionId);
           setCustomTypeFormErr(
             lang === "en" ? "Could not save. Try again." : "保存失败，请重试。"
           );
           return;
         }
         await onCollectionsChange?.({
-          enabledCollectionId: res.id,
-          presetTypeId,
+          enabledCollectionId: collectionId,
         });
       } else {
         const col = customTypeModal.collection;
@@ -1160,6 +1148,10 @@ export function NoteSettingsModal({
     </div>
   );
 
+  const showRerunAndMigrationTools =
+    (globalThis as { __MIKUJAR_SHOW_NOTE_SETTINGS_MIGRATION_TOOLS__?: boolean })
+      .__MIKUJAR_SHOW_NOTE_SETTINGS_MIGRATION_TOOLS__ === true;
+
   const panelContent =
     settingsPanel === "general" ? (
       <div className="note-settings-modal__panel-scroll">
@@ -1425,13 +1417,13 @@ export function NoteSettingsModal({
           {c.noteSettingsObjectTypesLead}
         </p>
 
-        {collections != null && dataMode === "remote" ? (
+        {showRerunAndMigrationTools && collections != null && dataMode === "remote" ? (
           <div className="note-settings-modal__choice-row note-settings-modal__choice-row--stack">
             <button
               type="button"
               className="note-settings-modal__choice note-settings-modal__choice--block"
               disabled={presetObjectTypesLocked}
-              onClick={() => void handleEnableAllPresetTypes()}
+              onClick={() => void handleEnableAllCatalogPresetCollections()}
             >
               {typeActionLoading === "__all__"
                 ? c.noteSettingsEnableAllPresetsBusy
@@ -1440,7 +1432,7 @@ export function NoteSettingsModal({
           </div>
         ) : null}
 
-        {collections != null && dataMode === "remote" ? (
+        {showRerunAndMigrationTools && collections != null && dataMode === "remote" ? (
           <div className="note-settings-modal__migrate-section">
             <p className="note-settings-modal__label">
               {c.noteSettingsSyncBuiltinSchemaTitle}
@@ -1462,7 +1454,7 @@ export function NoteSettingsModal({
               disabled={
                 presetObjectTypesLocked || syncBuiltinSchemaLoading
               }
-              onClick={() => void handleSyncBuiltinPresetSchemas()}
+              onClick={() => void handleSyncCatalogPresetTemplates()}
             >
               {syncBuiltinSchemaLoading
                 ? c.noteSettingsSyncBuiltinSchemaBusy
@@ -1576,9 +1568,26 @@ export function NoteSettingsModal({
             const parentEnabled = enabledByPresetTypeId.get(group.baseId);
             return (
               <div key={group.baseId} className="note-settings-modal__type-group">
+              <div className="note-settings-modal__type-section-head">
                 <p className="note-settings-modal__type-section-title">
                   {presetLabel(parent)}
                 </p>
+                <button
+                  type="button"
+                  className="note-settings-modal__type-section-add-btn"
+                  title={c.noteSettingsAddCustomType}
+                  aria-label={`${c.noteSettingsAddCustomType}：${presetLabel(parent)}`}
+                  disabled={
+                    collections == null ||
+                    dataMode !== "remote" ||
+                    presetObjectTypesLocked ||
+                    !parentEnabled
+                  }
+                  onClick={() => openCreateSubtypeModal(parentEnabled?.id)}
+                >
+                  +
+                </button>
+              </div>
                 <div
                   className="note-settings-modal__subtype-row note-settings-modal__preset-grid"
                   role="list"
@@ -1702,9 +1711,25 @@ export function NoteSettingsModal({
 
           {customObjectTypeLayout.nestedCustomRows.map((row) => (
             <div key={row.parent.id} className="note-settings-modal__type-group">
-              <p className="note-settings-modal__type-section-title">
-                {row.parent.name}
-              </p>
+              <div className="note-settings-modal__type-section-head">
+                <p className="note-settings-modal__type-section-title">
+                  {row.parent.name}
+                </p>
+                <button
+                  type="button"
+                  className="note-settings-modal__type-section-add-btn"
+                  title={c.noteSettingsAddCustomType}
+                  aria-label={`${c.noteSettingsAddCustomType}：${row.parent.name}`}
+                  disabled={
+                    collections == null ||
+                    dataMode !== "remote" ||
+                    presetObjectTypesLocked
+                  }
+                  onClick={() => openCreateSubtypeModal(row.parent.id)}
+                >
+                  +
+                </button>
+              </div>
               <div
                 className="note-settings-modal__subtype-row note-settings-modal__preset-grid"
                 role="list"
@@ -1763,7 +1788,7 @@ export function NoteSettingsModal({
           ))}
         </div>
 
-        {collections != null && dataMode === "remote" && (
+        {showRerunAndMigrationTools && collections != null && dataMode === "remote" && (
           <div className="note-settings-modal__migrate-section">
             <p className="note-settings-modal__label">
               {c.noteSettingsMigrateRelatedRefsTitle}
@@ -1792,7 +1817,7 @@ export function NoteSettingsModal({
           </div>
         )}
 
-        {collections != null && onMigrateFileCardTitles ? (
+        {showRerunAndMigrationTools && collections != null && onMigrateFileCardTitles ? (
           <div className="note-settings-modal__migrate-section">
             <p className="note-settings-modal__label">
               {c.noteSettingsMigrateFileTitlesTitle}
@@ -1823,7 +1848,7 @@ export function NoteSettingsModal({
           </div>
         ) : null}
 
-        {collections != null && dataMode === "remote" && (
+        {showRerunAndMigrationTools && collections != null && dataMode === "remote" && (
           <div className="note-settings-modal__migrate-section">
             <p className="note-settings-modal__label">
               {c.noteSettingsMigrateClipTaggedTitle}
@@ -1856,7 +1881,7 @@ export function NoteSettingsModal({
           </div>
         )}
 
-        {collections != null && enabledByPresetTypeId.has("file") && (
+        {showRerunAndMigrationTools && collections != null && enabledByPresetTypeId.has("file") && (
           <div className="note-settings-modal__migrate-section">
             <p className="note-settings-modal__label">
               {lang === "en" ? "Migrate attachments to File cards" : "将附件迁移为文件卡片"}
@@ -1946,7 +1971,7 @@ export function NoteSettingsModal({
             </button>
           </nav>
           <div className="note-settings-modal__main">
-            {NOTE_SETTINGS_POST_MIGRATE_HINTS.length > 0 ? (
+            {showRerunAndMigrationTools && NOTE_SETTINGS_POST_MIGRATE_HINTS.length > 0 ? (
               <div
                 className="note-settings-modal__post-migrate"
                 role="region"
@@ -2003,7 +2028,7 @@ export function NoteSettingsModal({
                   }
                   onClick={() => {
                     if (collections == null || dataMode !== "remote") return;
-                    setCustomTypeModal({ mode: "create" });
+                    openCreateSubtypeModal();
                   }}
                 >
                   <span aria-hidden className="note-settings-modal__add-type-btn-icon">
@@ -2090,7 +2115,7 @@ export function NoteSettingsModal({
                         <option value="">
                           {c.noteSettingsCustomTypeParentTop}
                         </option>
-                        {categoryObjectContainers.map((o) => (
+                        {templateParentContainers.map((o) => (
                           <option key={o.id} value={o.id}>
                             {o.label}
                           </option>

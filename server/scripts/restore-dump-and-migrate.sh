@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 将 test/railway.dump（或第一个参数）恢复到本机临时库并跑 pg-migrate-incremental.js
+# 将 test/railway.dump（或第一个参数）恢复到本机临时库并跑 migrate-to-v2.js
 #
 # 要求：
 #   - pg_restore 与备份时的 PostgreSQL 主版本一致或更新（Railway PG18 → 需本机 PG16+ 的 pg_restore）
@@ -69,9 +69,9 @@ pg_restore -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" --no-owner --no-acl -d "$TARGE
 TEST_URL="postgresql://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/${TARGET_DB}"
 export DATABASE_URL="$TEST_URL"
 
-echo "📦 npm run db:migrate（目标: ${TARGET_DB}）…"
+echo "📦 npm run db:migrate-to-v2（目标: ${TARGET_DB}）…"
 cd "$ROOT/server"
-npm run db:migrate
+npm run db:migrate-to-v2
 
 echo ""
 echo "✅ 完成。自检可执行："

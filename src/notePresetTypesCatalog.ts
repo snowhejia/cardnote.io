@@ -96,6 +96,35 @@ export const PRESET_OBJECT_TYPES_GROUPS: PresetTypeGroup[] = [
         ],
       },
       {
+        id: "note_book",
+        nameZh: "读书笔记",
+        nameEn: "Book note",
+        emoji: "📖",
+        tint: "rgba(139, 92, 246, 0.16)",
+        schemaFields: [
+          { id: "sf-booknote-title", name: "书名", type: "text", order: 0 },
+          { id: "sf-booknote-author", name: "作者", type: "text", order: 1 },
+          { id: "sf-booknote-page", name: "页码 / 章节", type: "text", order: 2 },
+        ],
+      },
+      {
+        id: "note_video",
+        nameZh: "视频笔记",
+        nameEn: "Video note",
+        emoji: "🎬",
+        tint: "rgba(124, 58, 237, 0.14)",
+        schemaFields: [
+          {
+            id: "sf-vidnote-source",
+            name: "视频",
+            type: "cardLink",
+            order: 0,
+            cardLinkFromEdge: "source",
+          },
+          { id: "sf-vidnote-time", name: "时间戳（秒）", type: "number", order: 1 },
+        ],
+      },
+      {
         id: "idea",
         nameZh: "灵感",
         nameEn: "Idea",
@@ -148,6 +177,8 @@ export const PRESET_OBJECT_TYPES_GROUPS: PresetTypeGroup[] = [
     baseTint: "rgba(55, 53, 47, 0.1)",
     schemaFields: [
       { id: "sf-file-title", name: "标题", type: "text", order: 0 },
+      // 由后端按 card_links(attachment) 入站链自动注入；UI 渲染为 cardLink 跳回源卡
+      { id: "sf-file-source", name: "来源", type: "cardLink", order: 5, readonly: true },
     ],
     children: [
       {
@@ -168,8 +199,8 @@ export const PRESET_OBJECT_TYPES_GROUPS: PresetTypeGroup[] = [
         emoji: "🎬",
         tint: "rgba(124, 58, 237, 0.14)",
         schemaFields: [
-          { id: "sf-vid-duration-sec", name: "时长（秒）", type: "number", order: 1 },
-          { id: "sf-vid-resolution", name: "分辨率", type: "text", order: 2 },
+          { id: "sf-vid-duration-sec", name: "时长", type: "number", order: 1, readonly: true },
+          { id: "sf-vid-resolution", name: "分辨率", type: "text", order: 2, readonly: true },
         ],
       },
       {
@@ -179,7 +210,7 @@ export const PRESET_OBJECT_TYPES_GROUPS: PresetTypeGroup[] = [
         emoji: "🎵",
         tint: "rgba(14, 165, 233, 0.14)",
         schemaFields: [
-          { id: "sf-aud-duration-sec", name: "时长（秒）", type: "number", order: 1 },
+          { id: "sf-aud-duration-sec", name: "时长", type: "number", order: 1, readonly: true },
           { id: "sf-aud-artist", name: "表演者 / 播客", type: "text", order: 2 },
         ],
       },
@@ -208,18 +239,6 @@ export const PRESET_OBJECT_TYPES_GROUPS: PresetTypeGroup[] = [
     ],
   },
   {
-    baseId: "web",
-    baseLabelZh: "网页",
-    baseLabelEn: "Web",
-    baseEmoji: "🌐",
-    baseTint: "rgba(37, 99, 235, 0.12)",
-    schemaFields: [
-      { id: "sf-web-url", name: "链接", type: "url", order: 0 },
-      { id: "sf-web-source", name: "来源", type: "text", order: 1 },
-    ],
-    children: [],
-  },
-  {
     baseId: "topic",
     baseLabelZh: "主题",
     baseLabelEn: "Topic",
@@ -239,7 +258,7 @@ export const PRESET_OBJECT_TYPES_GROUPS: PresetTypeGroup[] = [
           { id: "sf-person-url", name: "主页链接", type: "url", order: 3 },
           {
             id: "sf-person-works",
-            name: "代表作 / 作品",
+            name: "作品",
             type: "cardLinks",
             order: 4,
           },
@@ -522,9 +541,9 @@ export const PRESET_OBJECT_TYPES_GROUPS: PresetTypeGroup[] = [
               },
               {
                 targetKey: "source",
-                targetObjectKind: "web",
+                targetObjectKind: "clip_bookmark",
                 linkType: "source",
-                targetPresetTypeId: "web",
+                targetPresetTypeId: "clip_bookmark",
               },
             ],
             labelZh: "自动关联作者与链接对象",
@@ -547,7 +566,7 @@ export const PRESET_OBJECT_TYPES_GROUPS: PresetTypeGroup[] = [
             cardLinkFromEdge: "creator",
           },
           { id: "sf-bili-date", name: "发布日期", type: "date", order: 3 },
-          { id: "sf-bili-duration", name: "时长（秒）", type: "number", order: 4 },
+          { id: "sf-bili-duration", name: "时长", type: "number", order: 4, readonly: true },
         ],
         autoLinkRules: [
           {
@@ -563,14 +582,95 @@ export const PRESET_OBJECT_TYPES_GROUPS: PresetTypeGroup[] = [
               },
               {
                 targetKey: "source",
-                targetObjectKind: "web",
+                targetObjectKind: "clip_bookmark",
                 linkType: "source",
-                targetPresetTypeId: "web",
+                targetPresetTypeId: "clip_bookmark",
               },
             ],
             labelZh: "自动关联 UP 主与链接对象",
             labelEn: "Auto-link uploader and URL card",
           },
+        ],
+      },
+      {
+        id: "clip_wechat",
+        nameZh: "微信公众号",
+        nameEn: "WeChat article",
+        emoji: "🟢",
+        tint: "rgba(34, 197, 94, 0.14)",
+        schemaFields: [
+          { id: "sf-wechat-account", name: "公众号", type: "text", order: 2 },
+          {
+            id: "sf-wechat-author",
+            name: "作者",
+            type: "cardLink",
+            order: 3,
+            cardLinkFromEdge: "creator",
+          },
+          { id: "sf-wechat-date", name: "发布日期", type: "date", order: 4 },
+        ],
+      },
+      {
+        id: "clip_douyin",
+        nameZh: "抖音",
+        nameEn: "Douyin",
+        emoji: "🎶",
+        tint: "rgba(0, 0, 0, 0.14)",
+        schemaFields: [
+          {
+            id: "sf-douyin-author",
+            name: "作者",
+            type: "cardLink",
+            order: 2,
+            cardLinkFromEdge: "creator",
+          },
+          { id: "sf-douyin-duration", name: "时长", type: "number", order: 3, readonly: true },
+          { id: "sf-douyin-date", name: "发布日期", type: "date", order: 4 },
+        ],
+      },
+      {
+        id: "clip_weibo",
+        nameZh: "微博",
+        nameEn: "Weibo",
+        emoji: "🟧",
+        tint: "rgba(245, 158, 11, 0.14)",
+        schemaFields: [
+          {
+            id: "sf-weibo-author",
+            name: "作者",
+            type: "cardLink",
+            order: 2,
+            cardLinkFromEdge: "creator",
+          },
+          { id: "sf-weibo-date", name: "发布日期", type: "date", order: 3 },
+        ],
+      },
+      {
+        id: "clip_twitter",
+        nameZh: "推特 / X",
+        nameEn: "Twitter / X",
+        emoji: "🐦",
+        tint: "rgba(96, 165, 250, 0.14)",
+        schemaFields: [
+          {
+            id: "sf-twitter-author",
+            name: "作者",
+            type: "cardLink",
+            order: 2,
+            cardLinkFromEdge: "creator",
+          },
+          { id: "sf-twitter-date", name: "发布日期", type: "date", order: 3 },
+        ],
+      },
+      {
+        id: "clip_other",
+        nameZh: "其他剪藏",
+        nameEn: "Other clip",
+        emoji: "🔗",
+        tint: "rgba(148, 163, 184, 0.14)",
+        schemaFields: [
+          { id: "sf-clip-other-source", name: "来源", type: "text", order: 2 },
+          { id: "sf-clip-other-note", name: "备注", type: "text", order: 3 },
         ],
       },
     ],
@@ -581,6 +681,20 @@ export const PRESET_OBJECT_TYPES_GROUPS: PresetTypeGroup[] = [
     baseLabelEn: "Task",
     baseEmoji: "☑",
     baseTint: "rgba(34, 197, 94, 0.14)",
+    schemaFields: [
+      { id: "sf-todo-due", name: "截止日期", type: "date", order: 0 },
+      {
+        id: "sf-todo-priority",
+        name: "优先级",
+        type: "choice",
+        order: 1,
+        options: [
+          { id: "o-prio-high", name: "高", color: "#ef4444" },
+          { id: "o-prio-mid", name: "中", color: "#f59e0b" },
+          { id: "o-prio-low", name: "低", color: "#94a3b8" },
+        ],
+      },
+    ],
     children: [
       {
         id: "task_todo",
@@ -670,8 +784,10 @@ export const PRESET_OBJECT_TYPES_GROUPS: PresetTypeGroup[] = [
     baseTint: "rgba(59, 130, 246, 0.12)",
     children: [],
     schemaFields: [
-      { id: "sf-account-type", name: "类型", type: "text", order: 0 },
-      { id: "sf-account-balance", name: "余额", type: "number", order: 1 },
+      { id: "sf-account-platform", name: "平台", type: "text", order: 0 },
+      { id: "sf-account-username", name: "用户名", type: "text", order: 1 },
+      { id: "sf-account-password", name: "密码", type: "text", order: 2 },
+      { id: "sf-account-login-url", name: "登录链接", type: "url", order: 3 },
     ],
   },
 ];

@@ -1044,53 +1044,11 @@ app.get(
   }
 );
 
-/** POST /api/admin/migrate-attachments — 批量将卡片附件迁移为独立文件卡片 */
-app.post("/api/admin/migrate-attachments", collectionsWriterMw, async (req, res) => {
-  try {
-    const { fileCollectionId, clearOriginalMedia = false } = req.body ?? {};
-    if (!fileCollectionId) {
-      return res.status(400).json({ error: "缺少 fileCollectionId" });
-    }
-    const result = await batchMigrateAttachmentsToFileCards(getUserId(req), {
-      fileCollectionId,
-      clearOriginalMedia: clearOriginalMedia === true,
-    });
-    notifyCollectionsSync(req);
-    res.json(result);
-  } catch (e) {
-    console.error(e);
-    res.status(400).json({ error: e.message || "迁移失败" });
-  }
-});
-
-/** POST /api/admin/migrate-related-refs-json — related_refs JSON → card_links（图谱边表为唯一来源） */
-app.post("/api/admin/migrate-related-refs-json", collectionsWriterMw, async (req, res) => {
-  try {
-    const result = await migrateRelatedRefsJsonToCardLinks(getUserId(req));
-    notifyCollectionsSync(req);
-    res.json(result);
-  } catch (e) {
-    console.error(e);
-    res.status(400).json({ error: e.message || "迁移失败" });
-  }
-});
-
-/** POST /api/admin/migrate-clip-tagged-notes — 小红书 / bilibili 标签笔记迁入剪藏预设子类 */
-app.post("/api/admin/migrate-clip-tagged-notes", collectionsWriterMw, async (req, res) => {
-  try {
-    const dryRun = req.body?.dryRun === true;
-    const result = await migrateClipTaggedNotesToPresetCards(getUserId(req), {
-      dryRun,
-    });
-    notifyCollectionsSync(req);
-    res.json(result);
-  } catch (e) {
-    console.error(e);
-    res.status(400).json({ error: e.message || "迁移失败" });
-  }
-});
-
-/** POST /api/admin/enable-preset-type — 创建预设类型合集（is_category=true，幂等） */
+/**
+ * POST /api/admin/enable-preset-type — 创建预设类型合集（幂等）
+ * v2 schema 下：通过 storage-pg 的 createCollection + updateCollection
+ * （collection.bound_type_id 由 presetTypeId/cardSchema 决议）。
+ */
 app.post("/api/admin/enable-preset-type", collectionsWriterMw, async (req, res) => {
   try {
     const { presetTypeId, collectionId, name, dotColor = "", cardSchema, parentId } = req.body ?? {};
@@ -1098,27 +1056,20 @@ app.post("/api/admin/enable-preset-type", collectionsWriterMw, async (req, res) 
       return res.status(400).json({ error: "缺少必填字段 presetTypeId / collectionId / name" });
     }
     const uid = getUserId(req);
-    const { sql: uidSql, params: uidParams } =
-      uid === null || uid === undefined
-        ? { sql: "user_id IS NULL", params: [] }
-        : { sql: "user_id = $2", params: [uid] };
-    // 幂等：检查是否已有该 preset_type_id 的合集
-    const existing = await dbQuery(
-      `SELECT id FROM collections WHERE preset_type_id = $1 AND ${uidSql}`,
-      [presetTypeId, ...uidParams]
-    );
-    if (existing.rowCount > 0) {
-      return res.json({ alreadyExists: true, id: existing.rows[0].id });
+
+    // 幂等：先看用户名下是否已有 bound_type_id 指向同 preset_slug 的合集
+    const existingId = await getPresetCollectionId(uid, presetTypeId);
+    if (existingId) {
+      return res.json({ alreadyExists: true, id: existingId });
     }
-    // 创建合集
-    const col = await createCollection(uid, {
+
+    await createCollection(uid, {
       id: collectionId,
       name,
       dotColor,
       hint: "",
       parentId: parentId ?? null,
     });
-    // 设置 is_category + preset_type_id + card_schema
     const updated = await updateCollection(uid, collectionId, {
       isCategory: true,
       presetTypeId,
@@ -1131,6 +1082,16 @@ app.post("/api/admin/enable-preset-type", collectionsWriterMw, async (req, res) 
     res.status(400).json({ error: e.message || "创建失败" });
   }
 });
+
+// 旧的一次性迁移端点（v2 已不需要；保留路由以免 404，但直接 410 Gone）
+function v2GoneRoute(_req, res) {
+  res
+    .status(410)
+    .json({ error: "endpoint removed in v2; data migration handled by migrate-to-v2.js" });
+}
+app.post("/api/admin/migrate-attachments", collectionsWriterMw, v2GoneRoute);
+app.post("/api/admin/migrate-related-refs-json", collectionsWriterMw, v2GoneRoute);
+app.post("/api/admin/migrate-clip-tagged-notes", collectionsWriterMw, v2GoneRoute);
 
 /**
  * GET /api/me/sync/events — SSE：笔记数据变更时推送，客户端防抖后拉取 GET /api/collections。

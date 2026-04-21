@@ -11,17 +11,19 @@ export type CollectionContextMenuState = {
 
 type Props = {
   menu: CollectionContextMenuState | null;
+  onAddSubcollection: (id: string, name: string) => void;
   onMergeInto: (id: string, name: string) => void;
   onMoveUnder: (id: string, name: string) => void;
-  onChangeCategory: (id: string, name: string) => void;
+  onEditTemplate: (id: string, name: string) => void;
   onRemove: (id: string, name: string, hasChildren: boolean) => void;
 };
 
 export function CollectionContextMenu({
   menu,
+  onAddSubcollection,
   onMergeInto,
   onMoveUnder,
-  onChangeCategory,
+  onEditTemplate,
   onRemove,
 }: Props) {
   const c = useAppChrome();
@@ -41,6 +43,17 @@ export function CollectionContextMenu({
       }}
       role="menu"
     >
+      <button
+        type="button"
+        className="attachment-ctx-menu__item"
+        role="menuitem"
+        onClick={(e) => {
+          e.stopPropagation();
+          onAddSubcollection(menu.id, menu.name);
+        }}
+      >
+        {c.uiAddSubcollectionAria}
+      </button>
       <button
         type="button"
         className="attachment-ctx-menu__item"
@@ -69,10 +82,10 @@ export function CollectionContextMenu({
         role="menuitem"
         onClick={(e) => {
           e.stopPropagation();
-          onChangeCategory(menu.id, menu.name);
+          onEditTemplate(menu.id, menu.name);
         }}
       >
-        {c.uiCollectionChangeCategoryMenu}
+        {c.uiCollectionEditTemplateMenu}
       </button>
       <button
         type="button"

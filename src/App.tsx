@@ -80,6 +80,7 @@ import {
   writeSidebarSectionsCollapsed,
   type SidebarSectionCollapseState,
 } from "./sidebarSectionCollapseStorage";
+import { toReadableSidebarDotColor } from "./sidebarDotColor";
 const UserProfileModal = lazy(() =>
   import("./UserProfileModal").then((m) => ({ default: m.UserProfileModal }))
 );
@@ -128,8 +129,10 @@ const UserAdminPage = lazy(() =>
 import type {
   CardProperty,
   Collection,
+  CollectionCardSchema,
   NoteCard,
   NoteMediaItem,
+  SchemaField,
   TrashedNoteEntry,
   UserNotePrefs,
 } from "./types";
@@ -162,9 +165,8 @@ import {
   buildSearchResults,
   CalendarBrowsePanel,
   CollectionContextMenu,
-  CollectionCategoryModal,
-  type CollectionCategoryChoice,
-  type CollectionCategoryDialogState,
+  CollectionTemplateModal,
+  type CollectionTemplateDialogState,
   CollectionDeleteDialog,
   CollectionMergeDialog,
   type CollectionMergeDialogState,
@@ -265,6 +267,7 @@ import {
   mergeServerTreeWithLocalExtraCards,
   removeCardPlacementFromTree,
 } from "./appkit/collectionModel";
+import { mergedTemplateSchemaFieldsForCollection } from "./appkit/schemaTemplateFields";
 import {
   type AttachmentFilterKey,
   type AttachmentUiCategory,
@@ -273,7 +276,6 @@ import {
 } from "./noteMediaCategory";
 import {
   PRESET_OBJECT_TYPES_GROUPS,
-  buildSchemaFromPreset,
   filterPlainFolderCollectionsForNotesSidebar,
   presetCatalogBaseIdForPresetTypeId,
   type PresetTypeGroup,
@@ -281,17 +283,7 @@ import {
 
 /** 时间线虚拟列表：每批挂载卡片数（全部笔记 / 单合集 / 日历 / 搜索等共用） */
 const TIMELINE_VIRTUAL_BATCH = 40;
-
-/** 侧栏「笔记」下笔记预设子类型（学习/灵感/日记/摘抄） */
-const NOTE_PRESET_SUBTYPE_ITEMS =
-  PRESET_OBJECT_TYPES_GROUPS.find((g) => g.baseId === "note")?.children ?? [];
-
-const NOTE_SUBTYPE_SIDEBAR_DOT: Record<string, string> = {
-  note_standard: "#5b8def",
-  idea: "#eab308",
-  journal: "#b45309",
-  quote: "#ef4444",
-};
+const CONNECTIONS_EDGE_BATCH = 500;
 
 /** 侧栏「文件」下展示的子类型（与对象类型目录、附件筛选一致） */
 const FILE_PRESET_SUBTYPE_ITEMS =
@@ -310,23 +302,9 @@ const FILE_SUBTYPE_SIDEBAR_DOT: Record<string, string> = {
 const TOPIC_PRESET_SUBTYPE_ITEMS =
   PRESET_OBJECT_TYPES_GROUPS.find((g) => g.baseId === "topic")?.children ?? [];
 
-const TOPIC_SUBTYPE_SIDEBAR_DOT: Record<string, string> = {
-  person: "#f97316",
-  organization: "#ea580c",
-  event: "#f59e0b",
-  place: "#22c55e",
-  topic_concept: "#7c3aed",
-};
-
 /** 侧栏「剪藏」子类型（与对象类型目录一致） */
 const CLIP_PRESET_SUBTYPE_ITEMS =
   PRESET_OBJECT_TYPES_GROUPS.find((g) => g.baseId === "clip")?.children ?? [];
-
-const CLIP_SUBTYPE_SIDEBAR_DOT: Record<string, string> = {
-  clip_bookmark: "#3b82f6",
-  post_xhs: "#ef4444",
-  post_bilibili: "#00a1d6",
-};
 
 /**
  * 侧栏「类型」区块统一判定：是否存在会在该区块下展示的子合集。
@@ -379,9 +357,9 @@ const WORK_TASK_PRESET_SUBTYPE_DOT: Record<string, string> = {
   habit_log: "#34d399",
 };
 
+
 /** 侧栏中单独分区的 catalog 顶层 id（启用对应预设时显示；未启用则整块隐藏） */
 const SIDEBAR_COLLAPSIBLE_PRESET_BASE_IDS = [
-  "web",
   "work",
   "task",
   "project",
@@ -419,6 +397,43 @@ function presetGroupSectionCardCount(
   }
   return has ? sum : ("–" as const);
 }
+
+type SidebarSubtypeRow = {
+  col: Collection;
+  depth: number;
+};
+
+function collectSidebarSubtypeRows(root: Collection | null): SidebarSubtypeRow[] {
+  if (!root) return [];
+  const out: SidebarSubtypeRow[] = [];
+  const walk = (nodes: Collection[] | undefined, depth: number) => {
+    if (!nodes?.length) return;
+    for (const n of nodes) {
+      out.push({ col: n, depth });
+      walk(n.children, depth + 1);
+    }
+  };
+  walk(root.children, 0);
+  return out;
+}
+
+function collectLegacyRootCollectionsForNotesMigration(
+  roots: Collection[],
+  noteRootId: string
+): string[] {
+  return roots
+    .filter((col) => {
+      if (col.id === noteRootId || col.id === LOOSE_NOTES_COLLECTION_ID) {
+        return false;
+      }
+      const pid = (col.presetTypeId ?? "").trim();
+      if (pid) return false;
+      if (col.isCategory) return false;
+      return true;
+    })
+    .map((col) => col.id);
+}
+
 
 /** 「文件」视图面包屑：子级文案与顶栏筛选一致 */
 function attachmentFilterCrumbLabel(
@@ -728,8 +743,8 @@ export default function App() {
     useState<CollectionMergeDialogState | null>(null);
   const [moveUnderCollectionDialog, setMoveUnderCollectionDialog] =
     useState<CollectionMoveUnderDialogState | null>(null);
-  const [collectionCategoryDialog, setCollectionCategoryDialog] =
-    useState<CollectionCategoryDialogState | null>(null);
+  const [collectionTemplateDialog, setCollectionTemplateDialog] =
+    useState<CollectionTemplateDialogState | null>(null);
   const [collectionCloudSyncProgress, setCollectionCloudSyncProgress] =
     useState<{
       current: number;
@@ -876,6 +891,7 @@ export default function App() {
     position: CollectionDropPosition;
   } | null>(null);
   const [remoteLoaded, setRemoteLoaded] = useState(false);
+  const legacyNoteRootMigrationDoneRef = useRef<Set<string>>(new Set());
   /** 云端：首屏已展示（含本地快照）但 GET /collections 仍在进行 */
   const [remoteBootSyncing, setRemoteBootSyncing] = useState(false);
   /** 云端模式下仅在一次成功的 GET /collections 之后才开放写入（粒度化 API 内部自行检查） */
@@ -1403,7 +1419,6 @@ export default function App() {
           if (base === "file") n.files = false;
           if (base === "clip") n.clip = false;
           if (base === "topic") n.topic = false;
-          if (base === "web") n.web = false;
           if (base === "work") n.work = false;
           if (base === "task") n.task = false;
           if (base === "project") n.project = false;
@@ -1415,6 +1430,74 @@ export default function App() {
     },
     [resyncRemoteCollectionsTree, setCollapsedFolderIds, setSidebarSectionCollapsed]
   );
+
+  useEffect(() => {
+    if (!authReady) return;
+    if (dataMode === "remote" && !remoteLoaded) return;
+
+    const scopeKey =
+      dataMode === "remote"
+        ? `remote:${currentUser?.id?.trim() || "signed-out"}`
+        : "local";
+    if (legacyNoteRootMigrationDoneRef.current.has(scopeKey)) return;
+
+    const noteRoot = findCollectionByPresetType(collections, "note");
+    if (!noteRoot) {
+      legacyNoteRootMigrationDoneRef.current.add(scopeKey);
+      return;
+    }
+    if (dataMode === "remote" && !canEdit) {
+      legacyNoteRootMigrationDoneRef.current.add(scopeKey);
+      return;
+    }
+
+    const movableRootIds = collectLegacyRootCollectionsForNotesMigration(
+      collections,
+      noteRoot.id
+    );
+    if (movableRootIds.length === 0) {
+      legacyNoteRootMigrationDoneRef.current.add(scopeKey);
+      return;
+    }
+
+    const previousTree = collections;
+    let nextTree = previousTree;
+    for (const rootId of movableRootIds) {
+      nextTree = moveCollectionInTree(nextTree, rootId, noteRoot.id, "inside");
+    }
+    legacyNoteRootMigrationDoneRef.current.add(scopeKey);
+    setCollections(nextTree);
+    setSidebarSectionCollapsed((prev) => ({ ...prev, notes: false }));
+    setCollapsedFolderIds((prev) => {
+      const next = new Set(prev);
+      next.delete(noteRoot.id);
+      return next;
+    });
+
+    if (dataMode !== "remote") return;
+    void (async () => {
+      const ok = await persistCollectionTreeLayoutRemoteWithRetry(
+        nextTree,
+        undefined,
+        previousTree
+      );
+      if (!ok) {
+        legacyNoteRootMigrationDoneRef.current.delete(scopeKey);
+        await resyncRemoteCollectionsTree();
+      }
+    })();
+  }, [
+    authReady,
+    dataMode,
+    remoteLoaded,
+    currentUser?.id,
+    canEdit,
+    collections,
+    setCollections,
+    setSidebarSectionCollapsed,
+    setCollapsedFolderIds,
+    resyncRemoteCollectionsTree,
+  ]);
 
   const handleTimelinePullRefresh = useCallback(async () => {
     if (dataMode === "remote") {
@@ -1937,12 +2020,29 @@ export default function App() {
     });
   }, [collections]);
 
-  const activeNoteCards = useMemo(
-    () => (active?.cards ?? []).filter(
-      (c) => !isFileCard(c)
-    ),
-    [active?.cards]
-  );
+  const activeNoteCards = useMemo(() => {
+    if (!active) return [];
+    const presetId = (active.presetTypeId ?? "").trim();
+    const baseId =
+      presetCatalogBaseIdForPresetTypeId(presetId) ??
+      (presetId === "post" ? "clip" : null);
+    const isPresetRootView = Boolean(
+      baseId &&
+        (presetId === baseId || (presetId === "post" && baseId === "clip"))
+    );
+    if (!isPresetRootView) {
+      return (active.cards ?? []).filter((c) => !isFileCard(c));
+    }
+    const out: NoteCard[] = [];
+    const walk = (col: Collection) => {
+      for (const card of col.cards ?? []) {
+        if (!isFileCard(card)) out.push(card);
+      }
+      for (const ch of col.children ?? []) walk(ch);
+    };
+    walk(active);
+    return out;
+  }, [active]);
 
   const { pinned, rest } = useMemo(
     () => splitPinnedCards(activeNoteCards),
@@ -2001,24 +2101,34 @@ export default function App() {
     }
     return has ? sum : ("–" as const);
   }, [collections, topicParentCol]);
+  const topicSubtypeCols = useMemo(
+    () => collectSidebarSubtypeRows(topicNavRootCol),
+    [topicNavRootCol]
+  );
   const clipSectionCount = useMemo(() => {
     if (!clipParentCol) return "–" as const;
     return countCollectionSubtreeCards(clipParentCol);
   }, [clipParentCol]);
+  const clipSubtypeCols = useMemo(
+    () => collectSidebarSubtypeRows(clipParentCol),
+    [clipParentCol]
+  );
+
+  const noteNavRootCol = useMemo(() => {
+    return findCollectionByPresetType(collections, "note");
+  }, [collections]);
 
   const collectionsForNotesSidebar = useMemo(
-    () => filterPlainFolderCollectionsForNotesSidebar(collections),
-    [collections]
+    () =>
+      noteNavRootCol?.children?.filter(
+        (c) => c.id !== LOOSE_NOTES_COLLECTION_ID
+      ) ?? filterPlainFolderCollectionsForNotesSidebar(collections),
+    [collections, noteNavRootCol]
   );
 
   const notesSectionHasChildCollections = useMemo(
-    () =>
-      sidebarTypeSectionHasChildCollections(
-        collections,
-        NOTE_PRESET_SUBTYPE_ITEMS,
-        collectionsForNotesSidebar.length
-      ),
-    [collections, collectionsForNotesSidebar]
+    () => collectionsForNotesSidebar.length > 0,
+    [collectionsForNotesSidebar]
   );
 
   const filesSectionHasChildCollections = useMemo(
@@ -2031,23 +2141,13 @@ export default function App() {
   );
 
   const topicSectionHasChildCollections = useMemo(
-    () =>
-      sidebarTypeSectionHasChildCollections(
-        collections,
-        TOPIC_PRESET_SUBTYPE_ITEMS,
-        0
-      ),
-    [collections]
+    () => topicSubtypeCols.length > 0,
+    [topicSubtypeCols]
   );
 
   const clipSectionHasChildCollections = useMemo(
-    () =>
-      sidebarTypeSectionHasChildCollections(
-        collections,
-        CLIP_PRESET_SUBTYPE_ITEMS,
-        0
-      ),
-    [collections]
+    () => clipSubtypeCols.length > 0,
+    [clipSubtypeCols]
   );
 
   const allMediaAttachmentEntries = useMemo(() => {
@@ -2162,9 +2262,10 @@ export default function App() {
         item,
         collectionsRef.current
       );
-      if (!linked) return;
+      if (!linked) return false;
       setDetailCard(null);
       setCardPageCard({ colId: linked.colId, cardId: linked.card.id });
+      return true;
     },
     []
   );
@@ -2172,16 +2273,29 @@ export default function App() {
   /** 「文件」网格：打开附件时优先进入已关联的 file 卡；否则创建 file 卡并建双向连接后再打开 */
   const openAttachmentFromAllAttachmentsView = useCallback(
     (colId: string, noteCardId: string, mediaIndex: number) => {
+      const resolveAttachmentCardHit = (
+        cols: Collection[],
+        preferredColId: string,
+        cardId: string
+      ) => {
+        const direct = findCardInTree(cols, preferredColId, cardId);
+        if (direct) return direct;
+        for (const col of cols) {
+          const card = col.cards.find((c) => c.id === cardId);
+          if (card) return { col, card };
+        }
+        return null;
+      };
       const tryOpen = async (depth = 0): Promise<void> => {
         if (depth > 12) return;
         const collectionsNow = collectionsRef.current;
-        const hit = findCardInTree(collectionsNow, colId, noteCardId);
+        const hit = resolveAttachmentCardHit(collectionsNow, colId, noteCardId);
         if (!hit) return;
 
         // 附件页直接列出的是文件卡 — 直接打开 CardPageView
         if (isFileCard(hit.card)) {
           setDetailCard(null);
-          setCardPageCard({ colId, cardId: noteCardId });
+          setCardPageCard({ colId: hit.col.id, cardId: noteCardId });
           return;
         }
 
@@ -2230,7 +2344,11 @@ export default function App() {
         });
         inflight.set(lockKey, chainDone);
         try {
-          const hitAgain = findCardInTree(collectionsRef.current, colId, noteCardId);
+          const hitAgain = resolveAttachmentCardHit(
+            collectionsRef.current,
+            colId,
+            noteCardId
+          );
           if (!hitAgain) return;
           const itemAgain = hitAgain.card.media?.[mediaIndex];
           if (!itemAgain?.url?.trim()) {
@@ -2265,7 +2383,7 @@ export default function App() {
 
           if (dataMode === "remote") {
             const res = await createFileCardForNoteMediaApi(noteCardId, {
-              placementCollectionId: colId,
+              placementCollectionId: hitAgain.col.id,
               media: itemAgain,
             });
             if (!res) {
@@ -2280,7 +2398,7 @@ export default function App() {
             const merged = await resyncRemoteCollectionsTree();
             notifyRemoteAttachmentsChanged();
             if (merged) {
-              const fh = findCardInTree(merged, colId, res.fileCardId);
+              const fh = resolveAttachmentCardHit(merged, hitAgain.col.id, res.fileCardId);
               if (fh) {
                 setDetailCard(null);
                 setCardPageCard({
@@ -2326,20 +2444,24 @@ export default function App() {
           };
           flushSync(() => {
             setCollections((prev) => {
-              let next = mapCollectionById(prev, colId, (col) => ({
+              let next = mapCollectionById(prev, hitAgain.col.id, (col) => ({
                 ...col,
                 cards: [...col.cards, newFileCard],
               }));
               return addBidirectionalRelated(
                 next,
-                colId,
+                hitAgain.col.id,
                 noteCardId,
-                colId,
+                hitAgain.col.id,
                 fileCardId
               );
             });
           });
-          const fh = findCardInTree(collectionsRef.current, colId, fileCardId);
+          const fh = resolveAttachmentCardHit(
+            collectionsRef.current,
+            hitAgain.col.id,
+            fileCardId
+          );
           if (fh) {
             setDetailCard(null);
             setCardPageCard({ colId: fh.col.id, cardId: fh.card.id });
@@ -2369,10 +2491,25 @@ export default function App() {
     ]
   );
 
-  const connectionEdges = useMemo(
-    () => (connectionsPrimed ? collectConnectionEdges(collections) : []),
-    [collections, connectionsPrimed]
+  const [connectionsEdgeLimit, setConnectionsEdgeLimit] = useState(
+    CONNECTIONS_EDGE_BATCH
   );
+  const { connectionEdges, connectionEdgesTruncated } = useMemo(() => {
+    if (!connectionsPrimed) {
+      return { connectionEdges: [] as ReturnType<typeof collectConnectionEdges>["edges"], connectionEdgesTruncated: false };
+    }
+    const r = collectConnectionEdges(collections, connectionsEdgeLimit);
+    return { connectionEdges: r.edges, connectionEdgesTruncated: r.truncated };
+  }, [collections, connectionsPrimed, connectionsEdgeLimit]);
+  const connectedCardsCount = useMemo(() => {
+    let count = 0;
+    walkCollections(collections, (col) => {
+      for (const card of col.cards) {
+        if ((card.relatedRefs ?? []).length > 0) count += 1;
+      }
+    });
+    return count;
+  }, [collections]);
 
   const allNotesSorted = useMemo(() => {
     const entries: { col: Collection; card: NoteCard }[] = [];
@@ -2476,6 +2613,80 @@ export default function App() {
     ]
   );
 
+  const renderSidebarSubtypeRows = (
+    rows: SidebarSubtypeRow[],
+    listAria: string
+  ) => (
+    <div className="sidebar__file-subtypes" role="list" aria-label={listAria}>
+      {rows.map(({ col, depth }) => {
+        const label = col.name;
+        const subtypeActive =
+          Boolean(active?.id === col.id) &&
+          !searchActive &&
+          !attachmentsViewActive &&
+          !trashViewActive &&
+          !allNotesViewActive &&
+          !calendarDay &&
+          !connectionsViewActive &&
+          !remindersViewActive;
+        const subtypeCount = countCollectionSubtreeCards(col);
+        return (
+          <div key={col.id} className="sidebar__file-subtype-row" role="listitem">
+            <button
+              type="button"
+              className={
+                "sidebar__file-subtype-hit" + (subtypeActive ? " is-active" : "")
+              }
+              onContextMenu={(e) => {
+                if (!canEdit) return;
+                e.preventDefault();
+                setCollectionCtxMenu({
+                  x: e.clientX,
+                  y: e.clientY,
+                  id: col.id,
+                  name: col.name,
+                  hasChildren: (col.children?.length ?? 0) > 0,
+                });
+              }}
+              onClick={() => {
+                closeCardFullPage();
+                setTrashViewActive(false);
+                setCalendarDay(null);
+                setSearchQuery("");
+                setSearchBarOpen(false);
+                setAllNotesViewActive(false);
+                setAttachmentsViewActive(false);
+                setConnectionsViewActive(false);
+                setRemindersViewActive(false);
+                setActiveId(col.id);
+                expandAncestorsOf(col.id);
+                setMobileNavOpen(false);
+              }}
+              aria-label={`${label} (${subtypeCount})`}
+            >
+              <span className="sidebar__chevron-spacer" aria-hidden />
+              <span className="sidebar__file-subtype-body">
+                {depth > 0 ? (
+                  <span
+                    aria-hidden
+                    style={{ width: `${Math.min(depth, 8) * 12}px`, flex: "0 0 auto" }}
+                  />
+                ) : null}
+                <span
+                  className="sidebar__dot"
+                  style={{ backgroundColor: toReadableSidebarDotColor(col.dotColor) }}
+                  aria-hidden
+                />
+                <span className="sidebar__name">{label}</span>
+                <span className="sidebar__count">{subtypeCount}</span>
+              </span>
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+
   const renderPresetCatalogSidebarSection = (
     baseId: (typeof SIDEBAR_COLLAPSIBLE_PRESET_BASE_IDS)[number]
   ) => {
@@ -2485,13 +2696,10 @@ export default function App() {
     if (!navRootCol) return null;
     const sectionLabel =
       appUiLang === "en" ? group.baseLabelEn : group.baseLabelZh;
-    const sectionCount = presetGroupSectionCardCount(collections, group);
+    const sectionCount = countCollectionSubtreeCards(navRootCol);
     const collapsed = sidebarSectionCollapsed[baseId];
-    const hasChildCollections = sidebarTypeSectionHasChildCollections(
-      collections,
-      group.children,
-      0
-    );
+    const subtypeCollections = collectSidebarSubtypeRows(navRootCol);
+    const hasChildCollections = subtypeCollections.length > 0;
     const collapsedEffective = hasChildCollections && collapsed;
     const listAria =
       appUiLang === "zh"
@@ -2538,6 +2746,17 @@ export default function App() {
               "sidebar__section-hit sidebar__section-hit--preset-title" +
               (isSidebarPresetNavActive(navRootCol.id) ? " is-active" : "")
             }
+            onContextMenu={(e) => {
+              if (!canEdit) return;
+              e.preventDefault();
+              setCollectionCtxMenu({
+                x: e.clientX,
+                y: e.clientY,
+                id: navRootCol.id,
+                name: navRootCol.name,
+                hasChildren: (navRootCol.children?.length ?? 0) > 0,
+              });
+            }}
             onClick={() => {
               closeCardFullPage();
               setTrashViewActive(false);
@@ -2559,76 +2778,22 @@ export default function App() {
               {sectionCount}
             </span>
           </button>
+          {canEdit && !showMobileSidebarBrowseChrome ? (
+            <button
+              type="button"
+              className="sidebar__section-add"
+              onClick={() =>
+                void addSubCollection(navRootCol.id, { asCategory: true })
+              }
+              aria-label={c.newCollectionAria}
+            >
+              +
+            </button>
+          ) : null}
         </div>
-        {!collapsedEffective && hasChildCollections ? (
-          <div
-            className="sidebar__file-subtypes"
-            role="list"
-            aria-label={listAria}
-          >
-            {group.children.map((item) => {
-              const col = findCollectionByPresetType(collections, item.id);
-              if (!col) return null;
-              const label =
-                appUiLang === "en" ? item.nameEn : item.nameZh;
-              const subtypeActive =
-                Boolean(active?.id === col.id) &&
-                !searchActive &&
-                !attachmentsViewActive &&
-                !trashViewActive &&
-                !allNotesViewActive &&
-                !calendarDay &&
-                !connectionsViewActive &&
-                !remindersViewActive;
-              const subtypeCount = countCollectionSubtreeCards(col);
-              return (
-                <div
-                  key={item.id}
-                  className="sidebar__file-subtype-row"
-                  role="listitem"
-                >
-                  <button
-                    type="button"
-                    className={
-                      "sidebar__file-subtype-hit" +
-                      (subtypeActive ? " is-active" : "")
-                    }
-                    onClick={() => {
-                      closeCardFullPage();
-                      setTrashViewActive(false);
-                      setCalendarDay(null);
-                      setSearchQuery("");
-                      setSearchBarOpen(false);
-                      setAllNotesViewActive(false);
-                      setAttachmentsViewActive(false);
-                      setConnectionsViewActive(false);
-                      setRemindersViewActive(false);
-                      setActiveId(col.id);
-                      expandAncestorsOf(col.id);
-                      setMobileNavOpen(false);
-                    }}
-                    aria-label={`${label} (${subtypeCount})`}
-                  >
-                    <span className="sidebar__chevron-spacer" aria-hidden />
-                    <span className="sidebar__file-subtype-body">
-                      <span
-                        className="sidebar__dot"
-                        style={{
-                          backgroundColor:
-                            WORK_TASK_PRESET_SUBTYPE_DOT[item.id] ??
-                            "rgba(55, 53, 47, 0.35)",
-                        }}
-                        aria-hidden
-                      />
-                      <span className="sidebar__name">{label}</span>
-                      <span className="sidebar__count">{subtypeCount}</span>
-                    </span>
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        ) : null}
+        {!collapsedEffective && hasChildCollections
+          ? renderSidebarSubtypeRows(subtypeCollections, listAria)
+          : null}
       </div>
     );
   };
@@ -4589,17 +4754,28 @@ export default function App() {
   }, [canEdit, dataMode, c.newCollectionName, c.errCreateCol]);
 
   const addSubCollection = useCallback(
-    async (parentId: string) => {
+    async (
+      parentId: string,
+      options?: { asCategory?: boolean; inheritParentSchema?: boolean }
+    ) => {
       if (!canEdit) return;
       skipCloseMobileNavOnActiveChangeRef.current = true;
       setTrashViewActive(false);
       setRemindersViewActive(false);
+      const asCategory = options?.asCategory === true;
+      const parentCol = findCollectionById(collections, parentId);
+      const inheritedSchema =
+        asCategory && options?.inheritParentSchema !== false
+          ? parentCol?.cardSchema
+          : undefined;
       const id = `c-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
       const child: Collection = {
         id,
         name: c.newSubCollectionName,
         dotColor: randomDotColor(),
         cards: [],
+        ...(asCategory ? { isCategory: true } : {}),
+        ...(inheritedSchema ? { cardSchema: inheritedSchema } : {}),
       };
       if (dataMode === "remote") {
         const created = await createCollectionApi({
@@ -4611,6 +4787,17 @@ export default function App() {
         if (!created) {
           window.alert(c.errCreateSub);
           return;
+        }
+        if (asCategory) {
+          const ok = await updateCollectionApi(id, {
+            isCategory: true,
+            cardSchema: inheritedSchema ?? { version: 1, fields: [] },
+          });
+          if (!ok) {
+            await deleteCollectionApi(id);
+            window.alert(c.errCreateSub);
+            return;
+          }
         }
         const merged: Collection = {
           ...child,
@@ -4635,7 +4822,7 @@ export default function App() {
       setDraftCollectionName(c.newSubCollectionName);
       setEditingCollectionId(id);
     },
-    [canEdit, dataMode, c.newSubCollectionName, c.errCreateSub]
+    [canEdit, collections, dataMode, c.newSubCollectionName, c.errCreateSub]
   );
 
   const toggleFavoriteCollection = useCallback(
@@ -4879,59 +5066,39 @@ export default function App() {
     [canEdit]
   );
 
-  const openCollectionCategoryDialog = useCallback(
+  const openCollectionTemplateDialog = useCallback(
     (id: string, displayName: string) => {
       if (!canEdit) return;
       setCollectionCtxMenu(null);
-      setCollectionCategoryDialog({ collectionId: id, displayName });
+      setCollectionTemplateDialog({ collectionId: id, displayName });
     },
     [canEdit]
   );
 
-  const performCollectionCategoryChange = useCallback(
-    async (collectionId: string, choice: CollectionCategoryChoice) => {
+  const performCollectionTemplateSave = useCallback(
+    async (collectionId: string, fields: SchemaField[]) => {
       if (!canEdit) return;
-      if (choice.kind === "none") {
-        setCollections((prev) =>
-          mapCollectionById(prev, collectionId, (col) => ({
-            ...col,
-            isCategory: false,
-            presetTypeId: undefined,
-            cardSchema: undefined,
-          }))
-        );
-        if (dataMode === "remote" && canEdit) {
-          const ok = await updateCollectionApi(collectionId, {
-            isCategory: false,
-            presetTypeId: null,
-            cardSchema: null,
-          });
-          if (!ok) window.alert(c.errCollectionCategorySync);
-        }
-        return;
-      }
-      const schema = buildSchemaFromPreset(choice.group, choice.child);
-      const dotColor = choice.child?.tint ?? choice.group.baseTint;
+      const prevCol = findCollectionById(collections, collectionId);
+      const prevSchema: CollectionCardSchema = prevCol?.cardSchema ?? {};
+      const schema: CollectionCardSchema = {
+        ...prevSchema,
+        version: 1,
+        fields: fields.map((f, idx) => ({ ...f, order: idx })),
+      };
       setCollections((prev) =>
         mapCollectionById(prev, collectionId, (col) => ({
           ...col,
-          isCategory: true,
-          presetTypeId: choice.presetTypeId,
           cardSchema: schema,
-          dotColor,
         }))
       );
       if (dataMode === "remote" && canEdit) {
         const ok = await updateCollectionApi(collectionId, {
-          isCategory: true,
-          presetTypeId: choice.presetTypeId,
           cardSchema: schema,
-          dotColor,
         });
-        if (!ok) window.alert(c.errCollectionCategorySync);
+        if (!ok) window.alert(c.errCollectionTemplateSync);
       }
     },
-    [canEdit, dataMode, c.errCollectionCategorySync]
+    [canEdit, dataMode, c.errCollectionTemplateSync, collections]
   );
 
   const performMoveCollectionUnder = useCallback(
@@ -5145,13 +5312,13 @@ export default function App() {
   }, [moveUnderCollectionDialog]);
 
   useEffect(() => {
-    if (collectionCategoryDialog === null) return;
+    if (collectionTemplateDialog === null) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setCollectionCategoryDialog(null);
+      if (e.key === "Escape") setCollectionTemplateDialog(null);
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [collectionCategoryDialog]);
+  }, [collectionTemplateDialog]);
 
   useEffect(() => {
     if (cardMenuId === null) return;
@@ -5374,6 +5541,11 @@ export default function App() {
     setUserDataStatsOpen(true);
   }, []);
 
+  const logoutFromAccountMenu = useCallback(() => {
+    setUserAccountMenuOpen(false);
+    logout();
+  }, [logout]);
+
   const userAccountMenuDropdownEl = useMemo(() => {
     if (
       !userAccountMenuOpen ||
@@ -5389,6 +5561,7 @@ export default function App() {
         onOpenProfile={openUserProfileModal}
         onOpenNoteSettings={openNoteSettingsModal}
         onOpenDataStats={openDataStatsModal}
+        onLogout={logoutFromAccountMenu}
       />
     );
   }, [
@@ -5400,6 +5573,7 @@ export default function App() {
     openUserProfileModal,
     openNoteSettingsModal,
     openDataStatsModal,
+    logoutFromAccountMenu,
     appUiLang,
   ]);
 
@@ -5481,32 +5655,15 @@ export default function App() {
                 menuOpen={userAccountMenuOpen}
                 menuDropdown={userAccountMenuDropdownEl}
               />
-              {dataMode === "remote" ? (
+              {dataMode === "remote" && !currentUser && !getAdminToken() ? (
                 <button
                   type="button"
-                  className={
-                    "sidebar__admin-icon-btn sidebar__admin-icon-btn--mobile-browse" +
-                    (currentUser || getAdminToken()
-                      ? " sidebar__admin-icon-btn--on"
-                      : "")
-                  }
-                  onClick={
-                    currentUser || getAdminToken() ? logout : openLogin
-                  }
-                  aria-label={
-                    currentUser || getAdminToken() ? c.logout : c.login
-                  }
-                  title={
-                    currentUser || getAdminToken()
-                      ? c.logoutTitle
-                      : c.loginTitle
-                  }
+                  className="sidebar__admin-icon-btn sidebar__admin-icon-btn--mobile-browse"
+                  onClick={openLogin}
+                  aria-label={c.login}
+                  title={c.loginTitle}
                 >
-                  <AdminHeaderIcon
-                    mode={
-                      currentUser || getAdminToken() ? "logout" : "login"
-                    }
-                  />
+                  <AdminHeaderIcon mode="login" />
                 </button>
               ) : null}
             </div>
@@ -5588,32 +5745,17 @@ export default function App() {
                       {c.adminUsersShort}
                     </button>
                   ) : null}
-                  <button
-                    type="button"
-                    className={
-                      "sidebar__admin-icon-btn" +
-                      (currentUser || getAdminToken()
-                        ? " sidebar__admin-icon-btn--on"
-                        : "")
-                    }
-                    onClick={
-                      currentUser || getAdminToken() ? logout : openLogin
-                    }
-                    aria-label={
-                      currentUser || getAdminToken() ? c.logout : c.login
-                    }
-                    title={
-                      currentUser || getAdminToken()
-                        ? c.logoutTitle
-                        : c.loginTitle
-                    }
-                  >
-                    <AdminHeaderIcon
-                      mode={
-                        currentUser || getAdminToken() ? "logout" : "login"
-                      }
-                    />
-                  </button>
+                  {!currentUser && !getAdminToken() ? (
+                    <button
+                      type="button"
+                      className="sidebar__admin-icon-btn"
+                      onClick={openLogin}
+                      aria-label={c.login}
+                      title={c.loginTitle}
+                    >
+                      <AdminHeaderIcon mode="login" />
+                    </button>
+                  ) : null}
                 </>
               ) : null}
             </div>
@@ -5631,6 +5773,36 @@ export default function App() {
               {sidebarFlash}
             </p>
           ) : null}
+        </div>
+
+        <div className="sidebar__features-section">
+          <div className="sidebar__all-notes">
+            <button
+              type="button"
+              className={
+                "sidebar__all-notes-hit" +
+                (connectionsViewActive && !searchActive ? " is-active" : "")
+              }
+              onClick={() => {
+                closeCardFullPage();
+                setTrashViewActive(false);
+                setCalendarDay(null);
+                setSearchQuery("");
+                setSearchBarOpen(false);
+                setAllNotesViewActive(false);
+                setAttachmentsViewActive(false);
+                setRemindersViewActive(false);
+                setConnectionsViewActive(true);
+                setConnectionsPrimed(true);
+                setConnectionsEdgeLimit(CONNECTIONS_EDGE_BATCH);
+                setMobileNavOpen(false);
+              }}
+              aria-label={`卡片探索（关联卡片 ${connectedCardsCount}）`}
+            >
+              <span className="sidebar__all-notes-label">卡片探索</span>
+              <span className="sidebar__all-notes-count">{connectedCardsCount}</span>
+            </button>
+          </div>
         </div>
 
         <div
@@ -5767,78 +5939,6 @@ export default function App() {
                   role="list"
                   aria-label={`${c.sidebarNotesSection} · ${c.sidebarNav}`}
                 >
-                  {NOTE_PRESET_SUBTYPE_ITEMS.map((item) => {
-                    const col = findCollectionByPresetType(collections, item.id);
-                    if (!col) return null;
-                    const label =
-                      appUiLang === "en" ? item.nameEn : item.nameZh;
-                    const subtypeActive =
-                      Boolean(active?.id === col.id) &&
-                      !searchActive &&
-                      !attachmentsViewActive &&
-                      !trashViewActive &&
-                      !allNotesViewActive &&
-                      !calendarDay &&
-                      !connectionsViewActive &&
-                      !remindersViewActive;
-                    const subtypeCount = countCollectionSubtreeCards(col);
-                    return (
-                      <div
-                        key={item.id}
-                        className="sidebar__file-subtype-row sidebar__file-subtype-row--notes-line"
-                        role="listitem"
-                      >
-                        <span
-                          className="sidebar__chevron-spacer"
-                          aria-hidden
-                        />
-                        <button
-                          type="button"
-                          className={
-                            "sidebar__file-subtype-hit sidebar__file-subtype-hit--notes-line" +
-                            (subtypeActive ? " is-active" : "")
-                          }
-                          onClick={() => {
-                            closeCardFullPage();
-                            setTrashViewActive(false);
-                            setCalendarDay(null);
-                            setSearchQuery("");
-                            setSearchBarOpen(false);
-                            setAllNotesViewActive(false);
-                            setAttachmentsViewActive(false);
-                            setConnectionsViewActive(false);
-                            setRemindersViewActive(false);
-                            setActiveId(col.id);
-                            expandAncestorsOf(col.id);
-                            setMobileNavOpen(false);
-                          }}
-                          aria-label={`${label} (${subtypeCount})`}
-                        >
-                          <span className="sidebar__file-subtype-body">
-                            <span
-                              className="sidebar__dot"
-                              style={{
-                                backgroundColor:
-                                  NOTE_SUBTYPE_SIDEBAR_DOT[item.id] ??
-                                  "rgba(55, 53, 47, 0.35)",
-                              }}
-                              aria-hidden
-                            />
-                            <span className="sidebar__name">{label}</span>
-                            <span className="sidebar__count">
-                              {subtypeCount}
-                            </span>
-                          </span>
-                        </button>
-                        {canEdit ? (
-                          <span
-                            className="sidebar__notes-folder-tail-slot"
-                            aria-hidden
-                          />
-                        ) : null}
-                      </div>
-                    );
-                  })}
                   <NotesSidebarPlainCollectionsList
                     collections={collectionsForNotesSidebar}
                     activeId={active?.id}
@@ -6063,6 +6163,7 @@ export default function App() {
               {FILE_PRESET_SUBTYPE_ITEMS.map((item) => {
                 const fk = presetFileSubtypeIdToAttachmentFilterKey(item.id);
                 if (!fk) return null;
+                const subtypeCol = findCollectionByPresetType(collections, item.id);
                 const label =
                   appUiLang === "en" ? item.nameEn : item.nameZh;
                 const subtypeActive =
@@ -6076,7 +6177,7 @@ export default function App() {
                 return (
                   <div
                     key={item.id}
-                    className="sidebar__file-subtype-row"
+                    className="sidebar__file-subtype-row sidebar__file-subtype-row--with-tail"
                     role="listitem"
                   >
                     <button
@@ -6112,14 +6213,29 @@ export default function App() {
                         <span className="sidebar__count">{subtypeCount}</span>
                       </span>
                     </button>
+                    {canEdit ? (
+                      <div className="sidebar__fixed-subtype-tail">
+                        {subtypeCol ? (
+                          <button
+                            type="button"
+                            className="sidebar__add-sub"
+                            aria-label={c.uiAddSubcollectionAria}
+                            title={c.uiAddSubcollectionTitle}
+                            onClick={() => void addSubCollection(subtypeCol.id)}
+                          >
+                            +
+                          </button>
+                        ) : (
+                          <span className="sidebar__add-sub-spacer" aria-hidden />
+                        )}
+                      </div>
+                    ) : null}
                   </div>
                 );
               })}
             </div>
           ) : null}
         </div>
-
-        {renderPresetCatalogSidebarSection("web")}
 
         {topicNavRootCol ? (
           <div
@@ -6169,6 +6285,17 @@ export default function App() {
                     ? " is-active"
                     : "")
                 }
+                onContextMenu={(e) => {
+                  if (!canEdit) return;
+                  e.preventDefault();
+                  setCollectionCtxMenu({
+                    x: e.clientX,
+                    y: e.clientY,
+                    id: topicNavRootCol.id,
+                    name: topicNavRootCol.name,
+                    hasChildren: (topicNavRootCol.children?.length ?? 0) > 0,
+                  });
+                }}
                 onClick={() => {
                   closeCardFullPage();
                   setTrashViewActive(false);
@@ -6190,79 +6317,30 @@ export default function App() {
                   {topicSectionCount}
                 </span>
               </button>
+              {canEdit && !showMobileSidebarBrowseChrome ? (
+                <button
+                  type="button"
+                  className="sidebar__section-add"
+                  onClick={() =>
+                    void addSubCollection(topicNavRootCol.id, {
+                      asCategory: true,
+                    })
+                  }
+                  aria-label={c.newCollectionAria}
+                >
+                  +
+                </button>
+              ) : null}
             </div>
             {!(
               topicSectionHasChildCollections &&
               sidebarSectionCollapsed.topic
-            ) ? (
-              <div
-                className="sidebar__file-subtypes"
-                role="list"
-                aria-label={c.sidebarTopicSubtypeListAria}
-              >
-                {TOPIC_PRESET_SUBTYPE_ITEMS.map((item) => {
-                  const col = findCollectionByPresetType(collections, item.id);
-                  if (!col) return null;
-                  const label =
-                    appUiLang === "en" ? item.nameEn : item.nameZh;
-                  const subtypeActive =
-                    Boolean(active?.id === col.id) &&
-                    !searchActive &&
-                    !attachmentsViewActive &&
-                    !trashViewActive &&
-                    !allNotesViewActive &&
-                    !calendarDay &&
-                    !connectionsViewActive &&
-                    !remindersViewActive;
-                  const subtypeCount = countCollectionSubtreeCards(col);
-                  return (
-                    <div
-                      key={item.id}
-                      className="sidebar__file-subtype-row"
-                      role="listitem"
-                    >
-                      <button
-                        type="button"
-                        className={
-                          "sidebar__file-subtype-hit" +
-                          (subtypeActive ? " is-active" : "")
-                        }
-                        onClick={() => {
-                          closeCardFullPage();
-                          setTrashViewActive(false);
-                          setCalendarDay(null);
-                          setSearchQuery("");
-                          setSearchBarOpen(false);
-                          setAllNotesViewActive(false);
-                          setAttachmentsViewActive(false);
-                          setConnectionsViewActive(false);
-                          setRemindersViewActive(false);
-                          setActiveId(col.id);
-                          expandAncestorsOf(col.id);
-                          setMobileNavOpen(false);
-                        }}
-                        aria-label={`${label} (${subtypeCount})`}
-                      >
-                        <span className="sidebar__chevron-spacer" aria-hidden />
-                        <span className="sidebar__file-subtype-body">
-                          <span
-                            className="sidebar__dot"
-                            style={{
-                              backgroundColor:
-                                TOPIC_SUBTYPE_SIDEBAR_DOT[item.id] ??
-                                "rgba(55, 53, 47, 0.35)",
-                            }}
-                            aria-hidden
-                          />
-                          <span className="sidebar__name">{label}</span>
-                          <span className="sidebar__count">{subtypeCount}</span>
-                        </span>
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : null}
+            )
+              ? renderSidebarSubtypeRows(
+                  topicSubtypeCols,
+                  c.sidebarTopicSubtypeListAria
+                )
+              : null}
           </div>
         ) : null}
 
@@ -6316,6 +6394,17 @@ export default function App() {
                     ? " is-active"
                     : "")
                 }
+                onContextMenu={(e) => {
+                  if (!canEdit) return;
+                  e.preventDefault();
+                  setCollectionCtxMenu({
+                    x: e.clientX,
+                    y: e.clientY,
+                    id: clipParentCol.id,
+                    name: clipParentCol.name,
+                    hasChildren: (clipParentCol.children?.length ?? 0) > 0,
+                  });
+                }}
                 onClick={() => {
                   closeCardFullPage();
                   setTrashViewActive(false);
@@ -6337,79 +6426,30 @@ export default function App() {
                   {clipSectionCount}
                 </span>
               </button>
+              {canEdit && !showMobileSidebarBrowseChrome ? (
+                <button
+                  type="button"
+                  className="sidebar__section-add"
+                  onClick={() =>
+                    void addSubCollection(clipParentCol.id, {
+                      asCategory: true,
+                    })
+                  }
+                  aria-label={c.newCollectionAria}
+                >
+                  +
+                </button>
+              ) : null}
             </div>
             {!(
               clipSectionHasChildCollections &&
               sidebarSectionCollapsed.clip
-            ) ? (
-              <div
-                className="sidebar__file-subtypes"
-                role="list"
-                aria-label={c.sidebarClipSubtypeListAria}
-              >
-                {CLIP_PRESET_SUBTYPE_ITEMS.map((item) => {
-                  const col = findCollectionByPresetType(collections, item.id);
-                  if (!col) return null;
-                  const label =
-                    appUiLang === "en" ? item.nameEn : item.nameZh;
-                  const subtypeActive =
-                    Boolean(active?.id === col.id) &&
-                    !searchActive &&
-                    !attachmentsViewActive &&
-                    !trashViewActive &&
-                    !allNotesViewActive &&
-                    !calendarDay &&
-                    !connectionsViewActive &&
-                    !remindersViewActive;
-                  const subtypeCount = countCollectionSubtreeCards(col);
-                  return (
-                    <div
-                      key={item.id}
-                      className="sidebar__file-subtype-row"
-                      role="listitem"
-                    >
-                      <button
-                        type="button"
-                        className={
-                          "sidebar__file-subtype-hit" +
-                          (subtypeActive ? " is-active" : "")
-                        }
-                        onClick={() => {
-                          closeCardFullPage();
-                          setTrashViewActive(false);
-                          setCalendarDay(null);
-                          setSearchQuery("");
-                          setSearchBarOpen(false);
-                          setAllNotesViewActive(false);
-                          setAttachmentsViewActive(false);
-                          setConnectionsViewActive(false);
-                          setRemindersViewActive(false);
-                          setActiveId(col.id);
-                          expandAncestorsOf(col.id);
-                          setMobileNavOpen(false);
-                        }}
-                        aria-label={`${label} (${subtypeCount})`}
-                      >
-                        <span className="sidebar__chevron-spacer" aria-hidden />
-                        <span className="sidebar__file-subtype-body">
-                          <span
-                            className="sidebar__dot"
-                            style={{
-                              backgroundColor:
-                                CLIP_SUBTYPE_SIDEBAR_DOT[item.id] ??
-                                "rgba(55, 53, 47, 0.35)",
-                            }}
-                            aria-hidden
-                          />
-                          <span className="sidebar__name">{label}</span>
-                          <span className="sidebar__count">{subtypeCount}</span>
-                        </span>
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : null}
+            )
+              ? renderSidebarSubtypeRows(
+                  clipSubtypeCols,
+                  c.sidebarClipSubtypeListAria
+                )
+              : null}
           </div>
         ) : null}
 
@@ -7352,6 +7392,19 @@ export default function App() {
                   }
                 }}
               />
+              {connectionEdgesTruncated ? (
+                <div className="connections-page__load-more-wrap">
+                  <button
+                    type="button"
+                    className="all-attachments-page__pagination-btn"
+                    onClick={() =>
+                      setConnectionsEdgeLimit((n) => n + CONNECTIONS_EDGE_BATCH)
+                    }
+                  >
+                    加载更多关联卡片
+                  </button>
+                </div>
+              ) : null}
             </Suspense>
           ) : attachmentsViewActive ? (
             <Suspense
@@ -7831,14 +7884,18 @@ export default function App() {
       />
       <CollectionContextMenu
         menu={collectionCtxMenu}
+        onAddSubcollection={(id) => {
+          setCollectionCtxMenu(null);
+          void addSubCollection(id);
+        }}
         onMergeInto={(id, name) => {
           openMergeCollectionDialog(id, name);
         }}
         onMoveUnder={(id, name) => {
           openMoveUnderCollectionDialog(id, name);
         }}
-        onChangeCategory={(id, name) => {
-          openCollectionCategoryDialog(id, name);
+        onEditTemplate={(id, name) => {
+          openCollectionTemplateDialog(id, name);
         }}
         onRemove={(id, name, hasChildren) => {
           openRemoveCollectionDialog(id, name, hasChildren);
@@ -7860,12 +7917,20 @@ export default function App() {
           void performMoveCollectionUnder(sourceId, parentId);
         }}
       />
-      <CollectionCategoryModal
-        dialog={collectionCategoryDialog}
-        collections={collections}
-        onClose={() => setCollectionCategoryDialog(null)}
-        onConfirm={(collectionId, choice) => {
-          void performCollectionCategoryChange(collectionId, choice);
+      <CollectionTemplateModal
+        dialog={collectionTemplateDialog}
+        initialFields={
+          collectionTemplateDialog
+            ? mergedTemplateSchemaFieldsForCollection(
+                collections,
+                collectionTemplateDialog.collectionId
+              )
+            : []
+        }
+        onClose={() => setCollectionTemplateDialog(null)}
+        onConfirm={(collectionId, fields) => {
+          setCollectionTemplateDialog(null);
+          void performCollectionTemplateSave(collectionId, fields);
         }}
       />
       {collectionCloudSyncProgress

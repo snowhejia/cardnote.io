@@ -8,7 +8,7 @@ import { finalizeUserDeletionInDb } from "./users.js";
 
 export async function runAccountDeletionWorkerOnce() {
   const sel = await query(
-    `SELECT id FROM users WHERE COALESCE(deletion_pending, false) = true
+    `SELECT id FROM users WHERE deletion_state = 'pending'
      ORDER BY deletion_requested_at ASC NULLS LAST LIMIT 1`
   );
   const id = sel.rows[0]?.id;

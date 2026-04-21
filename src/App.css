@@ -647,6 +647,7 @@
   font-size: 0.78rem;
   font-weight: 600;
   line-height: 1.3;
+  min-height: calc(1.3em * 2);
   color: rgba(55, 53, 47, 0.9);
   word-break: break-word;
   display: -webkit-box;
@@ -889,6 +890,12 @@
 
 .connections-page__empty {
   max-width: 40rem;
+}
+
+.connections-page__load-more-wrap {
+  margin-top: 12px;
+  display: flex;
+  justify-content: center;
 }
 
 .connections-board__toolbar {
@@ -1617,16 +1624,13 @@
  * 用「默认 0 + 本行 :hover 1」避免依赖 :not(:hover)，防止悬停在「笔记」行时「文件」行加号仍可见。
  */
 @media (hover: hover) and (pointer: fine) {
-  .sidebar__section-row--notes-head .sidebar__section-add,
-  .sidebar__section-row--files-head .sidebar__section-add,
+  .sidebar__section-row .sidebar__section-add,
   .card-page__props-sidebar-row.sidebar__section-row .sidebar__section-add {
     opacity: 0;
   }
 
-  .sidebar__section-row--notes-head:hover .sidebar__section-add,
-  .sidebar__section-row--notes-head:focus-within .sidebar__section-add,
-  .sidebar__section-row--files-head:hover .sidebar__section-add,
-  .sidebar__section-row--files-head:focus-within .sidebar__section-add,
+  .sidebar__section-row:hover .sidebar__section-add,
+  .sidebar__section-row:focus-within .sidebar__section-add,
   .card-page__props-sidebar-row.sidebar__section-row:hover .sidebar__section-add,
   .card-page__props-sidebar-row.sidebar__section-row:focus-within
     .sidebar__section-add {
@@ -1714,11 +1718,11 @@
   padding-bottom: 6px;
 }
 
-/* 笔记分区：占侧栏剩余高度，内嵌收藏 + 合集树可滚动 */
+/* 笔记分区（桌面）：保持稳定可视高度，避免被其它分区展开时挤小 */
 .sidebar__notes-section {
   display: flex;
   flex-direction: column;
-  flex: 1 1 0;
+  flex: 0 0 auto;
   min-height: 0;
 }
 
@@ -1730,8 +1734,9 @@
 .sidebar__notes-section-main {
   display: flex;
   flex-direction: column;
-  flex: 1 1 0;
-  min-height: 0;
+  flex: 0 0 auto;
+  min-height: clamp(220px, 42vh, 460px);
+  max-height: clamp(220px, 42vh, 460px);
   overflow: hidden;
 }
 
@@ -1755,7 +1760,7 @@
 
 .sidebar__file-subtypes--notes-scroll > .sidebar__file-subtype-row--notes-line:not(.sidebar__file-subtype-row--plain-folder) {
   padding-left: 8px;
-  padding-right: 2px;
+  padding-right: 6px;
   box-sizing: border-box;
 }
 
@@ -1781,6 +1786,17 @@
   width: 46px;
   height: 22px;
   pointer-events: none;
+}
+
+.sidebar__fixed-subtype-tail {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 0;
+  margin-left: auto;
+  width: 22px;
+  justify-content: flex-end;
 }
 
 /* 笔记 / 文件区标题：左侧仅展开，中间分区名 + 数量，右侧加号垂直居中 */
@@ -1949,6 +1965,35 @@
 .sidebar__file-subtype-row {
   margin: 0;
   padding: 0;
+}
+
+.sidebar__file-subtype-row--with-tail {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0;
+  position: relative;
+}
+
+.sidebar__file-subtype-row--with-tail .sidebar__file-subtype-hit {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
+}
+
+.sidebar__file-subtype-row--with-tail .sidebar__fixed-subtype-tail {
+  position: absolute;
+  right: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+  margin-left: 0;
+  width: 0;
+  justify-content: flex-end;
+  pointer-events: none;
+}
+
+.sidebar__file-subtype-row--with-tail .sidebar__fixed-subtype-tail .sidebar__add-sub {
+  pointer-events: auto;
 }
 
 /* 无 preset 合集行：拖拽/投放态挂在整行；布局由 --notes-line 承担 */
@@ -2316,11 +2361,15 @@
 }
 
 .sidebar__nav {
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   gap: 1px;
   overflow-y: auto;
+  overflow-x: hidden;
   min-height: 0;
+  max-height: 100%;
+  -webkit-overflow-scrolling: touch;
   scrollbar-width: none; /* Firefox：不显示滚动条 */
   -ms-overflow-style: none; /* 旧版 Edge */
 }
@@ -3197,7 +3246,9 @@
 }
 
 .sidebar__tree-row:hover .sidebar__add-sub,
-.sidebar__tree-row:focus-within .sidebar__add-sub {
+.sidebar__tree-row:focus-within .sidebar__add-sub,
+.sidebar__file-subtype-row:hover .sidebar__add-sub,
+.sidebar__file-subtype-row:focus-within .sidebar__add-sub {
   opacity: 1;
 }
 
@@ -3302,9 +3353,16 @@
 }
 
 .sidebar__count {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
   font-size: 0.65rem;
   font-weight: 500;
+  line-height: 1;
   padding: 2px 6px;
   border-radius: 4px;
   background: rgba(55, 53, 47, 0.06);
@@ -3794,13 +3852,13 @@ textarea.main__hint-editor:focus {
 }
 
 .main__header-icon-btn--active {
-  background: rgba(37, 99, 235, 0.12);
+  background: #ffffff;
   border-color: rgba(37, 99, 235, 0.35);
   color: #1d4ed8;
 }
 
 .main__header-icon-btn--active:hover {
-  background: rgba(37, 99, 235, 0.16);
+  background: #ffffff;
   border-color: rgba(37, 99, 235, 0.45);
   color: #1e40af;
 }
@@ -6594,6 +6652,16 @@ div.card__text--readonly:not(.card__text--preview) {
     font-size: 0.75rem;
   }
 
+  .sidebar__notes-section {
+    flex: 1 1 0;
+  }
+
+  .sidebar__notes-section-main {
+    flex: 1 1 0;
+    min-height: 0;
+    max-height: none;
+  }
+
   .sidebar__tree-row {
     font-size: 1rem;
     min-height: 42px;
@@ -8126,12 +8194,46 @@ div.card__text--readonly:not(.card__text--preview) {
 }
 
 /** 有子类型的分块：仅文字标题，不重复父类型图标 */
+.note-settings-modal__type-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 0.85rem;
+}
+
 .note-settings-modal__type-section-title {
-  margin: 0 0 0.85rem;
+  margin: 0;
   font-size: 0.8125rem;
   font-weight: 600;
   letter-spacing: -0.02em;
   color: rgba(55, 53, 47, 0.72);
+}
+
+.note-settings-modal__type-section-add-btn {
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  border-radius: 8px;
+  border: 1px solid rgba(55, 53, 47, 0.16);
+  background: #fff;
+  color: rgba(55, 53, 47, 0.7);
+  font-size: 16px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.note-settings-modal__type-section-add-btn:hover:not(:disabled) {
+  border-color: rgba(37, 99, 235, 0.36);
+  color: rgba(29, 78, 216, 0.95);
+}
+
+.note-settings-modal__type-section-add-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .note-settings-modal__preset-grid .note-settings-modal__preset-subhead--span {
@@ -8456,6 +8558,59 @@ div.card__text--readonly:not(.card__text--preview) {
   justify-content: flex-end;
   gap: 10px;
   margin-top: 4px;
+}
+
+.collection-template-modal {
+  width: min(760px, calc(100vw - 36px));
+  padding: 18px 18px 16px;
+  border-radius: 14px;
+}
+
+.collection-template-modal__head {
+  margin-bottom: 10px;
+}
+
+.collection-template-modal__title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 650;
+  color: rgba(55, 53, 47, 0.88);
+}
+
+.collection-template-modal__sub {
+  margin: 6px 0 0;
+  font-size: 0.8rem;
+  color: rgba(55, 53, 47, 0.58);
+}
+
+.collection-template-modal__fields {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+  margin-bottom: 12px;
+}
+
+.collection-template-modal__field-row {
+  display: grid;
+  grid-template-columns: 1fr 170px 32px;
+  gap: 8px;
+  align-items: center;
+}
+
+.collection-template-modal__field-row .auth-modal__input {
+  min-height: 38px;
+}
+
+.collection-template-modal__add-btn {
+  width: 100%;
+  margin: 0 0 12px;
+}
+
+.collection-template-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 /* ── Attachment migration section ──────────────────────────── */
@@ -10774,6 +10929,40 @@ body.app--card-page-open .app {
   color: rgba(55, 53, 47, 0.45);
 }
 
+.card-page__header-meta {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
+.card-page__header-collections {
+  flex: 0 1 min(46vw, 520px);
+  min-width: 120px;
+  max-width: 520px;
+}
+
+.card-page__header-collections .card-page__tags-panel {
+  width: auto;
+  min-height: 0;
+}
+
+.card-page__header-collections .card-page__tags-panel--readonly:hover,
+.card-page__header-collections .card-page__tags-panel:focus-within {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+.card-page__header-collections .card-page__tags-pills {
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+
 .card-page:not(.card-page--compact) .card-page__time {
   flex-shrink: 0;
 }
@@ -10784,6 +10973,10 @@ body.app--card-page-open .app {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.card-page--compact .card-page__header-collections {
+  display: none;
 }
 
 .card-page__header-panels {
@@ -10874,6 +11067,11 @@ body.app--card-page-open .app {
 .card-page__props {
   flex: 0 0 auto;
   overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
+  max-height: 100%;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   /* 右侧略收紧，属性值（尤其链接+外链图标）更贴近分隔条 */
   padding: 20px 8px 40px 16px;
   display: flex;
@@ -10941,6 +11139,11 @@ body.app--card-page-open .app {
   background: rgba(250, 250, 252, 0.96);
   overflow: hidden;
   min-height: 0;
+}
+
+.card-page__attachments-rail--drop-active {
+  border-left-color: rgba(37, 99, 235, 0.45);
+  background: rgba(239, 246, 255, 0.9);
 }
 
 .card-page__attachments-rail-scroll {
@@ -11155,6 +11358,133 @@ body.app--card-page-open .app {
   border-radius: 7px;
   background: rgba(55, 53, 47, 0.055);
   word-break: break-word;
+}
+
+/* 属性值区域整体左对齐：避免 inline-block 子项被父级文本居中 */
+.card-page__prop-content {
+  text-align: left;
+  align-items: flex-start;
+}
+
+.card-page__file-meta-row .card-page__prop-content {
+  justify-content: flex-start;
+}
+
+/* 强制值区一级子项靠左对齐（inline-block / flex 子项都兜住）。
+ * 有些行（如 --custom）祖先选择器把 align-items 覆成 stretch；对 inline-block 子项来说 stretch 不生效，
+ * 但显示上仍出现"看起来居中"的情况。显式给所有子项 align-self: flex-start + margin-right: auto 来抵消。 */
+.card-page__prop-content > *,
+.card-page__prop-content > .card-page__file-meta-val,
+.card-page__prop-content > .card-page__tags-panel,
+.card-page__prop-content > .card-page__prop-val-text {
+  align-self: flex-start;
+  margin-right: auto;
+  margin-left: 0;
+}
+
+/* 文件卡属性面板：标题/时间/地点/来源 等 tags-panel 内的按钮/文本一律左起 */
+.card-page__props-panel-inner--file-card .card-page__tags-panel,
+.card-page__props-panel-inner--file-card .card-page__tags-hit-btn,
+.card-page__props-panel-inner--file-card .card-page__prop-val-text--tags-panel,
+.card-page__props-panel-inner--file-card .card-page__prop-val-link--tags-panel {
+  justify-content: flex-start;
+  text-align: left;
+}
+
+/* 文件卡中央预览：容器居中、预览占满上限宽度；内部使用原生控件 */
+.card-page__file-primary {
+  width: 100%;
+  max-width: 960px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  padding: 8px 0 24px;
+}
+
+.card-page__file-primary .image-lightbox__media-frame {
+  position: relative;
+  background: rgba(55, 53, 47, 0.04);
+  border-radius: 10px;
+  overflow: hidden;
+  min-height: 220px;
+}
+
+.card-page__file-primary--image .image-lightbox__media-frame,
+.card-page__file-primary--video .image-lightbox__media-frame {
+  max-height: 70vh;
+}
+
+.card-page__file-primary-img,
+.card-page__file-primary-video {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 70vh;
+  object-fit: contain;
+  background: #000;
+}
+
+.card-page__file-primary-video {
+  background: #000;
+}
+
+.card-page__file-primary--audio {
+  align-items: center;
+}
+
+.card-page__file-primary-audio {
+  width: 100%;
+  max-width: 480px;
+}
+
+.card-page__file-primary--pdf .image-lightbox__media-frame {
+  height: 72vh;
+  min-height: 480px;
+}
+
+.card-page__file-primary-pdf {
+  width: 100%;
+  height: 100%;
+  border: none;
+}
+
+.card-page__file-primary--doc {
+  align-items: center;
+  text-align: center;
+  gap: 8px;
+  padding: 40px 16px;
+  border: 1px dashed rgba(55, 53, 47, 0.18);
+  border-radius: 10px;
+  color: rgba(55, 53, 47, 0.78);
+}
+
+.card-page__file-primary-icon {
+  width: 56px;
+  height: 56px;
+  color: rgba(55, 53, 47, 0.55);
+}
+
+.card-page__file-primary-name {
+  font-size: 0.95rem;
+  word-break: break-all;
+  max-width: 640px;
+}
+
+.card-page__file-primary-open {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 14px;
+  border-radius: 8px;
+  background: rgba(55, 53, 47, 0.08);
+  color: rgba(55, 53, 47, 0.9);
+  font-size: 0.875rem;
+  text-decoration: none;
+}
+
+.card-page__file-primary-open:hover {
+  background: rgba(55, 53, 47, 0.14);
 }
 
 .card-page__toc {
@@ -11492,9 +11822,10 @@ body.app--card-page-open .app {
 .card-page__tags-panel--cardlinks {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
   width: 100%;
   min-width: 0;
+  min-height: 0;
 }
 
 .card-page__prop-cardlinks-list {
@@ -11521,6 +11852,13 @@ body.app--card-page-open .app {
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
+}
+
+.card-page__prop-cardlinks-manual .card-page__tags-add-input {
+  height: 30px;
+  min-height: 30px;
+  padding: 4px 10px;
+  line-height: 1.2;
 }
 
 .card-page__prop-empty--in-tags-panel {
@@ -11580,12 +11918,65 @@ body.app--card-page-open .app {
   min-height: var(--card-page-prop-value-h, 40px);
 }
 
+.card-page__prop-datetime-inline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+}
+
+.card-page__prop-datetime-inline .card-page__tags-add-input--date {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.card-page__prop-datetime-inline .card-page__tags-add-input--time {
+  flex: 0 0 96px;
+  width: 96px;
+  min-width: 96px;
+}
+
 .card-page__prop-url-edit-row--tags-plain .card-page__tags-add-input--url-field {
   min-height: var(--card-page-prop-value-h, 40px);
 }
 
 .card-page__tags-add-input--prop-field[type="date"] {
   min-height: var(--card-page-prop-value-h, 40px);
+}
+
+.card-page__tags-add-input--prop-field[type="datetime-local"] {
+  min-height: var(--card-page-prop-value-h, 40px);
+  padding-right: 34px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
+
+.card-page__tags-add-input--prop-field[type="datetime-local"]::-webkit-datetime-edit {
+  padding: 0;
+  line-height: 1.2;
+}
+
+.card-page__tags-add-input--prop-field[type="datetime-local"]::-webkit-datetime-edit-fields-wrapper {
+  padding: 0;
+}
+
+.card-page__tags-add-input--prop-field[type="datetime-local"]::-webkit-datetime-edit-text {
+  color: rgba(55, 53, 47, 0.45);
+  padding: 0 2px;
+}
+
+.card-page__tags-add-input--prop-field[type="datetime-local"]::-webkit-calendar-picker-indicator {
+  margin: 0 0 0 6px;
+  padding: 2px;
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0.62;
+}
+
+.card-page__tags-add-input--prop-field[type="datetime-local"]::-webkit-calendar-picker-indicator:hover {
+  opacity: 0.88;
+  background: rgba(55, 53, 47, 0.08);
 }
 
 .card-page__tags-field {
@@ -12008,8 +12399,9 @@ body.app--card-page-open .app {
 
 .card-page__attachment {
   position: relative;
-  display: inline-flex;
-  align-items: flex-start;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
   gap: 0;
   background: rgba(55, 53, 47, 0.04);
   border: 1px solid rgba(55, 53, 47, 0.1);
@@ -12034,6 +12426,7 @@ body.app--card-page-open .app {
   align-items: stretch;
   gap: 6px;
   flex: 1 1 auto;
+  width: 100%;
   min-width: 0;
   margin: 0;
   padding: 0;
@@ -12044,6 +12437,11 @@ body.app--card-page-open .app {
   text-align: left;
   color: inherit;
   border-radius: 4px;
+}
+
+.card-page__attachment-thumb-wrap {
+  display: block;
+  width: 100%;
 }
 
 .card-page__attachment-trigger:hover {
@@ -12118,13 +12516,66 @@ body.app--card-page-open .app {
 
 .card-page__attachment-label {
   display: block;
-  max-width: 168px;
+  max-width: 100%;
   font-size: 0.6875rem;
   line-height: 1.25;
   color: rgba(55, 53, 47, 0.58);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.card-page__attachment-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  margin-top: 6px;
+}
+
+.card-page__attachment-meta .card-page__attachment-label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.card-page__attachment-open-card {
+  -webkit-appearance: none;
+  appearance: none;
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: rgba(55, 53, 47, 0.56);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.card-page__attachment-open-card:hover {
+  background: rgba(55, 53, 47, 0.08);
+  color: rgba(55, 53, 47, 0.82);
+}
+
+.card-page__attachment-open-card:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.card-page__attachment-open-card:focus,
+.card-page__attachment-open-card:active {
+  outline: none;
+  box-shadow: none;
+  background: transparent;
+  color: rgba(55, 53, 47, 0.56);
 }
 
 .card-page__attachment-thumb--pending {

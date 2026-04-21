@@ -151,7 +151,8 @@ export async function refundAttachmentUploadQuota(userId, fileSize) {
   try {
     await client.query("BEGIN");
     const r = await client.query(
-      `SELECT media_usage_month, media_uploaded_bytes_month FROM users WHERE id = $1 FOR UPDATE`,
+      `SELECT TO_CHAR(usage_month, 'YYYY-MM') AS media_usage_month, media_uploaded_bytes_month
+         FROM users WHERE id = $1 FOR UPDATE`,
       [uid]
     );
     if (r.rowCount === 0) {
@@ -193,7 +194,7 @@ export async function consumeAttachmentUploadQuota(userId, fileSize) {
   }
 
   const pre = await query(
-    "SELECT role, media_usage_month, media_uploaded_bytes_month FROM users WHERE id = $1",
+    "SELECT role, TO_CHAR(usage_month, 'YYYY-MM') AS media_usage_month, media_uploaded_bytes_month FROM users WHERE id = $1",
     [uid]
   );
   if (pre.rowCount === 0) throw new Error("用户不存在");
@@ -217,8 +218,8 @@ export async function consumeAttachmentUploadQuota(userId, fileSize) {
   try {
     await client.query("BEGIN");
     const r = await client.query(
-      `SELECT id, role, media_usage_month, media_uploaded_bytes_month
-       FROM users WHERE id = $1 FOR UPDATE`,
+      `SELECT id, role, TO_CHAR(usage_month, 'YYYY-MM') AS media_usage_month, media_uploaded_bytes_month
+         FROM users WHERE id = $1 FOR UPDATE`,
       [uid]
     );
     if (r.rowCount === 0) throw new Error("用户不存在");
@@ -245,7 +246,11 @@ export async function consumeAttachmentUploadQuota(userId, fileSize) {
     }
     const next = used + size;
     await client.query(
-      `UPDATE users SET media_usage_month = $2, media_uploaded_bytes_month = $3 WHERE id = $1`,
+      // 跨月时顺带重置 AI 计数（与 usage_month 共享）
+      `UPDATE users SET usage_month = ($2::text || '-01')::date,
+                        media_uploaded_bytes_month = $3,
+                        ai_assist_calls_month = CASE WHEN TO_CHAR(usage_month, 'YYYY-MM') = $2 THEN ai_assist_calls_month ELSE 0 END
+         WHERE id = $1`,
       [uid, monthKey, next]
     );
     await client.query("COMMIT");

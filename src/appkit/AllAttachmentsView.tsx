@@ -348,7 +348,7 @@ function AttachmentAudioDurationProbe({
   );
 }
 
-/** 图片：分辨率（已存或探测） */
+/** 分辨率：图片可探测；其余类型仅展示已存宽高（如 file）。 */
 function AttachmentImageResolutionIfAny({
   item,
   cardId,
@@ -362,7 +362,7 @@ function AttachmentImageResolutionIfAny({
   persistRemote: boolean;
   onRemotePersisted?: () => void;
 }) {
-  if (item.kind !== "image") return null;
+  if (item.kind === "video") return null;
   if (itemHasStoredResolution(item)) {
     const t = formatResolutionPx(item.widthPx!, item.heightPx!);
     if (!t) return null;
@@ -372,6 +372,7 @@ function AttachmentImageResolutionIfAny({
       </span>
     );
   }
+  if (item.kind !== "image") return null;
   return (
     <AttachmentImageResolutionProbe
       item={item}

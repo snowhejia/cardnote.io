@@ -1,10 +1,62 @@
 /**
- * storage-pg.js
- * PostgreSQL 数据访问层：合集 + 卡片 CRUD。
- * COS 工具函数（presign、putCosObject 等）继续留在 storage.js，不在此文件。
+ * storage-pg.js (v2, Stage A)
+ * PostgreSQL 数据访问层：CRUD over 新 schema（cards / card_types / collections /
+ * card_placements / card_reminders / card_links / card_files + 子表）。
+ *
+ * Stage A 只覆盖核心 CRUD（集合/卡片/归属/星标/偏好）。附件分页、回收站、图谱、
+ * 自动链规则等见 Stage B/C/D。未实现的导出以 notImplemented(stage) 兜底，
+ * 让 index.js 在访问这些路径时快速失败。
+ *
+ * API 契约尽量保持与旧版一致（rowToCard/rowToCollection 的字段名），
+ * 以便前端无需改动。内部则走新 schema；object_kind 等旧字符串通过
+ * card_types.preset_slug 回推。
  */
 
 import { query, getClient } from "./db.js";
+import { PRESET_TREE, seedPresetCardTypesForUser } from "./cardTypePresets.js";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 常量与小工具
+// ─────────────────────────────────────────────────────────────────────────────
+
+const LOOSE_NOTES_COLLECTION_ID = "__loose_notes";
+const LOOSE_NOTES_DOT_COLOR = "#a8a29e";
+
+/**
+ * object_kind 字符串 ↔ preset_slug 是恒等映射：cardTypePresets.js 已与前端 catalog
+ * 1:1 对齐。任何前端传来的非空 objectKind 都直接当 slug 使用；resolvePresetCardTypeId
+ * 会校验是否真的在 catalog 里（不在则按需种子）。
+ */
+function objectKindToSlugInternal(s) {
+  const v = String(s || "").trim();
+  return v ? v : "note";
+}
+const SLUG_TO_OBJECT_KIND = new Proxy(
+  {},
+  { get: (_t, k) => (typeof k === "string" ? k : undefined) }
+);
+
+/** 文件子类 preset_slug → 旧 media.kind 字符串 */
+const FILE_SLUG_TO_MEDIA_KIND = {
+  file_image: "image",
+  file_video: "video",
+  file_audio: "audio",
+  file_document: "file",
+  file_other: "file",
+};
+const MEDIA_KIND_TO_FILE_SLUG = {
+  image: "file_image",
+  video: "file_video",
+  audio: "file_audio",
+  file: "file_document",
+};
+
+/** Stage A 未实现的导出统一用这个抛出，定位清晰。 */
+function notImplemented(stage, name) {
+  return async (..._args) => {
+    throw new Error(`[storage-pg v2] ${name} not implemented (deferred to ${stage})`);
+  };
+}
 
 /** @param {import("pg").PoolClient} client */
 async function safeRollback(client) {
@@ -23,739 +75,554 @@ function stripExtFilename(s) {
   return t.slice(0, i);
 }
 
-/** @param {{ url?: string, name?: string }} mediaItem */
-function deriveFileCardTitleFromMediaItem(mediaItem) {
-  const name = typeof mediaItem.name === "string" ? mediaItem.name.trim() : "";
-  if (name) return stripExtFilename(name);
-  const url = typeof mediaItem.url === "string" ? mediaItem.url.trim() : "";
-  if (!url) return "";
-  try {
-    const u = new URL(url);
-    const parts = u.pathname.split("/").filter(Boolean);
-    const seg = parts[parts.length - 1] || "";
-    return stripExtFilename(decodeURIComponent(seg));
-  } catch {
-    const noQuery = url.split("?")[0] || "";
-    const parts = noQuery.split("/").filter(Boolean);
-    const seg = parts[parts.length - 1] || "";
-    return stripExtFilename(seg);
-  }
+/** 前端 object_kind 字符串 → preset_slug；恒等（slug 与 catalog 已 1:1 对齐）。 */
+function objectKindToSlug(objectKind) {
+  return objectKindToSlugInternal(objectKind);
 }
 
-/** @param {string} kind */
-function objectKindForFileMediaKind(kind) {
-  if (kind === "image") return "file_image";
-  if (kind === "video") return "file_video";
-  if (kind === "audio") return "file_audio";
-  return "file_document";
+/** preset_slug → 前端 object_kind；恒等。 */
+function slugToLegacyObjectKind(slug) {
+  return slug && typeof slug === "string" ? slug : "note";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 内部工具
+// user / card_type 解析
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * 把数据库行（snake_case）转换为前端期望的卡片格式（camelCase）。
+ * 在新 schema 下 user_id 必非空；若 caller 传 null（单用户模式遗留），
+ * 回退到"第一个 admin"用户。缓存到模块级避免每次查库。
  */
-function rowToCard(row) {
-  const ok =
-    row.object_kind &&
-    typeof row.object_kind === "string" &&
-    row.object_kind !== "note";
-  return {
-    id: row.id,
-    text: row.text,
-    minutesOfDay: row.minutes_of_day,
-    addedOn: row.added_on ?? undefined,
-    ...(row.reminder_on ? { reminderOn: row.reminder_on } : {}),
-    ...(row.reminder_time ? { reminderTime: row.reminder_time } : {}),
-    ...(row.reminder_note ? { reminderNote: row.reminder_note } : {}),
-    ...(row.reminder_completed_at
-      ? { reminderCompletedAt: row.reminder_completed_at }
-      : {}),
-    ...(row.reminder_completed_note
-      ? { reminderCompletedNote: row.reminder_completed_note }
-      : {}),
-    pinned: row.pinned ?? false,
-    tags: row.tags ?? [],
-    relatedRefs: Array.isArray(row.related_refs) ? row.related_refs : [],
-    media: row.media ?? [],
-    ...(ok ? { objectKind: row.object_kind } : {}),
-    ...(Array.isArray(row.custom_props) && row.custom_props.length > 0
-      ? { customProps: row.custom_props }
-      : {}),
-  };
+let cachedFallbackUserId = null;
+async function resolveUserId(userId, qFn) {
+  if (userId && typeof userId === "string") return userId;
+  if (cachedFallbackUserId) return cachedFallbackUserId;
+  const q = qFn || query;
+  const r = await q(
+    `SELECT id FROM users WHERE deletion_state = 'active'
+      ORDER BY (role = 'admin') DESC, created_at ASC LIMIT 1`
+  );
+  if (r.rowCount === 0) throw new Error("no active user in DB");
+  cachedFallbackUserId = r.rows[0].id;
+  return cachedFallbackUserId;
 }
 
-const LOOSE_NOTES_COLLECTION_ID = "__loose_notes";
-const LOOSE_NOTES_DOT_COLOR = "#a8a29e";
-
-/**
- * 把数据库行（snake_case）转换为前端期望的合集格式（不含 cards/children，由调用方组装）。
- */
-function hintFromRow(val) {
-  const t = String(val ?? "").trim();
-  return t.length > 0 ? t : undefined;
-}
-
-function rowToCollection(row) {
-  const schema = row.card_schema;
-  const hasSchema =
-    schema &&
-    typeof schema === "object" &&
-    !Array.isArray(schema) &&
-    Object.keys(schema).length > 0;
-  return {
-    id: row.id,
-    name: row.name,
-    dotColor: row.dot_color,
-    ...(() => {
-      const h = hintFromRow(row.hint);
-      return h ? { hint: h } : {};
-    })(),
-    parentId: row.parent_id ?? undefined,
-    sortOrder: row.sort_order,
-    ...(row.is_category === true ? { isCategory: true } : {}),
-    ...(hasSchema ? { cardSchema: schema } : {}),
-    ...(typeof row.preset_type_id === "string" && row.preset_type_id.trim()
-      ? { presetTypeId: row.preset_type_id.trim() }
-      : {}),
-  };
-}
-
-/**
- * 从 card_links 批量解析 relatedRefs（含 to_card 的 placement colId）。
- * @param {string|null} userId
- * @param {string[]} cardIds
- * @returns {Promise<Map<string, Array<{ colId: string, cardId: string }>>>}
- */
-async function loadRelatedRefsMapFromLinks(userId, cardIds) {
-  const unique = [...new Set(cardIds.filter(Boolean))];
-  const out = new Map();
-  if (unique.length === 0) return out;
-  for (const id of unique) out.set(id, []);
-
-  let linksRes;
-  if (userId === null || userId === undefined) {
-    linksRes = await query(
-      `SELECT l.from_card_id, l.to_card_id, l.link_type
-       FROM card_links l
-       INNER JOIN cards fr ON fr.id = l.from_card_id AND fr.trashed_at IS NULL
-       WHERE l.from_card_id = ANY($1) AND fr.user_id IS NULL`,
-      [unique]
-    );
+/** 按 preset_slug 查用户的 card_type_id；缺失则自动种子一次。 */
+async function resolvePresetCardTypeId(userId, slug, client) {
+  if (!slug) slug = "note";
+  const q = client ? (sql, params) => client.query(sql, params) : query;
+  let r = await q(
+    `SELECT id FROM card_types WHERE user_id = $1 AND preset_slug = $2`,
+    [userId, slug]
+  );
+  if (r.rows[0]) return r.rows[0].id;
+  // 预设缺失：为该用户补齐一次
+  if (client) {
+    await seedPresetCardTypesForUser(userId, client);
   } else {
-    linksRes = await query(
-      `SELECT l.from_card_id, l.to_card_id, l.link_type
-       FROM card_links l
-       INNER JOIN cards fr ON fr.id = l.from_card_id AND fr.trashed_at IS NULL
-       WHERE l.from_card_id = ANY($1)
-         AND (fr.user_id = $2 OR fr.user_id IS NULL)`,
-      [unique, userId]
-    );
-  }
-
-  const toIds = [...new Set(linksRes.rows.map((r) => r.to_card_id))];
-  /** @type {Map<string, string>} */
-  const placementMap = new Map();
-  if (toIds.length > 0) {
-    const plRes = await query(
-      `SELECT DISTINCT ON (card_id) card_id, collection_id
-       FROM card_placements WHERE card_id = ANY($1)
-       ORDER BY card_id, collection_id`,
-      [toIds]
-    );
-    for (const row of plRes.rows) {
-      placementMap.set(row.card_id, row.collection_id);
+    const c = await getClient();
+    try {
+      await c.query("BEGIN");
+      await seedPresetCardTypesForUser(userId, c);
+      await c.query("COMMIT");
+    } catch (e) {
+      await safeRollback(c);
+      throw e;
+    } finally {
+      c.release();
     }
   }
+  r = await q(
+    `SELECT id FROM card_types WHERE user_id = $1 AND preset_slug = $2`,
+    [userId, slug]
+  );
+  if (!r.rows[0]) throw new Error(`preset card_type '${slug}' not found after seeding`);
+  return r.rows[0].id;
+}
 
-  /** @type {Map<string, Array<{ from_card_id: string, to_card_id: string }>>} */
-  const byFrom = new Map();
-  for (const row of linksRes.rows) {
-    const arr = byFrom.get(row.from_card_id) ?? [];
-    arr.push(row);
-    byFrom.set(row.from_card_id, arr);
+// ─────────────────────────────────────────────────────────────────────────────
+// row → API 形状
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 从 cards + card_types.preset_slug + 附带读入的 media/reminder/relatedRefs 拼 API 卡。 */
+function assembleCardRow(r, extras) {
+  const slug = r.preset_slug || "note";
+  const legacyKind = slugToLegacyObjectKind(slug);
+  const rem = extras?.reminders?.get(r.id);
+  const media = extras?.mediaByCard?.get(r.id) ?? [];
+  const related = extras?.relatedByCard?.get(r.id) ?? [];
+  // 反向关联：person 卡的 sf-person-works 自动包含所有指向它的 creator/source 卡
+  let mergedCustomProps = Array.isArray(r.custom_props) ? r.custom_props : [];
+  if (slug === "person") {
+    const works = extras?.personWorksByCard?.get(r.id) ?? [];
+    if (works.length > 0) {
+      mergedCustomProps = mergedCustomProps.slice();
+      const idx = mergedCustomProps.findIndex((p) => p?.id === "sf-person-works");
+      const prop = {
+        id: "sf-person-works",
+        name: "作品",
+        type: "cardLinks",
+        value: works,
+      };
+      if (idx >= 0) mergedCustomProps[idx] = prop;
+      else mergedCustomProps.push(prop);
+    }
   }
-  for (const id of unique) {
-    const rows = byFrom.get(id) ?? [];
-    const refs = [];
-    for (const r of rows) {
-      const colId = placementMap.get(r.to_card_id);
-      if (colId) {
-        const lt =
-          typeof r.link_type === "string" && r.link_type.trim()
-            ? r.link_type.trim()
-            : undefined;
-        refs.push(
-          lt ? { colId, cardId: r.to_card_id, linkType: lt } : { colId, cardId: r.to_card_id }
-        );
+  // 反向关联：file 卡的 sf-file-source 指向它的"宿主卡"（剪藏 / 笔记 等）
+  if (kindFromSlug(slug) === "file") {
+    const src = extras?.fileSourceByCard?.get(r.id);
+    if (src) {
+      mergedCustomProps = mergedCustomProps.slice();
+      const idx = mergedCustomProps.findIndex((p) => p?.id === "sf-file-source");
+      const prop = {
+        id: "sf-file-source",
+        name: "来源",
+        type: "cardLink",
+        value: src,
+      };
+      if (idx >= 0) mergedCustomProps[idx] = prop;
+      else mergedCustomProps.push(prop);
+    }
+  }
+  const out = {
+    id: r.id,
+    // 旧 API 期望 text = 正文；我们把 title+body 都暴露，但保留 text 兼容
+    text: r.body ?? "",
+    ...(r.title ? { title: r.title } : {}),
+    minutesOfDay: r.minutes_of_day,
+    addedOn: r.added_on ?? undefined,
+    pinned: r.pinned ?? false,
+    tags: r.tags ?? [],
+    relatedRefs: related,
+    media,
+    ...(legacyKind !== "note" ? { objectKind: legacyKind } : {}),
+    ...(mergedCustomProps.length > 0 ? { customProps: mergedCustomProps } : {}),
+  };
+  if (rem) {
+    if (rem.due_at) {
+      const iso = new Date(rem.due_at).toISOString();
+      out.reminderOn = iso.slice(0, 10);
+      out.reminderTime = iso.slice(11, 16);
+    }
+    if (rem.note) out.reminderNote = rem.note;
+    if (rem.completed_at) {
+      out.reminderCompletedAt = new Date(rem.completed_at).toISOString();
+    }
+    if (rem.completed_note) out.reminderCompletedNote = rem.completed_note;
+  }
+  return out;
+}
+
+function rowToCollection(r) {
+  // cardSchema / presetTypeId / isCategory 需从 bound_type 派生
+  const out = {
+    id: r.id,
+    name: r.name,
+    dotColor: r.dot_color,
+    parentId: r.parent_id ?? undefined,
+    sortOrder: r.sort_order,
+  };
+  const desc = String(r.description ?? "").trim();
+  if (desc) out.hint = desc;
+  if (r.bound_type_id) {
+    out.isCategory = true;
+    if (r.bound_card_schema && typeof r.bound_card_schema === "object") {
+      // Only emit if non-empty
+      if (Object.keys(r.bound_card_schema).length > 0) {
+        out.cardSchema = r.bound_card_schema;
       }
     }
-    out.set(id, refs);
+    if (r.bound_preset_slug) {
+      const legacy = mapPresetSlugToLegacyPresetTypeId(r.bound_preset_slug);
+      if (legacy) out.presetTypeId = legacy;
+    }
   }
   return out;
 }
 
 /**
- * @param {string|null} userId
- * @param {unknown[]} roots
+ * preset_slug 直接就是前端 catalog 的 preset_type_id（恒等）。
+ * 保留此函数名以减少调用点改动。
  */
-async function applyRelatedRefsFromLinksToTree(userId, roots) {
-  const ids = [];
-  function collect(cols) {
-    for (const col of cols) {
-      for (const card of col.cards || []) ids.push(card.id);
-      if (col.children?.length) collect(col.children);
-    }
+function mapPresetSlugToLegacyPresetTypeId(slug) {
+  return slug || null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 批量装配：reminders / media / relatedRefs
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * file 卡的 "来源" 反向引用：哪张卡通过 attachment 链引用了它。
+ * 取首条入站 attachment 链（一卡一个主源即可），转成 { colId, cardId }。
+ */
+async function loadFileSourceForCards(fileCardIds, q) {
+  const out = new Map();
+  if (!fileCardIds.length) return out;
+  const r = await q(
+    `SELECT DISTINCT ON (l.to_card_id) l.to_card_id AS file_id, l.from_card_id AS source_id
+       FROM card_links l
+       JOIN cards c ON c.id = l.from_card_id AND c.trashed_at IS NULL
+      WHERE l.to_card_id = ANY($1) AND l.property_key = 'attachment'
+      ORDER BY l.to_card_id, l.sort_order ASC, l.from_card_id ASC`,
+    [fileCardIds]
+  );
+  const sourceIds = [...new Set(r.rows.map((x) => x.source_id))];
+  const placement = new Map();
+  if (sourceIds.length) {
+    const pr = await q(
+      `SELECT DISTINCT ON (card_id) card_id, collection_id
+         FROM card_placements WHERE card_id = ANY($1)
+        ORDER BY card_id, sort_order ASC, collection_id ASC`,
+      [sourceIds]
+    );
+    for (const row of pr.rows) placement.set(row.card_id, row.collection_id);
   }
-  collect(roots);
-  const map = await loadRelatedRefsMapFromLinks(userId, ids);
-  function walk(cols) {
-    for (const col of cols) {
-      col.cards = (col.cards || []).map((card) => ({
-        ...card,
-        relatedRefs: map.get(card.id) ?? [],
-      }));
-      if (col.children?.length) walk(col.children);
-    }
+  for (const row of r.rows) {
+    const colId = placement.get(row.source_id);
+    if (!colId) continue;
+    out.set(row.file_id, { colId, cardId: row.source_id });
   }
-  walk(roots);
+  return out;
 }
 
 /**
- * 同步「相关」关系到 card_links（双向边），并清空 cards.related_refs JSON 列。
- * @param {import("pg").PoolClient} client
- * @param {string|null} userId
- * @param {string} cardId
- * @param {Array<{ colId?: string, cardId: string }>} relatedRefs
+ * person 卡的 "作品" 反向引用：
+ * 收集所有指向 person 的入站 card_links（property_key='creator' 或 'source'），
+ * 按 person_id 分组，每条产出 { colId, cardId } 形式（colId 取源卡主 placement）。
  */
-async function syncCardRelatedLinksWithClient(client, userId, cardId, relatedRefs) {
-  const { sql: cOwnSql, params: cOwnParams } = cardOwnershipCondition(userId, 2);
-  const own = await client.query(
-    `SELECT user_id FROM cards WHERE id = $1 AND (${cOwnSql}) AND trashed_at IS NULL`,
-    [cardId, ...cOwnParams]
+async function loadPersonWorksForCards(personCardIds, q) {
+  const out = new Map();
+  if (!personCardIds.length) return out;
+  for (const id of personCardIds) out.set(id, []);
+  const r = await q(
+    `SELECT l.to_card_id AS person_id, l.from_card_id AS work_card_id
+       FROM card_links l
+       JOIN cards c ON c.id = l.from_card_id AND c.trashed_at IS NULL
+      WHERE l.to_card_id = ANY($1) AND l.property_key IN ('creator','source')`,
+    [personCardIds]
   );
-  if (own.rowCount === 0) throw new Error("卡片不存在或无权限");
-  const uid = own.rows[0].user_id;
-
-  await client.query(
-    `DELETE FROM card_links WHERE link_type = 'related' AND (from_card_id = $1 OR to_card_id = $1)`,
-    [cardId]
-  );
-
-  const seen = new Set();
-  for (const ref of relatedRefs) {
-    const toId =
-      ref && typeof ref.cardId === "string" ? ref.cardId.trim() : "";
-    if (!toId || toId === cardId) continue;
-    if (seen.has(toId)) continue;
-    seen.add(toId);
-
-    const { sql: tOwnSql, params: tOwnParams } = cardOwnershipCondition(
-      userId,
-      2
+  const fromIds = [...new Set(r.rows.map((x) => x.work_card_id))];
+  const placement = new Map();
+  if (fromIds.length) {
+    const pr = await q(
+      `SELECT DISTINCT ON (card_id) card_id, collection_id
+         FROM card_placements WHERE card_id = ANY($1)
+        ORDER BY card_id, sort_order ASC, collection_id ASC`,
+      [fromIds]
     );
-    const t = await client.query(
-      `SELECT id FROM cards WHERE id = $1 AND (${tOwnSql}) AND trashed_at IS NULL`,
-      [toId, ...tOwnParams]
-    );
-    if (t.rowCount === 0) continue;
-
-    await client.query(
-      `INSERT INTO card_links (user_id, from_card_id, to_card_id, link_type)
-       VALUES ($1, $2, $3, 'related')
-       ON CONFLICT (from_card_id, to_card_id, link_type) DO NOTHING`,
-      [uid, cardId, toId]
-    );
-    await client.query(
-      `INSERT INTO card_links (user_id, from_card_id, to_card_id, link_type)
-       VALUES ($1, $2, $3, 'related')
-       ON CONFLICT (from_card_id, to_card_id, link_type) DO NOTHING`,
-      [uid, toId, cardId]
+    for (const row of pr.rows) placement.set(row.card_id, row.collection_id);
+  }
+  for (const row of r.rows) {
+    const colId = placement.get(row.work_card_id);
+    if (!colId) continue;
+    out.get(row.person_id).push({ colId, cardId: row.work_card_id });
+  }
+  // 去重
+  for (const [pid, arr] of out) {
+    const seen = new Set();
+    out.set(
+      pid,
+      arr.filter((x) => {
+        const k = `${x.colId}|${x.cardId}`;
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      })
     );
   }
-  await client.query(
-    `UPDATE cards SET related_refs = '[]'::jsonb WHERE id = $1`,
-    [cardId]
+  return out;
+}
+
+async function loadRemindersForCards(cardIds, q) {
+  const out = new Map();
+  if (!cardIds.length) return out;
+  const r = await q(
+    `SELECT card_id, due_at, note, completed_at, completed_note
+       FROM card_reminders WHERE card_id = ANY($1)`,
+    [cardIds]
   );
+  for (const row of r.rows) out.set(row.card_id, row);
+  return out;
 }
 
 /**
- * 基础图谱查询：从 root 出发按层扩展，maxDepth=1 表示只含与 root 直接相连的边与端点。
- * @param {string|null} userId
- * @param {string} rootCardId
- * @param {{ depth?: number, linkTypes?: string[] }} opts
+ * media 从 card_links(property_key='attachment') JOIN card_files 取。
+ * 返回 Map<fromCardId, mediaArray>
  */
-export async function queryCardGraph(userId, rootCardId, opts = {}) {
-  const maxDepth = Math.min(Math.max(parseInt(String(opts.depth ?? 1), 10) || 1, 1), 4);
-  const linkTypes =
-    Array.isArray(opts.linkTypes) && opts.linkTypes.length > 0
-      ? opts.linkTypes
-      : ["related", "attachment", "creator", "source", "source_url"];
+async function loadMediaForCards(cardIds, q) {
+  const out = new Map();
+  if (!cardIds.length) return out;
 
-  const { sql: uidSql, params: uidParams } = cardOwnershipCondition(userId, 2);
-  const rootOk = await query(
-    `SELECT id, object_kind FROM cards WHERE id = $1 AND (${uidSql}) AND trashed_at IS NULL`,
-    [rootCardId, ...uidParams]
+  // (a) note 引用的附件 —— 按文件卡 created_at 倒序（新的在前）
+  const r = await q(
+    `SELECT l.from_card_id AS owner_id, l.sort_order AS link_sort,
+            f.url, f.original_name, f.thumb_url, f.cover_url, f.cover_thumb_url, f.bytes,
+            ct.preset_slug AS target_slug,
+            c.custom_props AS target_custom_props,
+            c.created_at AS target_created_at
+       FROM card_links l
+       JOIN cards c      ON c.id = l.to_card_id AND c.trashed_at IS NULL
+       JOIN card_types ct ON ct.id = c.card_type_id
+       JOIN card_files f ON f.card_id = c.id
+      WHERE l.from_card_id = ANY($1) AND l.property_key = 'attachment'
+      ORDER BY l.from_card_id, c.created_at DESC, l.sort_order ASC`,
+    [cardIds]
   );
-  if (rootOk.rowCount === 0) throw new Error("卡片不存在或无权限");
 
-  /** @type {Map<string, { id: string, objectKind: string }>} */
-  const nodes = new Map();
-  nodes.set(rootCardId, {
-    id: rootCardId,
-    objectKind: rootOk.rows[0].object_kind ?? "note",
-  });
+  // (b) 文件卡自身：把 card_files 行也作为 media[0] 暴露给前端，让视频/图片能直接展示
+  const r2 = await q(
+    `SELECT c.id AS owner_id, 0 AS link_sort,
+            f.url, f.original_name, f.thumb_url, f.cover_url, f.cover_thumb_url, f.bytes,
+            ct.preset_slug AS target_slug,
+            c.custom_props AS target_custom_props
+       FROM cards c
+       JOIN card_types ct ON ct.id = c.card_type_id
+       JOIN card_files f ON f.card_id = c.id
+      WHERE c.id = ANY($1) AND ct.kind = 'file'`,
+    [cardIds]
+  );
 
-  const edges = [];
-  const seenEdge = new Set();
-
-  let frontier = [rootCardId];
-  const dist = new Map([[rootCardId, 0]]);
-
-  for (let level = 0; level < maxDepth; level++) {
-    const nextFrontier = [];
-    for (const nid of frontier) {
-      const lr = await query(
-        `SELECT l.from_card_id, l.to_card_id, l.link_type
-         FROM card_links l
-         WHERE (l.from_card_id = $1 OR l.to_card_id = $1) AND l.link_type = ANY($2::text[])`,
-        [nid, linkTypes]
-      );
-
-      for (const r of lr.rows) {
-        const a = r.from_card_id;
-        const b = r.to_card_id;
-        const ek =
-          a < b
-            ? `${a}|${b}|${r.link_type}`
-            : `${b}|${a}|${r.link_type}`;
-        if (!seenEdge.has(ek)) {
-          seenEdge.add(ek);
-          edges.push({ from: a, to: b, linkType: r.link_type });
-        }
-
-        const other = a === nid ? b : a;
-        const { sql: oSql, params: oParams } = cardOwnershipCondition(userId, 2);
-        const oc = await query(
-          `SELECT id, object_kind FROM cards WHERE id = $1 AND (${oSql}) AND trashed_at IS NULL`,
-          [other, ...oParams]
-        );
-        if (oc.rowCount === 0) continue;
-
-        if (!nodes.has(other)) {
-          nodes.set(other, {
-            id: other,
-            objectKind: oc.rows[0].object_kind ?? "note",
-          });
-        }
-        if (!dist.has(other)) {
-          dist.set(other, level + 1);
-          nextFrontier.push(other);
+  function rowToMedia(row) {
+    const kind = FILE_SLUG_TO_MEDIA_KIND[row.target_slug] || "file";
+    const m = { url: row.url, kind };
+    if (row.original_name) m.name = row.original_name;
+    if (row.thumb_url) m.thumbnailUrl = row.thumb_url;
+    if (row.cover_url) m.coverUrl = row.cover_url;
+    if (row.cover_thumb_url) m.coverThumbnailUrl = row.cover_thumb_url;
+    if (row.bytes != null) m.sizeBytes = Number(row.bytes);
+    // 把时长/分辨率类字段还原到 media（兼容旧 sf-vid-resolution 与通用 sf-file-resolution）
+    const cp = Array.isArray(row.target_custom_props) ? row.target_custom_props : [];
+    for (const p of cp) {
+      if (!p || typeof p !== "object") continue;
+      if (p.id === "sf-vid-duration-sec" || p.id === "sf-aud-duration-sec") {
+        const v = Number(p.value);
+        if (Number.isFinite(v)) m.durationSec = v;
+      } else if (
+        (p.id === "sf-vid-resolution" || p.id === "sf-file-resolution") &&
+        typeof p.value === "string"
+      ) {
+        const m2 = p.value.match(/^(\d+)\s*[x×]\s*(\d+)$/i);
+        if (m2) {
+          m.widthPx = Number(m2[1]);
+          m.heightPx = Number(m2[2]);
         }
       }
     }
-    frontier = nextFrontier;
+    return m;
   }
 
-  return {
-    root: rootCardId,
-    maxDepth,
-    linkTypes,
-    nodes: [...nodes.values()],
-    edges,
-  };
+  // 自身先于附件：自身位 0；其他附件按 link_sort 排
+  for (const row of r2.rows) {
+    out.set(row.owner_id, [rowToMedia(row)]);
+  }
+  for (const row of r.rows) {
+    const arr = out.get(row.owner_id) ?? [];
+    arr.push(rowToMedia(row));
+    out.set(row.owner_id, arr);
+  }
+  return out;
 }
 
 /**
- * 把平铺的 collections 行 + cards 行重建为嵌套树（与旧 JSON 格式兼容）。
- * 根节点（parent_id IS NULL）组成顶层数组，其余挂入父节点 children。
+ * relatedRefs 从 card_links(property_key='related') + 目标卡主要 placement
+ * 的 collection_id 组装成旧 API 形状 [{ colId, cardId }]。
  */
-function buildTree(colRows, cardRows) {
-  // 按 collection_id 分组 cards
+async function loadRelatedRefsForCards(cardIds, q) {
+  const out = new Map();
+  if (!cardIds.length) return out;
+  for (const id of cardIds) out.set(id, []);
+  const r = await q(
+    `SELECT l.from_card_id, l.to_card_id
+       FROM card_links l
+      WHERE l.from_card_id = ANY($1) AND l.property_key = 'related'`,
+    [cardIds]
+  );
+  const toIds = [...new Set(r.rows.map((x) => x.to_card_id))];
+  const placement = new Map();
+  if (toIds.length) {
+    const pr = await q(
+      `SELECT DISTINCT ON (card_id) card_id, collection_id
+         FROM card_placements WHERE card_id = ANY($1)
+        ORDER BY card_id, collection_id`,
+      [toIds]
+    );
+    for (const row of pr.rows) placement.set(row.card_id, row.collection_id);
+  }
+  for (const row of r.rows) {
+    const colId = placement.get(row.to_card_id);
+    if (colId) out.get(row.from_card_id).push({ colId, cardId: row.to_card_id });
+  }
+  return out;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 集合树读
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function getCollectionsTree(userIdIn) {
+  const userId = await resolveUserId(userIdIn);
+
+  const colRes = await query(
+    `SELECT col.id, col.user_id, col.parent_id, col.name, col.dot_color,
+            col.description, col.sort_order, col.bound_type_id,
+            ct.preset_slug AS bound_preset_slug, ct.schema_json AS bound_card_schema
+       FROM collections col
+       LEFT JOIN card_types ct ON ct.id = col.bound_type_id
+      WHERE col.user_id = $1
+      ORDER BY col.sort_order`,
+    [userId]
+  );
+
+  const orphanRes = await query(
+    `SELECT c.id, c.title, c.body, c.minutes_of_day, c.added_on,
+            c.tags, c.custom_props,
+            ct.preset_slug
+       FROM cards c
+       JOIN card_types ct ON ct.id = c.card_type_id
+      WHERE c.user_id = $1 AND c.trashed_at IS NULL
+        AND NOT EXISTS (SELECT 1 FROM card_placements p WHERE p.card_id = c.id)
+      ORDER BY c.updated_at DESC`,
+    [userId]
+  );
+
+  let cardRes = { rows: [] };
+  if (colRes.rows.length > 0) {
+    const colIds = colRes.rows.map((r) => r.id);
+    cardRes = await query(
+      `SELECT c.id, c.title, c.body, c.minutes_of_day, c.added_on,
+              c.tags, c.custom_props,
+              ct.preset_slug,
+              p.collection_id, p.pinned, p.sort_order
+         FROM card_placements p
+         JOIN cards c      ON c.id = p.card_id AND c.trashed_at IS NULL
+         JOIN card_types ct ON ct.id = c.card_type_id
+        WHERE p.collection_id = ANY($1)
+        ORDER BY p.collection_id, p.sort_order ASC, c.id ASC`,
+      [colIds]
+    );
+  }
+
+  // 装配 reminders / media / relatedRefs / personWorks / fileSource
+  const allCardIds = [
+    ...cardRes.rows.map((r) => r.id),
+    ...orphanRes.rows.map((r) => r.id),
+  ];
+  const personIds = [
+    ...cardRes.rows.filter((r) => r.preset_slug === "person").map((r) => r.id),
+    ...orphanRes.rows.filter((r) => r.preset_slug === "person").map((r) => r.id),
+  ];
+  const fileIds = [
+    ...cardRes.rows
+      .filter((r) => (r.preset_slug || "").startsWith("file"))
+      .map((r) => r.id),
+    ...orphanRes.rows
+      .filter((r) => (r.preset_slug || "").startsWith("file"))
+      .map((r) => r.id),
+  ];
+  const [reminders, mediaByCard, relatedByCard, personWorksByCard, fileSourceByCard] =
+    await Promise.all([
+      loadRemindersForCards(allCardIds, query),
+      loadMediaForCards(allCardIds, query),
+      loadRelatedRefsForCards(allCardIds, query),
+      loadPersonWorksForCards(personIds, query),
+      loadFileSourceForCards(fileIds, query),
+    ]);
+  const extras = {
+    reminders,
+    mediaByCard,
+    relatedByCard,
+    personWorksByCard,
+    fileSourceByCard,
+  };
+
   const cardsByColId = new Map();
-  for (const c of cardRows) {
+  for (const c of cardRes.rows) {
     const arr = cardsByColId.get(c.collection_id) ?? [];
-    arr.push(rowToCard(c));
+    arr.push(assembleCardRow(c, extras));
     cardsByColId.set(c.collection_id, arr);
   }
 
-  // 构建 collections Map，并挂上 cards
   const map = new Map();
-  for (const row of colRows) {
-    const base = rowToCollection(row);
+  for (const row of colRes.rows) {
     map.set(row.id, {
-      ...base,
+      ...rowToCollection(row),
       children: [],
       cards: cardsByColId.get(row.id) ?? [],
     });
   }
-
-  // 第二遍：把有 parent_id 的挂入父节点 children
   const roots = [];
-  for (const row of colRows) {
+  for (const row of colRes.rows) {
     const node = map.get(row.id);
     if (row.parent_id) {
       const parent = map.get(row.parent_id);
-      if (parent) {
-        parent.children.push(node);
-      } else {
-        // 父节点不存在（数据异常）→ 当根节点处理，防止数据丢失
-        roots.push(node);
-      }
+      if (parent) parent.children.push(node);
+      else roots.push(node);
     } else {
       roots.push(node);
     }
   }
 
-  return roots;
-}
-
-/**
- * 把嵌套 Collection[] 平铺成 collections + 去重后的 cards + placements（同 id 多合集只存一条 cards 行）。
- * @param {string|null} userId
- * @param {Array} tree
- */
-function flattenTree(userId, tree) {
-  const collections = [];
-  /** @type {Map<string, object>} */
-  const cardById = new Map();
-  const placements = [];
-
-  function walk(nodes, parentId) {
-    nodes.forEach((col, idx) => {
-      collections.push({
-        id: col.id,
-        user_id: userId,
-        parent_id: parentId ?? null,
-        name: col.name ?? "",
-        dot_color: col.dotColor ?? "",
-        sort_order: idx,
-        hint: typeof col.hint === "string" ? col.hint : "",
-      });
-      const cardList = col.cards ?? col.blocks ?? [];
-      cardList.forEach((card, ci) => {
-        if (!cardById.has(card.id)) {
-          cardById.set(card.id, {
-            id: card.id,
-            user_id: userId,
-            text: card.text ?? "",
-            minutes_of_day: card.minutesOfDay ?? 0,
-            added_on: card.addedOn ?? null,
-            reminder_on: card.reminderOn ?? null,
-            reminder_time: card.reminderTime ?? null,
-            reminder_note: card.reminderNote ?? null,
-            reminder_completed_at: card.reminderCompletedAt ?? null,
-            reminder_completed_note: card.reminderCompletedNote ?? null,
-            tags: card.tags ?? [],
-            related_refs: card.relatedRefs ?? [],
-            media: card.media ?? [],
-            custom_props: card.customProps ?? [],
-          });
-        }
-        placements.push({
-          card_id: card.id,
-          collection_id: col.id,
-          pinned: card.pinned ?? false,
-          sort_order: ci,
-        });
-      });
-      if (Array.isArray(col.children) && col.children.length > 0) {
-        walk(col.children, col.id);
-      }
-    });
-  }
-
-  walk(tree, null);
-  return { collections, cards: [...cardById.values()], placements };
-}
-
-/**
- * 返回用于 user_id 比较的 SQL 片段。
- * userId = null  → `user_id IS NULL`
- * userId = 'xxx' → `user_id = $N`
- */
-function userIdCondition(userId, paramIdx) {
-  if (userId === null || userId === undefined) {
-    return { sql: "user_id IS NULL", params: [] };
-  }
-  return { sql: `user_id = $${paramIdx}`, params: [userId] };
-}
-
-/**
- * 卡片行归属：已登录用户允许 `user_id = 本人` 或 `user_id IS NULL`（迁移/单库遗留），
- * 避免「侧栏/详情已显示多合集」但 DELETE placement 因条件过严返回 0 行。
- */
-function cardOwnershipCondition(userId, paramIdx) {
-  if (userId === null || userId === undefined) {
-    return { sql: "user_id IS NULL", params: [] };
-  }
-  return {
-    sql: `(user_id = $${paramIdx} OR user_id IS NULL)`,
-    params: [userId],
-  };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 合集树读取
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * 读取某用户（或单用户模式 userId=null）的全部合集，返回嵌套树。
- * 格式与旧 GET /api/collections JSON 完全一致。
- * @param {string|null} userId
- * @returns {Promise<Array>}
- */
-export async function getCollectionsTree(userId) {
-  const { sql: uidSql, params: uidParams } = userIdCondition(userId, 1);
-
-  const colRes = await query(
-    `SELECT id, user_id, parent_id, name, dot_color, sort_order, hint,
-            is_category, card_schema, preset_type_id
-     FROM collections
-     WHERE ${uidSql}
-     ORDER BY sort_order`,
-    uidParams
-  );
-
-  const { sql: cUidSql, params: cUidParams } = userIdCondition(userId, 1);
-  const orphanRes = await query(
-    `SELECT c.id, c.text, c.minutes_of_day, c.added_on, c.reminder_on,
-            c.reminder_time, c.reminder_note, c.reminder_completed_at, c.reminder_completed_note,
-            c.tags, c.related_refs, c.media, c.custom_props, c.object_kind
-     FROM cards c
-     WHERE (${cUidSql})
-       AND c.trashed_at IS NULL
-       AND NOT EXISTS (SELECT 1 FROM card_placements p WHERE p.card_id = c.id)
-     ORDER BY c.updated_at DESC`,
-    cUidParams
-  );
-
-  if (colRes.rows.length === 0) {
-    if (orphanRes.rows.length === 0) return [];
-    const looseCards = orphanRes.rows.map((r) => ({
-      ...rowToCard({ ...r, pinned: false }),
-    }));
-    return [
-      {
-        id: LOOSE_NOTES_COLLECTION_ID,
-        name: "",
-        dotColor: LOOSE_NOTES_DOT_COLOR,
-        cards: looseCards,
-        children: [],
-      },
-    ];
-  }
-
-  const colIds = colRes.rows.map((r) => r.id);
-
-  const cardRes = await query(
-    `SELECT c.id, c.text, c.minutes_of_day, c.added_on, c.reminder_on,
-            c.reminder_time, c.reminder_note, c.reminder_completed_at, c.reminder_completed_note,
-            c.tags, c.related_refs, c.media, c.custom_props, c.object_kind,
-            p.collection_id, p.pinned, p.sort_order
-     FROM card_placements p
-     INNER JOIN cards c ON c.id = p.card_id AND c.trashed_at IS NULL
-     WHERE p.collection_id = ANY($1)
-     ORDER BY p.collection_id, p.sort_order ASC, c.id ASC`,
-    [colIds]
-  );
-
-  const roots = buildTree(colRes.rows, cardRes.rows);
-
   if (orphanRes.rows.length > 0) {
-    const looseCards = orphanRes.rows.map((r) => ({
-      ...rowToCard({ ...r, pinned: false }),
-    }));
+    const loose = orphanRes.rows.map((r) => assembleCardRow(r, extras));
     roots.push({
       id: LOOSE_NOTES_COLLECTION_ID,
       name: "",
       dotColor: LOOSE_NOTES_DOT_COLOR,
-      cards: looseCards,
+      cards: loose,
       children: [],
     });
+  } else if (colRes.rows.length === 0) {
+    return [];
   }
 
-  await applyRelatedRefsFromLinksToTree(userId, roots);
   return roots;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 批量替换（迁移 / 导入）
+// 集合 CRUD
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * 在单事务内：删除该用户所有合集（级联删卡片），再把树形数组平铺插入。
- * 用于 PUT /api/collections（迁移 / 导入），生产日常写操作不走这里。
- * @param {string|null} userId
- * @param {Array} collectionsArray
- */
-export async function replaceCollectionsTree(userId, collectionsArray) {
-  const { collections, cards, placements } = flattenTree(
-    userId,
-    collectionsArray
-  );
-  const { sql: uidSql, params: uidParams } = userIdCondition(userId, 1);
-  const { sql: cardUidSql, params: cardUidParams } = userIdCondition(
-    userId,
-    1
-  );
-
-  const client = await getClient();
-  try {
-    await client.query("BEGIN");
-    await client.query("SET CONSTRAINTS ALL DEFERRED");
-
-    await client.query(
-      `DELETE FROM cards WHERE ${cardUidSql}`,
-      cardUidParams
-    );
-    await client.query(`DELETE FROM collections WHERE ${uidSql}`, uidParams);
-
-    if (collections.length > 0) {
-      const vals = collections
-        .map(
-          (_, i) =>
-            `($${i * 7 + 1}, $${i * 7 + 2}, $${i * 7 + 3}, $${i * 7 + 4}, $${i * 7 + 5}, $${i * 7 + 6}, $${i * 7 + 7})`
-        )
-        .join(",");
-      const flat = collections.flatMap((c) => [
-        c.id,
-        c.user_id,
-        c.parent_id,
-        c.name,
-        c.dot_color,
-        c.sort_order,
-        c.hint ?? "",
-      ]);
-      await client.query(
-        `INSERT INTO collections (id, user_id, parent_id, name, dot_color, sort_order, hint) VALUES ${vals}`,
-        flat
-      );
-    }
-
-    if (cards.length > 0) {
-      const vals = cards
-        .map(
-          (_, i) =>
-            `($${i * 14 + 1}, $${i * 14 + 2}, $${i * 14 + 3}, $${i * 14 + 4}, $${i * 14 + 5}, ` +
-            `$${i * 14 + 6}, $${i * 14 + 7}, $${i * 14 + 8}, $${i * 14 + 9}, $${i * 14 + 10}, ` +
-            `$${i * 14 + 11}, $${i * 14 + 12}, $${i * 14 + 13}, $${i * 14 + 14})`
-        )
-        .join(",");
-      const flat = cards.flatMap((c) => [
-        c.id,
-        c.user_id,
-        c.text,
-        c.minutes_of_day,
-        c.added_on,
-        c.reminder_on ?? null,
-        c.reminder_time ?? null,
-        c.reminder_note ?? null,
-        c.reminder_completed_at ?? null,
-        c.reminder_completed_note ?? null,
-        c.tags,
-        JSON.stringify(c.related_refs),
-        JSON.stringify(c.media),
-        JSON.stringify(c.custom_props ?? []),
-      ]);
-      await client.query(
-        `INSERT INTO cards
-           (id, user_id, text, minutes_of_day, added_on, reminder_on,
-            reminder_time, reminder_note, reminder_completed_at, reminder_completed_note,
-            tags, related_refs, media, custom_props)
-         VALUES ${vals}`,
-        flat
-      );
-    }
-
-    if (placements.length > 0) {
-      const vals = placements
-        .map(
-          (_, i) =>
-            `($${i * 4 + 1}, $${i * 4 + 2}, $${i * 4 + 3}, $${i * 4 + 4})`
-        )
-        .join(",");
-      const flat = placements.flatMap((p) => [
-        p.card_id,
-        p.collection_id,
-        p.pinned,
-        p.sort_order,
-      ]);
-      await client.query(
-        `INSERT INTO card_placements (card_id, collection_id, pinned, sort_order) VALUES ${vals}`,
-        flat
-      );
-    }
-
-    await client.query("COMMIT");
-  } catch (e) {
-    await client.query("ROLLBACK");
-    throw e;
-  } finally {
-    client.release();
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 合集粒度化操作
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * 创建单个合集。
- * @param {string|null} userId
- * @param {{ id, name, dotColor?, parentId?, sortOrder? }} data
- */
-export async function createCollection(userId, data) {
+export async function createCollection(userIdIn, data) {
+  const userId = await resolveUserId(userIdIn);
   const {
     id,
     name,
     dotColor = "",
-    hint: hintRaw = "",
+    hint = "",
     parentId = null,
     sortOrder,
-  } = data;
+  } = data || {};
   if (!id || !name) throw new Error("id 和 name 为必填项");
-  const hint = typeof hintRaw === "string" ? hintRaw : "";
 
-  // 未指定 sortOrder 时追加到末尾
   let order = sortOrder;
   if (order === undefined || order === null) {
-    const { sql: uidSql, params: uidParams } = userIdCondition(userId, 1);
-    const res = await query(
-      `SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM collections WHERE ${uidSql}`,
-      uidParams
+    const r = await query(
+      `SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM collections WHERE user_id = $1`,
+      [userId]
     );
-    order = res.rows[0].next;
+    order = r.rows[0].next;
   }
 
   await query(
-    `INSERT INTO collections (id, user_id, parent_id, name, dot_color, sort_order, hint)
-     VALUES ($1, ${userId === null ? "NULL" : "$7"}, $2, $3, $4, $5, $6)
+    `INSERT INTO collections (id, user_id, parent_id, name, description, dot_color, sort_order)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
      ON CONFLICT (id) DO NOTHING`,
-    userId === null
-      ? [id, parentId, name, dotColor, order, hint]
-      : [id, parentId, name, dotColor, order, hint, userId]
+    [id, userId, parentId, name, String(hint ?? ""), String(dotColor ?? ""), order]
   );
 
   return {
     id,
     name,
     dotColor,
-    ...(hint.trim() ? { hint: hint.trim() } : {}),
+    ...(String(hint || "").trim() ? { hint: String(hint).trim() } : {}),
     parentId: parentId ?? undefined,
     sortOrder: order,
   };
 }
 
-/**
- * 更新合集元数据（name / dotColor / parentId / sortOrder / 类别与 schema）。
- * @param {string|null} userId
- * @param {string} collectionId
- * @param {object} patch
- */
-export async function updateCollection(userId, collectionId, patch) {
+export async function updateCollection(userIdIn, collectionId, patch) {
+  const userId = await resolveUserId(userIdIn);
   const fields = [];
   const params = [];
   let i = 1;
@@ -777,93 +644,113 @@ export async function updateCollection(userId, collectionId, patch) {
     params.push(patch.sortOrder);
   }
   if (typeof patch.hint === "string") {
-    fields.push(`hint = $${i++}`);
+    fields.push(`description = $${i++}`);
     params.push(patch.hint);
   }
-  if (typeof patch.isCategory === "boolean") {
-    fields.push(`is_category = $${i++}`);
-    params.push(patch.isCategory);
-  }
-  if ("cardSchema" in patch) {
-    fields.push(`card_schema = $${i++}::jsonb`);
-    const v = patch.cardSchema;
-    params.push(
-      v === null || v === undefined
-        ? "{}"
-        : typeof v === "string"
-          ? v
-          : JSON.stringify(v)
-    );
-  }
-  if ("presetTypeId" in patch) {
-    fields.push(`preset_type_id = $${i++}`);
-    const v = patch.presetTypeId;
-    params.push(
-      v === null || v === undefined || v === ""
-        ? null
-        : String(v).trim() || null
-    );
+  // 分类/Schema/预设：写入 bound_type_id（用户已传 cardSchema 或 presetTypeId 时建/选 card_type）
+  if ("isCategory" in patch || "cardSchema" in patch || "presetTypeId" in patch) {
+    const boundId = await resolveBoundTypeForCollectionPatch(userId, patch);
+    fields.push(`bound_type_id = $${i++}`);
+    params.push(boundId);
   }
 
   if (fields.length === 0) throw new Error("未提供任何可更新字段");
 
-  const { sql: uidSql, params: uidParams } = userIdCondition(userId, i + 1);
   params.push(collectionId);
+  params.push(userId);
 
   const res = await query(
     `UPDATE collections SET ${fields.join(", ")}
-     WHERE id = $${i} AND ${uidSql}
-     RETURNING id, name, dot_color, parent_id, sort_order, hint,
-               is_category, card_schema, preset_type_id`,
-    [...params, ...uidParams]
+       WHERE id = $${i} AND user_id = $${i + 1}
+   RETURNING id, user_id, parent_id, name, dot_color, description, sort_order, bound_type_id`,
+    params
   );
   if (res.rowCount === 0) throw new Error("合集不存在或无权限");
-  return rowToCollection(res.rows[0]);
+
+  // 回一条 bound schema/preset 方便前端
+  const row = res.rows[0];
+  if (row.bound_type_id) {
+    const tr = await query(
+      `SELECT preset_slug, schema_json FROM card_types WHERE id = $1`,
+      [row.bound_type_id]
+    );
+    row.bound_preset_slug = tr.rows[0]?.preset_slug || null;
+    row.bound_card_schema = tr.rows[0]?.schema_json || null;
+  }
+  return rowToCollection(row);
 }
 
 /**
- * 删除合集（子合集随 parent_id CASCADE；笔记归属行随 collection CASCADE，cards 表不删）。
- * @param {string|null} userId
- * @param {string} collectionId
+ * 根据 patch 里的 isCategory / cardSchema / presetTypeId 决策 bound_type_id。
+ * - isCategory = false → bound_type_id = NULL
+ * - presetTypeId 给定且匹配到已知预设 → 指向该 preset
+ * - cardSchema 给定且不匹配预设 → 新建一条 kind=custom 自定义 card_type
  */
-export async function deleteCollection(userId, collectionId) {
-  const { sql: uidSql, params: uidParams } = userIdCondition(userId, 2);
+async function resolveBoundTypeForCollectionPatch(userId, patch) {
+  if (patch.isCategory === false) return null;
+  const presetId = typeof patch.presetTypeId === "string" ? patch.presetTypeId.trim() : "";
+  if (presetId) {
+    const r = await query(
+      `SELECT id FROM card_types WHERE user_id = $1 AND preset_slug = $2`,
+      [userId, presetId]
+    );
+    if (r.rows[0]) return r.rows[0].id;
+  }
+  if (patch.cardSchema && typeof patch.cardSchema === "object") {
+    // 自定义 card_type
+    const id = `ct_${cryptoRandomHex(8)}`;
+    await query(
+      `INSERT INTO card_types (id, user_id, parent_type_id, kind, name, schema_json, is_preset, preset_slug)
+       VALUES ($1,$2,NULL,'custom',$3,$4::jsonb,false,NULL)`,
+      [id, userId, patch.name || "自定义类型", JSON.stringify(patch.cardSchema)]
+    );
+    return id;
+  }
+  // isCategory=true but no schema/preset: leave null (caller may set later)
+  return null;
+}
+
+function cryptoRandomHex(bytes) {
+  // 小工具；只在少量位置用
+  const arr = new Uint8Array(bytes);
+  // node: use globalThis.crypto if available
+  if (globalThis.crypto?.getRandomValues) globalThis.crypto.getRandomValues(arr);
+  else {
+    for (let i = 0; i < bytes; i += 1) arr[i] = Math.floor(Math.random() * 256);
+  }
+  return Array.from(arr).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+export async function deleteCollection(userIdIn, collectionId) {
+  const userId = await resolveUserId(userIdIn);
   const res = await query(
-    `DELETE FROM collections WHERE id = $1 AND ${uidSql}`,
-    [collectionId, ...uidParams]
+    `DELETE FROM collections WHERE id = $1 AND user_id = $2`,
+    [collectionId, userId]
   );
   if (res.rowCount === 0) throw new Error("合集不存在或无权限");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 卡片粒度化操作
+// Placements（已有卡加入/移除合集）
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * 仅写入 card_placements：把已有笔记加入另一合集（不读/不写 cards 正文等大字段）。
- * @param {string|null} userId
- * @param {string} cardId
- * @param {string} collectionId
- * @param {{ insertAtStart?: boolean, pinned?: boolean }} opts
- * @returns {{ cardId: string, collectionId: string, sortOrder: number, pinned: boolean }}
- */
 export async function addCardToCollectionPlacement(
-  userId,
+  userIdIn,
   cardId,
   collectionId,
   opts = {}
 ) {
-  const colId = String(collectionId || "").trim();
+  const userId = await resolveUserId(userIdIn);
   const cid = String(cardId || "").trim();
+  const colId = String(collectionId || "").trim();
   if (!cid || !colId) throw new Error("缺少卡片或合集");
 
   const insertAtStart = opts.insertAtStart === true;
   const pinned = Boolean(opts.pinned);
 
-  const { sql: uidSql, params: uidParams } = userIdCondition(userId, 2);
   const colCheck = await query(
-    `SELECT id FROM collections WHERE id = $1 AND ${uidSql}`,
-    [colId, ...uidParams]
+    `SELECT id FROM collections WHERE id = $1 AND user_id = $2`,
+    [colId, userId]
   );
   if (colCheck.rowCount === 0) throw new Error("合集不存在或无权限");
 
@@ -883,15 +770,12 @@ export async function addCardToCollectionPlacement(
     sortOrder = orderRes.rows[0].next;
   }
 
-  const { sql: cOwnSql, params: cOwnParams } = cardOwnershipCondition(userId, 2);
   const existing = await query(
-    `SELECT id, trashed_at FROM cards WHERE id = $1 AND (${cOwnSql})`,
-    [cid, ...cOwnParams]
+    `SELECT id, trashed_at FROM cards WHERE id = $1 AND user_id = $2`,
+    [cid, userId]
   );
   if (existing.rowCount === 0) throw new Error("卡片不存在或无权限");
-  if (existing.rows[0].trashed_at != null) {
-    throw new Error("该笔记在回收站中，请先恢复");
-  }
+  if (existing.rows[0].trashed_at != null) throw new Error("该笔记在回收站中，请先恢复");
 
   await query(
     `INSERT INTO card_placements (card_id, collection_id, pinned, sort_order)
@@ -902,34 +786,46 @@ export async function addCardToCollectionPlacement(
     [cid, colId, pinned, sortOrder]
   );
 
-  return {
-    cardId: cid,
-    collectionId: colId,
-    sortOrder,
-    pinned,
-  };
+  return { cardId: cid, collectionId: colId, sortOrder, pinned };
 }
 
-/**
- * 在指定合集内创建卡片（默认末尾；card.insertAtStart 为 true 时插在 sort_order 最前）。
- * 在插入前先验证 collectionId 属于该用户。
- * @param {string|null} userId
- * @param {string} collectionId
- * @param {object} card
- * @param {import("pg").PoolClient|null} [pgClient] 传入时在同一连接上执行（用于事务）
- */
-export async function createCard(userId, collectionId, card, pgClient = null) {
+export async function removeCardFromCollectionPlacement(userIdIn, cardId, collectionId) {
+  const userId = await resolveUserId(userIdIn);
+  const cid = String(cardId || "").trim();
+  const colId = String(collectionId || "").trim();
+  if (!cid || !colId) throw new Error("缺少卡片或合集");
+
+  const res = await query(
+    `DELETE FROM card_placements p
+       USING cards c
+      WHERE p.card_id = c.id
+        AND p.card_id = $1
+        AND p.collection_id = $2
+        AND c.user_id = $3
+        AND c.trashed_at IS NULL`,
+    [cid, colId, userId]
+  );
+  if (res.rowCount === 0) throw new Error("归属不存在或无权限");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 卡片 CRUD
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function createCard(userIdIn, collectionId, card, pgClient = null) {
+  const userId = await resolveUserId(userIdIn);
   const q = pgClient ? (sql, params) => pgClient.query(sql, params) : query;
-  const { sql: uidSql, params: uidParams } = userIdCondition(userId, 2);
+
   const colCheck = await q(
-    `SELECT id FROM collections WHERE id = $1 AND ${uidSql}`,
-    [collectionId, ...uidParams]
+    `SELECT id FROM collections WHERE id = $1 AND user_id = $2`,
+    [collectionId, userId]
   );
   if (colCheck.rowCount === 0) throw new Error("合集不存在或无权限");
 
   const {
     id,
     text = "",
+    title = "",
     minutesOfDay = 0,
     addedOn = null,
     reminderOn = null,
@@ -942,41 +838,24 @@ export async function createCard(userId, collectionId, card, pgClient = null) {
     relatedRefs = [],
     media = [],
     customProps = [],
-  } = card;
-
-  /** 仅显式布尔 true 插入到最前，避免 "false" 等真值误判或客户端异常字段 */
-  const insertAtStart = card.insertAtStart === true;
-
+  } = card || {};
+  const insertAtStart = card?.insertAtStart === true;
   if (!id) throw new Error("card.id 为必填项");
 
-  const { sql: cOwnSql, params: cOwnParams } = cardOwnershipCondition(userId, 2);
+  // 若卡已存在则走 placement-only 分支（与旧行为一致）
   const existing = await q(
-    `SELECT id, user_id, trashed_at FROM cards WHERE id = $1 AND (${cOwnSql})`,
-    [id, ...cOwnParams]
+    `SELECT id, trashed_at FROM cards WHERE id = $1 AND user_id = $2`,
+    [id, userId]
   );
-
   if (existing.rowCount > 0) {
-    if (existing.rows[0].trashed_at != null) {
-      throw new Error("该笔记在回收站中，请先恢复");
-    }
-    await addCardToCollectionPlacement(userId, id, collectionId, {
-      insertAtStart,
-      pinned,
-    });
-    const row = await q(
-      `SELECT c.id, c.text, c.minutes_of_day, c.added_on, c.reminder_on,
-              c.reminder_time, c.reminder_note, c.reminder_completed_at, c.reminder_completed_note,
-              c.tags, c.related_refs, c.media, c.custom_props, c.object_kind, p.pinned
-       FROM cards c
-       JOIN card_placements p ON p.card_id = c.id AND p.collection_id = $2
-       WHERE c.id = $1`,
-      [id, collectionId]
-    );
-    const r = row.rows[0];
-    const base = rowToCard(r);
-    const relMap = await loadRelatedRefsMapFromLinks(userId, [id]);
-    return { ...base, relatedRefs: relMap.get(id) ?? [] };
+    if (existing.rows[0].trashed_at != null) throw new Error("该笔记在回收站中，请先恢复");
+    await addCardToCollectionPlacement(userId, id, collectionId, { insertAtStart, pinned });
+    return await readCardForApi(userId, id);
   }
+
+  // 决议 card_type_id：优先 objectKind → 预设 slug；兜底 'note'
+  const slug = objectKindToSlug(card?.objectKind || "note");
+  const cardTypeId = await resolvePresetCardTypeId(userId, slug, pgClient);
 
   let sortOrder;
   if (insertAtStart) {
@@ -994,221 +873,385 @@ export async function createCard(userId, collectionId, card, pgClient = null) {
     sortOrder = orderRes.rows[0].next;
   }
 
-  const objectKind =
-    typeof card.objectKind === "string" && card.objectKind.trim()
-      ? String(card.objectKind).trim().slice(0, 64)
-      : "note";
-
   await q(
-    `INSERT INTO cards
-       (id, user_id, text, minutes_of_day, added_on, reminder_on,
-        reminder_time, reminder_note, reminder_completed_at, reminder_completed_note, tags, related_refs, media, custom_props, object_kind)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+    `INSERT INTO cards (id, user_id, card_type_id, title, body, added_on,
+                        minutes_of_day, tags, custom_props)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb)`,
     [
       id,
-      userId ?? null,
-      text,
-      minutesOfDay,
-      addedOn,
+      userId,
+      cardTypeId,
+      String(title || ""),
+      String(text || ""),
+      dateOrNull(addedOn),
+      Number(minutesOfDay) || 0,
+      tags,
+      JSON.stringify(customProps || []),
+    ]
+  );
+
+  // 写对应 1:1 子表
+  await writeSubtableForKindFromSlug(q, id, slug);
+
+  await q(
+    `INSERT INTO card_placements (card_id, collection_id, pinned, sort_order)
+     VALUES ($1,$2,$3,$4)`,
+    [id, collectionId, !!pinned, sortOrder]
+  );
+
+  // reminder
+  if (reminderOn) {
+    await upsertReminderFromLegacy(q, id, userId, {
       reminderOn,
       reminderTime,
       reminderNote,
       reminderCompletedAt,
       reminderCompletedNote,
-      tags,
-      JSON.stringify(relatedRefs),
-      JSON.stringify(media),
-      JSON.stringify(customProps),
-      objectKind,
+    });
+  }
+
+  // relatedRefs → card_links
+  if (Array.isArray(relatedRefs) && relatedRefs.length > 0) {
+    await replaceRelatedLinks(q, userId, id, relatedRefs);
+  }
+
+  // media → 同步 attachment 链 + file 卡
+  if (Array.isArray(media) && media.length > 0) {
+    await syncMediaAttachments(q, userId, id, media);
+  }
+
+  return await readCardForApi(userId, id, pgClient);
+}
+
+function dateOrNull(s) {
+  if (!s) return null;
+  const t = String(s).trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(t) ? t : null;
+}
+
+async function writeSubtableForKindFromSlug(q, cardId, slug) {
+  const kind = kindFromSlug(slug);
+  if (kind === "note") {
+    await q(
+      `INSERT INTO card_notes (card_id, format, rich_body_json)
+       VALUES ($1,'plain',NULL)
+       ON CONFLICT (card_id) DO NOTHING`,
+      [cardId]
+    );
+  } else if (kind === "topic") {
+    await q(
+      `INSERT INTO card_topics (card_id, color, summary) VALUES ($1,'','')
+       ON CONFLICT (card_id) DO NOTHING`,
+      [cardId]
+    );
+  } else if (kind === "clip") {
+    await q(
+      `INSERT INTO card_clips (card_id, source_url, source_id) VALUES ($1,'','')
+       ON CONFLICT (card_id) DO NOTHING`,
+      [cardId]
+    );
+  } else if (kind === "file") {
+    // 文件卡需要 url；Stage A 不从此路径建文件卡（createFileCardForNoteMedia 在 Stage B）
+    // 若出现则写空行以满足 1:1 约束；应用层可后续更新
+    await q(
+      `INSERT INTO card_files (card_id, url) VALUES ($1,'')
+       ON CONFLICT (card_id) DO NOTHING`,
+      [cardId]
+    );
+  } else if (kind === "bookmark") {
+    await q(
+      `INSERT INTO card_bookmarks (card_id, url) VALUES ($1,'')
+       ON CONFLICT (card_id) DO NOTHING`,
+      [cardId]
+    );
+  }
+  // work/task/project/expense/account/custom：Stage A 不自动建子表；留待业务接口补
+}
+
+function kindFromSlug(slug) {
+  if (!slug) return "note";
+  const head = slug.split("_")[0];
+  const valid = [
+    "note",
+    "file",
+    "bookmark",
+    "topic",
+    "work",
+    "clip",
+    "task",
+    "project",
+    "expense",
+    "account",
+  ];
+  return valid.includes(head) ? head : "custom";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 媒体附件辅助：把 media[] 同步为 attachment 链 + 独立文件卡
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 把前端 media 项规范化为 card_files 字段 + 文件子类 slug。 */
+function normalizeIncomingMediaItem(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const url = typeof raw.url === "string" ? raw.url.trim() : "";
+  if (!url) return null;
+  const kindIn = String(raw.kind || "").toLowerCase();
+  const kind = ["image", "video", "audio", "file"].includes(kindIn) ? kindIn : "file";
+  const slug = MEDIA_KIND_TO_FILE_SLUG[kind] || "file_document";
+  const bytesRaw = raw.sizeBytes;
+  const bytes =
+    typeof bytesRaw === "number" && Number.isFinite(bytesRaw)
+      ? Math.trunc(bytesRaw)
+      : typeof bytesRaw === "string" && /^\d+$/.test(bytesRaw.trim())
+        ? Number(bytesRaw.trim())
+        : null;
+  return {
+    url,
+    slug,
+    name: typeof raw.name === "string" ? raw.name : "",
+    thumbnailUrl: typeof raw.thumbnailUrl === "string" ? raw.thumbnailUrl : "",
+    coverUrl: typeof raw.coverUrl === "string" ? raw.coverUrl : "",
+    coverThumbnailUrl:
+      typeof raw.coverThumbnailUrl === "string"
+        ? raw.coverThumbnailUrl
+        : typeof raw.coverThumbUrl === "string"
+          ? raw.coverThumbUrl
+          : "",
+    bytes,
+  };
+}
+
+function newCardId(prefix = "card") {
+  return `${prefix}_${cryptoRandomHex(10)}`;
+}
+
+function stripExt(name) {
+  const t = String(name || "").trim();
+  if (!t) return "";
+  const i = t.lastIndexOf(".");
+  if (i <= 0 || i >= t.length - 1) return t;
+  return t.slice(0, i);
+}
+
+/** 从 URL 推导展示用 title（用于 file 卡的 body/title fallback）。 */
+function fileTitleFromItem(item) {
+  if (item.name) return stripExt(item.name);
+  try {
+    const u = new URL(item.url);
+    const parts = u.pathname.split("/").filter(Boolean);
+    return stripExt(decodeURIComponent(parts[parts.length - 1] || ""));
+  } catch {
+    const parts = item.url.split("?")[0].split("/").filter(Boolean);
+    return stripExt(parts[parts.length - 1] || "");
+  }
+}
+
+/**
+ * 创建一张独立的文件卡（cards + card_files），返回其 id。
+ * 不写 placement，不写 card_links（调用方决定）。
+ */
+async function insertFileCard(q, userId, item) {
+  const fileCardId = newCardId("card");
+  const cardTypeId = await resolvePresetCardTypeId(userId, item.slug, null);
+  await q(
+    `INSERT INTO cards (id, user_id, card_type_id, title, body)
+     VALUES ($1,$2,$3,$4,'')`,
+    [fileCardId, userId, cardTypeId, fileTitleFromItem(item)]
+  );
+  await q(
+    `INSERT INTO card_files (card_id, url, original_name, thumb_url, cover_url, cover_thumb_url, bytes)
+     VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+    [
+      fileCardId,
+      item.url,
+      item.name,
+      item.thumbnailUrl,
+      item.coverUrl,
+      item.coverThumbnailUrl,
+      item.bytes,
     ]
   );
-
-  await q(
-    `INSERT INTO card_placements (card_id, collection_id, pinned, sort_order)
-     VALUES ($1, $2, $3, $4)`,
-    [id, collectionId, pinned, sortOrder]
-  );
-
-  return {
-    id,
-    text,
-    minutesOfDay,
-    addedOn,
-    ...(reminderOn ? { reminderOn } : {}),
-    ...(reminderTime ? { reminderTime } : {}),
-    ...(reminderNote ? { reminderNote } : {}),
-    ...(reminderCompletedAt ? { reminderCompletedAt } : {}),
-    ...(reminderCompletedNote ? { reminderCompletedNote } : {}),
-    pinned,
-    tags,
-    relatedRefs,
-    media,
-    ...(objectKind !== "note" ? { objectKind } : {}),
-    ...(Array.isArray(customProps) && customProps.length > 0
-      ? { customProps }
-      : {}),
-  };
+  return fileCardId;
 }
 
 /**
- * 由笔记上的单个附件元数据创建「文件」对象卡，并与笔记建双向 attachment 边。
- * @param {string|null} userId
- * @param {string} noteCardId
- * @param {{ media: object, placementCollectionId: string }} body
- * @returns {{ fileCardId: string, noteCardId: string }}
+ * 用一个 media[] 数组同步某卡的 attachment 链：
+ *   - 现有 attachment links 按 url 建 map；如果新数组里有同 url，复用旧 file 卡（更新顺序 + 元数据）
+ *   - 新数组里 URL 不在 map → 新建 file 卡 + link
+ *   - 旧数组里 URL 不在新数组 → 删 link（文件卡保留，与主卡独立）
  */
-export async function createFileCardForNoteMedia(userId, noteCardId, body) {
-  const placementCollectionId =
-    typeof body.placementCollectionId === "string"
-      ? body.placementCollectionId.trim()
-      : "";
-  const raw = body.media;
-  if (!placementCollectionId || !raw || typeof raw !== "object") {
-    throw new Error("缺少 placementCollectionId 或 media");
-  }
-  const url = typeof raw.url === "string" ? raw.url.trim() : "";
-  if (!url) throw new Error("media.url 为必填");
-
-  const { sql: cOwnSql, params: cOwnParams } = cardOwnershipCondition(userId, 2);
-  const noteRow = await query(
-    `SELECT id, user_id FROM cards WHERE id = $1 AND (${cOwnSql}) AND trashed_at IS NULL`,
-    [noteCardId, ...cOwnParams]
-  );
-  if (noteRow.rowCount === 0) throw new Error("笔记不存在或无权限");
-
-  const plCheck = await query(
-    `SELECT 1 FROM card_placements WHERE card_id = $1 AND collection_id = $2`,
-    [noteCardId, placementCollectionId]
-  );
-  if (plCheck.rowCount === 0) {
-    throw new Error("该笔记不在指定合集中");
+async function syncMediaAttachments(q, userId, noteCardId, mediaArr) {
+  const items = [];
+  for (const raw of mediaArr) {
+    const n = normalizeIncomingMediaItem(raw);
+    if (n) items.push(n);
   }
 
-  const uid = noteRow.rows[0].user_id;
-
-  const kind =
-    raw.kind === "image" ||
-    raw.kind === "video" ||
-    raw.kind === "audio" ||
-    raw.kind === "file"
-      ? raw.kind
-      : "file";
-  /** @type {Record<string, unknown>} */
-  const mediaItem = {
-    url,
-    kind,
-  };
-  if (typeof raw.name === "string" && raw.name.trim())
-    mediaItem.name = raw.name.trim();
-  if (typeof raw.coverUrl === "string" && raw.coverUrl.trim())
-    mediaItem.coverUrl = raw.coverUrl.trim();
-  if (typeof raw.thumbnailUrl === "string" && raw.thumbnailUrl.trim())
-    mediaItem.thumbnailUrl = raw.thumbnailUrl.trim();
-  if (typeof raw.sizeBytes === "number" && Number.isFinite(raw.sizeBytes))
-    mediaItem.sizeBytes = raw.sizeBytes;
-  if (typeof raw.durationSec === "number" && Number.isFinite(raw.durationSec))
-    mediaItem.durationSec = raw.durationSec;
-
-  const client = await getClient();
-  try {
-    await client.query("BEGIN");
-    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [
-      `fileobj:${noteCardId}\0${url}`,
-    ]);
-
-    const existingFile = await client.query(
-      `SELECT c.id
+  // 当前 attachment links（+ 目标 file 卡的 url）
+  const cur = await q(
+    `SELECT l.to_card_id, l.sort_order, cf.url
        FROM card_links l
-       INNER JOIN cards c ON c.id = l.to_card_id
-       WHERE l.from_card_id = $1
-         AND l.link_type = 'attachment'
-         AND c.user_id = $2
-         AND c.object_kind LIKE 'file%'
-         AND c.trashed_at IS NULL
-         AND (c.media->0->>'url') = $3
-       LIMIT 1`,
-      [noteCardId, uid, url]
-    );
-    if (existingFile.rowCount > 0) {
-      const fid = existingFile.rows[0].id;
-      await client.query("COMMIT");
-      return { fileCardId: fid, noteCardId };
+       JOIN card_files cf ON cf.card_id = l.to_card_id
+      WHERE l.from_card_id = $1 AND l.property_key = 'attachment'`,
+    [noteCardId]
+  );
+  const urlToFileCard = new Map();
+  for (const row of cur.rows) urlToFileCard.set(row.url, row.to_card_id);
+
+  // 删除所有旧 attachment 链（稍后按新数组重建；复用逻辑：若 url 复用则 file 卡不变，只是 link 重新插）
+  await q(
+    `DELETE FROM card_links WHERE from_card_id = $1 AND property_key = 'attachment'`,
+    [noteCardId]
+  );
+
+  for (let i = 0; i < items.length; i += 1) {
+    const it = items[i];
+    let fileCardId = urlToFileCard.get(it.url);
+    if (fileCardId) {
+      // 复用 file 卡：更新其 card_files 元数据（填补可能新获取的字段）
+      await q(
+        `UPDATE card_files
+            SET original_name = CASE WHEN $2 <> '' THEN $2 ELSE original_name END,
+                thumb_url = CASE WHEN $3 <> '' THEN $3 ELSE thumb_url END,
+                cover_url = CASE WHEN $4 <> '' THEN $4 ELSE cover_url END,
+                cover_thumb_url = CASE WHEN $5 <> '' THEN $5 ELSE cover_thumb_url END,
+                bytes = COALESCE($6, bytes)
+          WHERE card_id = $1`,
+        [
+          fileCardId,
+          it.name,
+          it.thumbnailUrl,
+          it.coverUrl,
+          it.coverThumbnailUrl,
+          it.bytes,
+        ]
+      );
+    } else {
+      fileCardId = await insertFileCard(q, userId, it);
     }
 
-    const now = new Date();
-    const minutesOfDay = now.getHours() * 60 + now.getMinutes();
-    const y = now.getFullYear();
-    const mo = String(now.getMonth() + 1).padStart(2, "0");
-    const da = String(now.getDate()).padStart(2, "0");
-    const day = `${y}-${mo}-${da}`;
-    const newId = `n-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-    const fileObjectKind = objectKindForFileMediaKind(kind);
-    const title = deriveFileCardTitleFromMediaItem(mediaItem);
-    const customProps = title
-      ? [
-          {
-            id: "sf-file-title",
-            name: "标题",
-            type: "text",
-            value: title,
-          },
-        ]
-      : [];
-
-    await createCard(
-      userId,
-      placementCollectionId,
-      {
-        id: newId,
-        text: "",
-        minutesOfDay,
-        addedOn: day,
-        media: [mediaItem],
-        tags: [],
-        relatedRefs: [],
-        objectKind: fileObjectKind,
-        customProps,
-        insertAtStart: false,
-      },
-      client
+    // 目标类型 id（供 card_links.target_type_id 缓存）
+    const tr = await q(
+      `SELECT card_type_id FROM cards WHERE id = $1`,
+      [fileCardId]
     );
+    const targetTypeId = tr.rows[0]?.card_type_id || null;
 
-    await client.query(
-      `INSERT INTO card_links (user_id, from_card_id, to_card_id, link_type)
-       VALUES ($1, $2, $3, 'attachment')
-       ON CONFLICT (from_card_id, to_card_id, link_type) DO NOTHING`,
-      [uid, noteCardId, newId]
+    await q(
+      `INSERT INTO card_links (from_card_id, property_key, to_card_id, target_type_id, user_id, sort_order)
+       VALUES ($1,'attachment',$2,$3,$4,$5)
+       ON CONFLICT (from_card_id, property_key, to_card_id) DO UPDATE SET
+         sort_order = EXCLUDED.sort_order,
+         target_type_id = EXCLUDED.target_type_id`,
+      [noteCardId, fileCardId, targetTypeId, userId, i]
     );
-    await client.query(
-      `INSERT INTO card_links (user_id, from_card_id, to_card_id, link_type)
-       VALUES ($1, $2, $3, 'attachment')
-       ON CONFLICT (from_card_id, to_card_id, link_type) DO NOTHING`,
-      [uid, newId, noteCardId]
-    );
-
-    await client.query("COMMIT");
-    return { fileCardId: newId, noteCardId };
-  } catch (e) {
-    await safeRollback(client);
-    throw e;
-  } finally {
-    client.release();
   }
 }
 
-/**
- * 更新卡片：正文等在 cards 表；置顶、排序、跨合集在 card_placements。
- * patch.placementCollectionId 在更新 pinned / sortOrder / collectionId（移动）时必填。
- * @param {string|null} userId
- * @param {string} cardId
- * @param {object} patch
- */
-export async function updateCard(userId, cardId, patch) {
+async function upsertReminderFromLegacy(q, cardId, userId, r) {
+  const datePart = String(r.reminderOn || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(datePart)) return;
+  const timePart = /^\d{2}:\d{2}/.test(r.reminderTime || "")
+    ? String(r.reminderTime).slice(0, 5)
+    : "00:00";
+  const iso = `${datePart}T${timePart}:00`;
+  await q(
+    `INSERT INTO card_reminders (card_id, user_id, due_at, note, completed_at, completed_note)
+     VALUES ($1,$2,$3::timestamptz,$4,$5::timestamptz,$6)
+     ON CONFLICT (card_id) DO UPDATE SET
+       due_at = EXCLUDED.due_at,
+       note = EXCLUDED.note,
+       completed_at = EXCLUDED.completed_at,
+       completed_note = EXCLUDED.completed_note`,
+    [
+      cardId,
+      userId,
+      iso,
+      String(r.reminderNote || ""),
+      r.reminderCompletedAt || null,
+      String(r.reminderCompletedNote || ""),
+    ]
+  );
+}
+
+async function deleteReminder(q, cardId) {
+  await q(`DELETE FROM card_reminders WHERE card_id = $1`, [cardId]);
+}
+
+async function replaceRelatedLinks(q, userId, fromCardId, relatedRefs) {
+  await q(
+    `DELETE FROM card_links
+      WHERE user_id = $1 AND property_key = 'related'
+        AND (from_card_id = $2 OR to_card_id = $2)`,
+    [userId, fromCardId]
+  );
+  const seen = new Set();
+  for (const ref of relatedRefs) {
+    const toId = ref && typeof ref.cardId === "string" ? ref.cardId.trim() : "";
+    if (!toId || toId === fromCardId || seen.has(toId)) continue;
+    seen.add(toId);
+    // 确认目标卡属于同用户
+    const t = await q(`SELECT card_type_id FROM cards WHERE id = $1 AND user_id = $2 AND trashed_at IS NULL`, [
+      toId,
+      userId,
+    ]);
+    if (t.rowCount === 0) continue;
+    const targetTypeId = t.rows[0].card_type_id;
+    // 双向 related 边
+    await q(
+      `INSERT INTO card_links (from_card_id, property_key, to_card_id, target_type_id, user_id, sort_order)
+       VALUES ($1,'related',$2,$3,$4,0)
+       ON CONFLICT (from_card_id, property_key, to_card_id) DO NOTHING`,
+      [fromCardId, toId, targetTypeId, userId]
+    );
+    await q(
+      `INSERT INTO card_links (from_card_id, property_key, to_card_id, target_type_id, user_id, sort_order)
+       VALUES ($1,'related',$2,$3,$4,0)
+       ON CONFLICT (from_card_id, property_key, to_card_id) DO NOTHING`,
+      [toId, fromCardId, null, userId]
+    );
+  }
+}
+
+/** 用于 createCard/updateCard 的"拉一张卡给前端"。 */
+async function readCardForApi(userId, cardId, pgClient = null) {
+  const q = pgClient ? (sql, params) => pgClient.query(sql, params) : query;
+  const r = await q(
+    `SELECT c.id, c.title, c.body, c.minutes_of_day, c.added_on, c.tags, c.custom_props,
+            ct.preset_slug
+       FROM cards c
+       JOIN card_types ct ON ct.id = c.card_type_id
+      WHERE c.id = $1 AND c.user_id = $2`,
+    [cardId, userId]
+  );
+  if (r.rowCount === 0) return null;
+  const slug = r.rows[0].preset_slug || "";
+  const isPerson = slug === "person";
+  const isFile = slug.startsWith("file");
+  const [reminders, mediaByCard, relatedByCard, personWorksByCard, fileSourceByCard] =
+    await Promise.all([
+      loadRemindersForCards([cardId], q),
+      loadMediaForCards([cardId], q),
+      loadRelatedRefsForCards([cardId], q),
+      isPerson ? loadPersonWorksForCards([cardId], q) : Promise.resolve(new Map()),
+      isFile ? loadFileSourceForCards([cardId], q) : Promise.resolve(new Map()),
+    ]);
+  return assembleCardRow(r.rows[0], {
+    reminders,
+    mediaByCard,
+    relatedByCard,
+    personWorksByCard,
+    fileSourceByCard,
+  });
+}
+
+export async function updateCard(userIdIn, cardId, patch) {
+  const userId = await resolveUserId(userIdIn);
+
   const placementCollectionId =
     typeof patch.placementCollectionId === "string"
       ? patch.placementCollectionId.trim()
       : "";
-
   const moveToColId =
     typeof patch.collectionId === "string" && patch.collectionId.trim()
       ? patch.collectionId.trim()
@@ -1216,28 +1259,17 @@ export async function updateCard(userId, cardId, patch) {
 
   const hasPlacementPatch =
     typeof patch.pinned === "boolean" ||
-    (typeof patch.sortOrder === "number" &&
-      Number.isFinite(patch.sortOrder)) ||
+    (typeof patch.sortOrder === "number" && Number.isFinite(patch.sortOrder)) ||
     Boolean(moveToColId);
-
   if (hasPlacementPatch && !placementCollectionId) {
     throw new Error("placementCollectionId 为必填（置顶、排序或移动归属时）");
   }
-
   if (moveToColId) {
-    if (userId === null || userId === undefined) {
-      const chk = await query(
-        `SELECT 1 FROM collections nc WHERE nc.id = $1 AND nc.user_id IS NULL`,
-        [moveToColId]
-      );
-      if (chk.rowCount === 0) throw new Error("目标合集不存在或无权限");
-    } else {
-      const chk = await query(
-        `SELECT 1 FROM collections nc WHERE nc.id = $1 AND nc.user_id = $2`,
-        [moveToColId, userId]
-      );
-      if (chk.rowCount === 0) throw new Error("目标合集不存在或无权限");
-    }
+    const chk = await query(
+      `SELECT 1 FROM collections WHERE id = $1 AND user_id = $2`,
+      [moveToColId, userId]
+    );
+    if (chk.rowCount === 0) throw new Error("目标合集不存在或无权限");
   }
 
   const hasRelatedSync = Array.isArray(patch.relatedRefs);
@@ -1245,26 +1277,20 @@ export async function updateCard(userId, cardId, patch) {
   const cardCols = [];
   const cardParams = [];
   let i = 1;
-
   if (typeof patch.text === "string") {
-    cardCols.push(`text = $${i++}`);
+    cardCols.push(`body = $${i++}`);
     cardParams.push(patch.text);
+  }
+  if (typeof patch.title === "string") {
+    cardCols.push(`title = $${i++}`);
+    cardParams.push(patch.title);
   }
   if (Array.isArray(patch.tags)) {
     cardCols.push(`tags = $${i++}`);
     cardParams.push(patch.tags);
   }
-  if (Array.isArray(patch.media)) {
-    cardCols.push(`media = $${i++}`);
-    cardParams.push(JSON.stringify(patch.media));
-  }
-  if (typeof patch.objectKind === "string") {
-    const ok = patch.objectKind.trim().slice(0, 64);
-    cardCols.push(`object_kind = $${i++}`);
-    cardParams.push(ok.length > 0 ? ok : "note");
-  }
   if (Array.isArray(patch.customProps)) {
-    cardCols.push(`custom_props = $${i++}`);
+    cardCols.push(`custom_props = $${i++}::jsonb`);
     cardParams.push(JSON.stringify(patch.customProps));
   }
   if (typeof patch.minutesOfDay === "number") {
@@ -1273,30 +1299,30 @@ export async function updateCard(userId, cardId, patch) {
   }
   if ("addedOn" in patch) {
     cardCols.push(`added_on = $${i++}`);
-    cardParams.push(patch.addedOn ?? null);
+    cardParams.push(dateOrNull(patch.addedOn));
   }
-  if ("reminderOn" in patch) {
-    cardCols.push(`reminder_on = $${i++}`);
-    cardParams.push(patch.reminderOn ?? null);
-  }
-  if ("reminderTime" in patch) {
-    cardCols.push(`reminder_time = $${i++}`);
-    cardParams.push(patch.reminderTime ?? null);
-  }
-  if ("reminderNote" in patch) {
-    cardCols.push(`reminder_note = $${i++}`);
-    cardParams.push(patch.reminderNote ?? null);
-  }
-  if ("reminderCompletedAt" in patch) {
-    cardCols.push(`reminder_completed_at = $${i++}`);
-    cardParams.push(patch.reminderCompletedAt ?? null);
-  }
-  if ("reminderCompletedNote" in patch) {
-    cardCols.push(`reminder_completed_note = $${i++}`);
-    cardParams.push(patch.reminderCompletedNote ?? null);
+  if (typeof patch.objectKind === "string") {
+    const slug = objectKindToSlug(patch.objectKind);
+    const newTypeId = await resolvePresetCardTypeId(userId, slug);
+    cardCols.push(`card_type_id = $${i++}`);
+    cardParams.push(newTypeId);
   }
 
-  if (cardCols.length === 0 && !hasPlacementPatch && !hasRelatedSync) {
+  // reminder：老 API 单字段 patch
+  const hasReminderPatch =
+    "reminderOn" in patch ||
+    "reminderTime" in patch ||
+    "reminderNote" in patch ||
+    "reminderCompletedAt" in patch ||
+    "reminderCompletedNote" in patch;
+
+  if (
+    cardCols.length === 0 &&
+    !hasPlacementPatch &&
+    !hasRelatedSync &&
+    !hasReminderPatch &&
+    !Array.isArray(patch.media)
+  ) {
     throw new Error("未提供任何可更新字段");
   }
 
@@ -1305,8 +1331,8 @@ export async function updateCard(userId, cardId, patch) {
     await client.query("BEGIN");
 
     if (hasRelatedSync) {
-      await syncCardRelatedLinksWithClient(
-        client,
+      await replaceRelatedLinks(
+        (sql, params) => client.query(sql, params),
         userId,
         cardId,
         patch.relatedRefs
@@ -1314,16 +1340,65 @@ export async function updateCard(userId, cardId, patch) {
     }
 
     if (cardCols.length > 0) {
-      const { sql: cOwnSql, params: cOwnParams } = cardOwnershipCondition(
-        userId,
-        i + 1
-      );
+      cardParams.push(cardId);
+      cardParams.push(userId);
       const res = await client.query(
         `UPDATE cards SET ${cardCols.join(", ")}
-         WHERE id = $${i} AND (${cOwnSql}) AND trashed_at IS NULL`,
-        [...cardParams, cardId, ...cOwnParams]
+           WHERE id = $${i} AND user_id = $${i + 1} AND trashed_at IS NULL`,
+        cardParams
       );
       if (res.rowCount === 0) throw new Error("卡片不存在或无权限");
+    }
+
+    if (hasReminderPatch) {
+      // 若 reminderOn 明确为 null → 删提醒；否则 upsert
+      if (patch.reminderOn === null) {
+        await deleteReminder((sql, params) => client.query(sql, params), cardId);
+      } else {
+        // 合并现状 + patch（保留 note/completedAt 等）
+        const cur = (
+          await client.query(
+            `SELECT due_at, note, completed_at, completed_note FROM card_reminders WHERE card_id = $1`,
+            [cardId]
+          )
+        ).rows[0];
+        const curDate =
+          cur?.due_at ? new Date(cur.due_at).toISOString().slice(0, 10) : null;
+        const curTime =
+          cur?.due_at ? new Date(cur.due_at).toISOString().slice(11, 16) : null;
+        const nextOn =
+          "reminderOn" in patch ? patch.reminderOn : curDate;
+        const nextTime = "reminderTime" in patch ? patch.reminderTime : curTime;
+        if (nextOn) {
+          await upsertReminderFromLegacy(
+            (sql, params) => client.query(sql, params),
+            cardId,
+            userId,
+            {
+              reminderOn: nextOn,
+              reminderTime: nextTime,
+              reminderNote: "reminderNote" in patch ? patch.reminderNote : cur?.note || "",
+              reminderCompletedAt:
+                "reminderCompletedAt" in patch
+                  ? patch.reminderCompletedAt
+                  : cur?.completed_at || null,
+              reminderCompletedNote:
+                "reminderCompletedNote" in patch
+                  ? patch.reminderCompletedNote
+                  : cur?.completed_note || "",
+            }
+          );
+        }
+      }
+    }
+
+    if (Array.isArray(patch.media)) {
+      await syncMediaAttachments(
+        (sql, params) => client.query(sql, params),
+        userId,
+        cardId,
+        patch.media
+      );
     }
 
     if (hasPlacementPatch) {
@@ -1338,1325 +1413,113 @@ export async function updateCard(userId, cardId, patch) {
         pCols.push(`pinned = $${k++}`);
         pParams.push(patch.pinned);
       }
-      if (
-        typeof patch.sortOrder === "number" &&
-        Number.isFinite(patch.sortOrder)
-      ) {
+      if (typeof patch.sortOrder === "number" && Number.isFinite(patch.sortOrder)) {
         pCols.push(`sort_order = $${k++}`);
         pParams.push(patch.sortOrder);
       }
-      if (pCols.length === 0) {
-        throw new Error("未提供可更新的归属字段");
-      }
-      const { sql: pOwnSql, params: pOwnParams } = cardOwnershipCondition(
-        userId,
-        k + 2
-      );
-      const pOwnQualified = pOwnSql.replace(/\buser_id\b/g, "c.user_id");
+      if (pCols.length === 0) throw new Error("未提供可更新的归属字段");
+      pParams.push(cardId, placementCollectionId, userId);
       const res = await client.query(
         `UPDATE card_placements p
-         SET ${pCols.join(", ")}
-         FROM cards c
-         WHERE p.card_id = c.id
-           AND p.card_id = $${k}
-           AND p.collection_id = $${k + 1}
-           AND (${pOwnQualified})`,
-        [...pParams, cardId, placementCollectionId, ...pOwnParams]
+            SET ${pCols.join(", ")}
+           FROM cards c
+          WHERE p.card_id = c.id
+            AND p.card_id = $${k}
+            AND p.collection_id = $${k + 1}
+            AND c.user_id = $${k + 2}`,
+        pParams
       );
       if (res.rowCount === 0) throw new Error("卡片归属不存在或无权限");
     }
 
     await client.query("COMMIT");
   } catch (e) {
-    await client.query("ROLLBACK").catch(() => {});
+    await safeRollback(client);
     throw e;
   } finally {
     client.release();
   }
 }
 
-/**
- * 是否已有可展示的时长（与前端一致）
- * @param {unknown} o
- */
-function mediaItemHasServerDurationSec(o) {
-  if (!o || typeof o !== "object") return false;
-  const d = /** @type {{ durationSec?: unknown }} */ (o).durationSec;
-  if (typeof d === "number" && Number.isFinite(d) && d >= 0) return true;
-  if (typeof d === "string" && /^-?\d+(\.\d+)?$/.test(String(d).trim()))
-    return true;
-  return false;
-}
-
-/**
- * 是否已有完整分辨率（宽高均为正整数）
- * @param {unknown} o
- */
-function mediaItemHasResolution(o) {
-  if (!o || typeof o !== "object") return false;
-  const x = /** @type {{ widthPx?: unknown; heightPx?: unknown }} */ (o);
-  const w = x.widthPx;
-  const h = x.heightPx;
-  if (typeof w !== "number" || !Number.isFinite(w) || w <= 0 || w > 32767)
-    return false;
-  if (typeof h !== "number" || !Number.isFinite(h) || h <= 0 || h > 32767)
-    return false;
-  return true;
-}
-
-/**
- * 合并单条附件元数据（仅填空项）：供浏览器探测到时长/分辨率后写回，避免整卡 PATCH。
- * @param {string|null} userId
- * @param {string} cardId
- * @param {number} mediaIndex
- * @param {{ durationSec?: number; sizeBytes?: number; widthPx?: number; heightPx?: number }} patch
- * @returns {Promise<{ updated: boolean }>}
- */
-export async function patchCardMediaItemAtIndex(
-  userId,
-  cardId,
-  mediaIndex,
-  patch
-) {
-  const cid = String(cardId || "").trim();
-  if (!cid) throw new Error("缺少卡片 id");
-  const idx = Math.floor(Number(mediaIndex));
-  if (!Number.isFinite(idx) || idx < 0) throw new Error("附件索引无效");
-
-  const { sql: cOwnSql, params: cOwnParams } = cardOwnershipCondition(
-    userId,
-    2
-  );
-  const r = await query(
-    `SELECT media FROM cards WHERE id = $1 AND (${cOwnSql}) AND trashed_at IS NULL`,
-    [cid, ...cOwnParams]
-  );
-  if (r.rowCount === 0) throw new Error("笔记不存在或无权限");
-
-  const raw = r.rows[0].media;
-  /** @type {unknown[]} */
-  const media = Array.isArray(raw)
-    ? JSON.parse(JSON.stringify(raw))
-    : [];
-  if (idx >= media.length) throw new Error("附件索引无效");
-
-  const cur = media[idx];
-  if (!cur || typeof cur !== "object") throw new Error("附件数据无效");
-
-  let changed = false;
-  const p = patch && typeof patch === "object" ? patch : {};
-
-  if (
-    typeof p.durationSec === "number" &&
-    Number.isFinite(p.durationSec) &&
-    p.durationSec >= 0 &&
-    p.durationSec <= 86400000
-  ) {
-    if (!mediaItemHasServerDurationSec(cur)) {
-      /** @type {Record<string, unknown>} */ (cur).durationSec = Math.round(
-        p.durationSec
-      );
-      changed = true;
-    }
-  }
-
-  if (
-    typeof p.sizeBytes === "number" &&
-    Number.isFinite(p.sizeBytes) &&
-    p.sizeBytes >= 0 &&
-    p.sizeBytes <= 9223372036854775807
-  ) {
-    const sb = /** @type {Record<string, unknown>} */ (cur).sizeBytes;
-    const has =
-      (typeof sb === "number" &&
-        Number.isFinite(sb) &&
-        sb >= 0 &&
-        Number.isInteger(sb)) ||
-      (typeof sb === "string" && /^[0-9]+$/.test(String(sb).trim()));
-    if (!has) {
-      /** @type {Record<string, unknown>} */ (cur).sizeBytes = Math.floor(
-        p.sizeBytes
-      );
-      changed = true;
-    }
-  }
-
-  if (
-    typeof p.widthPx === "number" &&
-    Number.isFinite(p.widthPx) &&
-    p.widthPx > 0 &&
-    p.widthPx <= 32767 &&
-    typeof p.heightPx === "number" &&
-    Number.isFinite(p.heightPx) &&
-    p.heightPx > 0 &&
-    p.heightPx <= 32767
-  ) {
-    if (!mediaItemHasResolution(cur)) {
-      /** @type {Record<string, unknown>} */ (cur).widthPx = Math.round(
-        p.widthPx
-      );
-      /** @type {Record<string, unknown>} */ (cur).heightPx = Math.round(
-        p.heightPx
-      );
-      changed = true;
-    }
-  }
-
-  if (!changed) return { updated: false };
-
-  await query(
-    `UPDATE cards SET media = $1::jsonb, updated_at = now() WHERE id = $2`,
-    [JSON.stringify(media), cid]
-  );
-  return { updated: true };
-}
-
-/**
- * 从指定合集移除一条 card 归属（多合集）；删后若无任何 placement，卡片在 GET 树中会以「未归类」孤儿形式出现。
- * @param {string|null} userId
- * @param {string} cardId
- * @param {string} collectionId
- */
-export async function removeCardFromCollectionPlacement(
-  userId,
-  cardId,
-  collectionId
-) {
-  const cid = String(cardId || "").trim();
-  const colId = String(collectionId || "").trim();
-  if (!cid || !colId) throw new Error("缺少卡片或合集");
-
-  const { sql: ownSql, params: ownParams } = cardOwnershipCondition(userId, 3);
-  const ownOnC = ownSql.replace(/\buser_id\b/g, "c.user_id");
-  const res = await query(
-    `DELETE FROM card_placements p
-     USING cards c
-     WHERE p.card_id = c.id
-       AND p.card_id = $1
-       AND p.collection_id = $2
-       AND c.trashed_at IS NULL
-       AND (${ownOnC})`,
-    [cid, colId, ...ownParams]
-  );
-  if (res.rowCount === 0) {
-    throw new Error("归属不存在或无权限");
-  }
-}
-
-/**
- * 删除整张笔记（所有合集中的出现一并删除）。
- * @param {string|null} userId
- * @param {string} cardId
- */
-export async function deleteCard(userId, cardId) {
-  const { sql: ownSql, params: ownParams } = cardOwnershipCondition(userId, 2);
-  const res = await query(
-    `DELETE FROM cards
-     WHERE id = $1 AND (${ownSql})`,
-    [cardId, ...ownParams]
-  );
+export async function deleteCard(userIdIn, cardId) {
+  const userId = await resolveUserId(userIdIn);
+  const res = await query(`DELETE FROM cards WHERE id = $1 AND user_id = $2`, [cardId, userId]);
   if (res.rowCount === 0) throw new Error("卡片不存在或无权限");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 侧栏：星标（collections.is_favorite）+ 垃圾桶（软删除在 cards.trashed_at）
+// 侧栏星标
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * preferences owner_key → cards.user_id（与 listFavoriteCollectionIds 一致）
- * @param {string} ownerKey
- * @returns {string|null}
- */
-function ownerKeyToUserId(ownerKey) {
-  if (!ownerKey || ownerKey === "__single__") return null;
-  return ownerKey;
-}
-
-/**
- * @param {import("pg").PoolClient} client
- * @param {string} collectionId
- * @param {string|null|undefined} userId — 与 getCollectionsTree 一致；null 表示单用户库
- */
-async function collectionOwnedByUser(client, collectionId, userId) {
-  if (userId === null || userId === undefined) {
-    const r = await client.query(
-      `SELECT 1 FROM collections WHERE id = $1 AND user_id IS NULL`,
-      [collectionId]
-    );
-    return r.rowCount > 0;
-  }
-  const r = await client.query(
-    `SELECT 1 FROM collections WHERE id = $1 AND user_id = $2`,
-    [collectionId, userId]
-  );
-  return r.rowCount > 0;
-}
-
-/**
- * 星标合集 id 列表（顺序与侧栏一致）。
- * @param {string} ownerKey 多用户为 JWT sub；单库为 __single__
- * @returns {Promise<string[]>}
- */
 export async function listFavoriteCollectionIds(ownerKey) {
-  if (!ownerKey || ownerKey === "__single__") {
-    const res = await query(
-      `SELECT id FROM collections
-       WHERE user_id IS NULL AND is_favorite = true
-       ORDER BY favorite_sort ASC NULLS LAST, sort_order ASC, id ASC`,
-      []
-    );
-    return res.rows.map((r) => r.id);
-  }
+  const userId = await resolveUserId(ownerKey === "__single__" ? null : ownerKey);
   const res = await query(
     `SELECT id FROM collections
-     WHERE user_id = $1 AND is_favorite = true
-     ORDER BY favorite_sort ASC NULLS LAST, sort_order ASC, id ASC`,
-    [ownerKey]
+      WHERE user_id = $1 AND is_favorite = true
+      ORDER BY favorite_sort ASC NULLS LAST, sort_order ASC, id ASC`,
+    [userId]
   );
   return res.rows.map((r) => r.id);
 }
 
-/**
- * 整表替换星标：先清空当前用户名下所有 is_favorite，再按数组顺序写回。
- * @param {string} ownerKey 与 preferencesOwnerKey 一致（保留参数供调用方对齐）
- * @param {string[]} collectionIds
- * @param {string|null|undefined} userId
- */
-export async function replaceFavoriteCollectionIds(
-  _ownerKey,
-  collectionIds,
-  userId
-) {
+export async function replaceFavoriteCollectionIds(_ownerKey, collectionIds, userIdIn) {
+  const userId = await resolveUserId(userIdIn);
   const ids = Array.isArray(collectionIds) ? collectionIds : [];
   const client = await getClient();
   try {
     await client.query("BEGIN");
-    if (userId === null || userId === undefined) {
-      await client.query(
-        `UPDATE collections SET is_favorite = false, favorite_sort = NULL WHERE user_id IS NULL`
-      );
-    } else {
-      await client.query(
-        `UPDATE collections SET is_favorite = false, favorite_sort = NULL WHERE user_id = $1`,
-        [userId]
-      );
-    }
+    await client.query(
+      `UPDATE collections SET is_favorite = false, favorite_sort = NULL WHERE user_id = $1`,
+      [userId]
+    );
     let sort = 0;
     for (const cid of ids) {
       if (typeof cid !== "string" || !cid.trim()) continue;
       const id = cid.trim();
-      const ok = await collectionOwnedByUser(client, id, userId);
-      if (!ok) continue;
-      if (userId === null || userId === undefined) {
-        await client.query(
-          `UPDATE collections SET is_favorite = true, favorite_sort = $1 WHERE id = $2 AND user_id IS NULL`,
-          [sort, id]
-        );
-      } else {
-        await client.query(
-          `UPDATE collections SET is_favorite = true, favorite_sort = $1 WHERE id = $2 AND user_id = $3`,
-          [sort, id, userId]
-        );
-      }
-      sort += 1;
+      const r = await client.query(
+        `UPDATE collections SET is_favorite = true, favorite_sort = $1 WHERE id = $2 AND user_id = $3`,
+        [sort, id, userId]
+      );
+      if (r.rowCount > 0) sort += 1;
     }
     await client.query("COMMIT");
   } catch (e) {
-    await client.query("ROLLBACK").catch(() => {});
+    await safeRollback(client);
     throw e;
   } finally {
     client.release();
   }
 }
 
-/**
- * @param {string} ownerKey
- */
-export async function listTrashedNotes(ownerKey) {
-  const userId = ownerKeyToUserId(ownerKey);
-  const { sql: uidSql, params: uidParams } = userIdCondition(userId, 1);
-  const res = await query(
-    `SELECT c.id, c.text, c.minutes_of_day, c.added_on, c.reminder_on,
-            c.reminder_time, c.reminder_note, c.reminder_completed_at, c.reminder_completed_note,
-            c.tags, c.related_refs, c.media, c.custom_props, c.object_kind,
-            c.trashed_at, c.trash_col_id, c.trash_col_path_label
-     FROM cards c
-     WHERE (${uidSql}) AND c.trashed_at IS NOT NULL
-     ORDER BY c.trashed_at DESC`,
-    uidParams
-  );
-  const entries = res.rows.map((r) => ({
-    trashId: r.id,
-    colId: r.trash_col_id ?? "",
-    colPathLabel: r.trash_col_path_label ?? "",
-    card: rowToCard({ ...r, pinned: false }),
-    deletedAt:
-      r.trashed_at instanceof Date
-        ? r.trashed_at.toISOString()
-        : String(r.trashed_at),
-  }));
-  const ids = entries.map((e) => e.card.id);
-  const relMap = await loadRelatedRefsMapFromLinks(userId, ids);
-  return entries.map((e) => ({
-    ...e,
-    card: { ...e.card, relatedRefs: relMap.get(e.card.id) ?? [] },
-  }));
-}
-
-/**
- * 软删除：移除所有归属行并标记 trashed_at（不再使用独立 trashed_notes 表）。
- * @param {string} ownerKey
- * @param {{ colId: string, colPathLabel?: string, cardId: string, deletedAt?: string }} row
- */
-export async function softTrashCard(ownerKey, row) {
-  const { colId, colPathLabel = "", cardId, deletedAt } = row;
-  if (!colId || !cardId) {
-    throw new Error("回收站条目缺少 colId 或 card.id");
-  }
-  const userId = ownerKeyToUserId(ownerKey);
-  const { sql: cUidSql, params: cUidParams } = userIdCondition(userId, 2);
-  const client = await getClient();
-  try {
-    await client.query("BEGIN");
-    const chk = await client.query(
-      `SELECT trashed_at FROM cards WHERE id = $1 AND (${cUidSql})`,
-      [cardId, ...cUidParams]
-    );
-    if (chk.rowCount === 0) throw new Error("卡片不存在或无权限");
-    if (chk.rows[0].trashed_at != null) {
-      throw new Error("卡片已在回收站中");
-    }
-    await client.query(`DELETE FROM card_placements WHERE card_id = $1`, [
-      cardId,
-    ]);
-    const ts = deletedAt ? new Date(deletedAt) : new Date();
-    const { sql: uSql, params: uParams } = userIdCondition(userId, 5);
-    const up = await client.query(
-      `UPDATE cards SET trashed_at = $1::timestamptz, trash_col_id = $2, trash_col_path_label = $3
-       WHERE id = $4 AND (${uSql}) AND trashed_at IS NULL`,
-      [
-        ts.toISOString(),
-        colId,
-        String(colPathLabel ?? ""),
-        cardId,
-        ...uParams,
-      ]
-    );
-    if (up.rowCount === 0) throw new Error("无法移入回收站");
-    await client.query("COMMIT");
-  } catch (e) {
-    await client.query("ROLLBACK").catch(() => {});
-    throw e;
-  } finally {
-    client.release();
-  }
-}
-
-/**
- * 从回收站恢复到指定合集（清除 trashed 标记并插入一条归属）。
- * @param {string} ownerKey
- * @param {string} cardId
- * @param {string} targetCollectionId
- * @param {boolean} [insertAtStart]
- * @returns {Promise<object>}
- */
-export async function restoreTrashedCard(
-  ownerKey,
-  cardId,
-  targetCollectionId,
-  insertAtStart = false
-) {
-  const userId = ownerKeyToUserId(ownerKey);
-  const { sql: colUidSql, params: colUidParams } = userIdCondition(
-    userId,
-    2
-  );
-  const colCheck = await query(
-    `SELECT id FROM collections WHERE id = $1 AND (${colUidSql})`,
-    [targetCollectionId, ...colUidParams]
-  );
-  if (colCheck.rowCount === 0) throw new Error("合集不存在或无权限");
-
-  const { sql: cUidSql, params: cUidParams } = userIdCondition(userId, 2);
-  const cardChk = await query(
-    `SELECT id FROM cards WHERE id = $1 AND (${cUidSql}) AND trashed_at IS NOT NULL`,
-    [cardId, ...cUidParams]
-  );
-  if (cardChk.rowCount === 0) {
-    throw new Error("回收站中找不到该笔记或无权恢复");
-  }
-
-  let sortOrder;
-  if (insertAtStart) {
-    const minRes = await query(
-      `SELECT MIN(sort_order) AS m FROM card_placements WHERE collection_id = $1`,
-      [targetCollectionId]
-    );
-    const m = minRes.rows[0]?.m;
-    sortOrder = m === null || m === undefined ? 0 : m - 1;
-  } else {
-    const orderRes = await query(
-      `SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM card_placements WHERE collection_id = $1`,
-      [targetCollectionId]
-    );
-    sortOrder = orderRes.rows[0].next;
-  }
-
-  const client = await getClient();
-  try {
-    await client.query("BEGIN");
-    const { sql: uSql, params: uParams } = userIdCondition(userId, 2);
-    const up = await client.query(
-      `UPDATE cards SET trashed_at = NULL, trash_col_id = NULL, trash_col_path_label = ''
-       WHERE id = $1 AND (${uSql}) AND trashed_at IS NOT NULL`,
-      [cardId, ...uParams]
-    );
-    if (up.rowCount === 0) throw new Error("恢复失败");
-    await client.query(
-      `INSERT INTO card_placements (card_id, collection_id, pinned, sort_order)
-       VALUES ($1, $2, false, $3)`,
-      [cardId, targetCollectionId, sortOrder]
-    );
-    await client.query("COMMIT");
-  } catch (e) {
-    await client.query("ROLLBACK").catch(() => {});
-    throw e;
-  } finally {
-    client.release();
-  }
-
-  const row = await query(
-    `SELECT c.id, c.text, c.minutes_of_day, c.added_on, c.reminder_on,
-            c.reminder_time, c.reminder_note, c.reminder_completed_at, c.reminder_completed_note,
-            c.tags, c.related_refs, c.media, c.custom_props, c.object_kind, p.pinned
-     FROM cards c
-     JOIN card_placements p ON p.card_id = c.id AND p.collection_id = $2
-     WHERE c.id = $1`,
-    [cardId, targetCollectionId]
-  );
-  const r = row.rows[0];
-  if (!r) return { id: cardId };
-  const card = rowToCard(r);
-  const relMap = await loadRelatedRefsMapFromLinks(userId, [cardId]);
-  return { ...card, relatedRefs: relMap.get(cardId) ?? [] };
-}
-
-/**
- * 永久删除回收站中的一条（按卡片 id，与 trashId 一致）。
- * @param {string} ownerKey
- * @param {string} trashId
- */
-export async function deleteTrashedNote(ownerKey, trashId) {
-  const userId = ownerKeyToUserId(ownerKey);
-  const { sql: uidSql, params: uidParams } = userIdCondition(userId, 2);
-  const res = await query(
-    `DELETE FROM cards
-     WHERE id = $1 AND (${uidSql}) AND trashed_at IS NOT NULL`,
-    [trashId, ...uidParams]
-  );
-  if (res.rowCount === 0) throw new Error("回收站记录不存在或无权限");
-}
-
-/**
- * @param {string} ownerKey
- */
-export async function clearTrashedNotes(ownerKey) {
-  const userId = ownerKeyToUserId(ownerKey);
-  const { sql: uidSql, params: uidParams } = userIdCondition(userId, 1);
-  await query(`DELETE FROM cards WHERE (${uidSql}) AND trashed_at IS NOT NULL`, uidParams);
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
-// 附件索引（card_attachments，与 cards.media 触发器同步）
+// 用户偏好（合并进 users.prefs_json）
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** 与前端 noteMediaCategory 文档扩展名规则一致 */
-const ATTACH_DOC_RE =
-  "\\.(pdf|docx?|xlsx?|pptx?|txt|md|csv|rtf|pages|numbers|key|epub|json|xml|yml|yaml)$";
-
-/**
- * @param {string} filterKey
- * @param {string} [alias]
- */
-function attachmentWhereSql(filterKey, alias = "a") {
-  const tail = `lower(regexp_replace(regexp_replace(split_part(${alias}.url, '?', 1), '#.*$', ''), '^.*[/\\\\\\\\]', ''))`;
-  const docPred = `(${alias}.kind = 'file' AND (
-    COALESCE(${alias}.name, '') ~* '${ATTACH_DOC_RE}'
-    OR ${tail} ~* '${ATTACH_DOC_RE}'
-  ))`;
-  switch (filterKey) {
-    case "image":
-      return `${alias}.kind = 'image'`;
-    case "video":
-      return `${alias}.kind = 'video'`;
-    case "audio":
-      return `${alias}.kind = 'audio'`;
-    case "document":
-      return docPred;
-    case "other":
-      return `NOT (${alias}.kind IN ('image','video','audio')) AND NOT (${docPred})`;
-    default:
-      return "TRUE";
-  }
-}
-
-/**
- * @param {string} raw
- */
-function normalizeAttachmentFilterKey(raw) {
-  const k = String(raw || "all").trim().toLowerCase();
-  if (
-    k === "image" ||
-    k === "video" ||
-    k === "audio" ||
-    k === "document" ||
-    k === "other" ||
-    k === "all"
-  ) {
-    return k;
-  }
-  return "all";
-}
-
-/**
- * 当前用户附件条数（未进回收站的卡片）。
- * @param {string} ownerKey
- * @param {string} [filterKey]
- */
-export async function countCardAttachments(ownerKey, filterKey = "all") {
-  const fk = normalizeAttachmentFilterKey(filterKey);
-  const userId = ownerKeyToUserId(ownerKey);
-  const { sql: cUidSql, params: cUidParams } = userIdCondition(userId, 1);
-  const cUidQ = cUidSql.replace(/\buser_id\b/g, "c.user_id");
-  const filt = attachmentWhereSql(fk);
-  const res = await query(
-    `SELECT COUNT(*)::bigint AS n
-     FROM card_attachments a
-     INNER JOIN cards c ON c.id = a.card_id AND c.trashed_at IS NULL
-       AND (${cUidQ}) AND c.object_kind LIKE 'file%'
-     WHERE ${filt}`,
-    cUidParams
-  );
-  return Number(res.rows[0]?.n ?? 0);
-}
-
-/**
- * 分页附件列表（用于「文件」页，避免拉全树）。
- * @param {string} ownerKey
- * @param {{ filterKey?: string, limit?: number, offset?: number }} opts
- */
-export async function listCardAttachmentsPage(ownerKey, opts = {}) {
-  const fk = normalizeAttachmentFilterKey(opts.filterKey);
-  const limit = Math.min(200, Math.max(1, Number(opts.limit) || 40));
-  const offset = Math.max(0, Number(opts.offset) || 0);
-  const total = await countCardAttachments(ownerKey, fk);
-  if (total === 0) {
-    return { items: [], total: 0 };
-  }
-  const userId = ownerKeyToUserId(ownerKey);
-  const { sql: cUidSql, params: cUidParams } = userIdCondition(userId, 1);
-  const cUidQ = cUidSql.replace(/\buser_id\b/g, "c.user_id");
-  const filt = attachmentWhereSql(fk);
-  const limIdx = cUidParams.length + 1;
-  const offIdx = cUidParams.length + 2;
-  const res = await query(
-    `SELECT COALESCE(pl.cid, '${LOOSE_NOTES_COLLECTION_ID}') AS col_id,
-            a.card_id, a.sort_order,
-            a.kind, a.url, a.name, a.thumbnail_url, a.cover_url, a.size_bytes,
-            a.duration_sec, c.media AS card_media
-     FROM card_attachments a
-     INNER JOIN cards c ON c.id = a.card_id AND c.trashed_at IS NULL
-       AND (${cUidQ}) AND c.object_kind LIKE 'file%'
-     LEFT JOIN LATERAL (
-       SELECT p.collection_id AS cid
-       FROM card_placements p
-       WHERE p.card_id = a.card_id
-       ORDER BY p.collection_id ASC
-       LIMIT 1
-     ) pl ON TRUE
-     WHERE ${filt}
-     ORDER BY c.added_on DESC NULLS LAST, c.minutes_of_day DESC,
-              COALESCE(pl.cid, '') ASC, a.card_id ASC, a.sort_order ASC
-     LIMIT $${limIdx} OFFSET $${offIdx}`,
-    [...cUidParams, limit, offset]
-  );
-  const items = res.rows.map((r) => {
-    const th = r.thumbnail_url != null ? String(r.thumbnail_url).trim() : "";
-    const cv = r.cover_url != null ? String(r.cover_url).trim() : "";
-    const item = {
-      url: r.url,
-      kind: r.kind,
-      ...(r.name ? { name: r.name } : {}),
-      ...(th ? { thumbnailUrl: th } : {}),
-      ...(cv ? { coverUrl: cv } : {}),
-      ...(r.size_bytes != null
-        ? { sizeBytes: Number(r.size_bytes) }
-        : {}),
-      ...(r.duration_sec != null &&
-      Number.isFinite(Number(r.duration_sec)) &&
-      Number(r.duration_sec) >= 0
-        ? { durationSec: Math.round(Number(r.duration_sec)) }
-        : {}),
-    };
-    try {
-      let arr = r.card_media;
-      if (typeof arr === "string") arr = JSON.parse(arr);
-      if (Array.isArray(arr)) {
-        const idx = Number(r.sort_order);
-        const el = Number.isFinite(idx) && idx >= 0 ? arr[idx] : null;
-        if (el && typeof el === "object") {
-          const w = /** @type {{ widthPx?: unknown }} */ (el).widthPx;
-          const h = /** @type {{ heightPx?: unknown }} */ (el).heightPx;
-          if (
-            typeof w === "number" &&
-            typeof h === "number" &&
-            Number.isFinite(w) &&
-            Number.isFinite(h) &&
-            w > 0 &&
-            h > 0
-          ) {
-            item.widthPx = Math.round(w);
-            item.heightPx = Math.round(h);
-          }
-        }
-      }
-    } catch {
-      /* 列表项不强制带分辨率 */
-    }
-    return {
-      colId: r.col_id,
-      cardId: r.card_id,
-      mediaIndex: r.sort_order,
-      item,
-    };
-  });
-  return { items, total };
-}
-
-/**
- * 每位用户「库内」附件总字节（card_attachments.size_bytes 之和，仅未进回收站的卡片）。
- * @returns {Promise<Map<string, number>>} userId → bytes（无附件的用户不在 Map 中）
- */
-export async function attachmentStorageBytesByUserId() {
-  const res = await query(
-    `SELECT c.user_id AS uid, COALESCE(SUM(a.size_bytes), 0)::bigint AS n
-     FROM card_attachments a
-     INNER JOIN cards c ON c.id = a.card_id AND c.trashed_at IS NULL
-     WHERE c.user_id IS NOT NULL
-     GROUP BY c.user_id`
-  );
-  const map = new Map();
-  for (const row of res.rows) {
-    if (row.uid == null) continue;
-    const id = String(row.uid).trim();
-    if (!id) continue;
-    const n = Number(row.n);
-    map.set(id, Number.isFinite(n) && n > 0 ? Math.floor(n) : 0);
-  }
-  return map;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 对象类型 Schema / 自动关联引擎 / 附件迁移
-// ─────────────────────────────────────────────────────────────────────────────
-
-/** 从当前时间生成 YYYY-MM-DD 和 minutesOfDay */
-function nowDateParts() {
-  const now = new Date();
-  const y = now.getFullYear();
-  const mo = String(now.getMonth() + 1).padStart(2, "0");
-  const da = String(now.getDate()).padStart(2, "0");
-  return { addedOn: `${y}-${mo}-${da}`, minutesOfDay: now.getHours() * 60 + now.getMinutes() };
-}
-
-/** 生成与现有代码一致的卡片 id */
-function newCardId() {
-  return `n-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-}
-
-/**
- * 展开 AutoLinkRule（支持 targets[] 或单 targetObjectKind + linkType）。
- * @param {object} rule
- * @returns {Array<{ ruleId: string, trigger: string, targetKey: string, targetObjectKind: string, linkType: string, targetPresetTypeId?: string }>}
- */
-function expandAutoLinkRuleSteps(rule) {
-  const rid = rule.ruleId;
-  const trig = rule.trigger ?? "on_save";
-  const ruleLevelCol =
-    typeof rule.targetCollectionId === "string" && rule.targetCollectionId.trim()
-      ? rule.targetCollectionId.trim()
-      : undefined;
-  const ruleTargetSync =
-    typeof rule.targetSyncSchemaFieldId === "string" &&
-    rule.targetSyncSchemaFieldId.trim()
-      ? rule.targetSyncSchemaFieldId.trim()
-      : undefined;
-  if (Array.isArray(rule.targets) && rule.targets.length > 0) {
-    return rule.targets.map((t) => {
-      const stepCol =
-        typeof t.targetCollectionId === "string" && t.targetCollectionId.trim()
-          ? t.targetCollectionId.trim()
-          : ruleLevelCol;
-      const tSync =
-        typeof t.targetSyncSchemaFieldId === "string" &&
-        t.targetSyncSchemaFieldId.trim()
-          ? t.targetSyncSchemaFieldId.trim()
-          : ruleTargetSync;
-      return {
-        ruleId: rid,
-        trigger: trig,
-        targetKey: t.targetKey ?? "default",
-        targetObjectKind: t.targetObjectKind,
-        linkType: t.linkType,
-        targetPresetTypeId: t.targetPresetTypeId,
-        targetCollectionId: stepCol,
-        syncSchemaFieldId:
-          typeof t.syncSchemaFieldId === "string" && t.syncSchemaFieldId.trim()
-            ? t.syncSchemaFieldId.trim()
-            : undefined,
-        targetSyncSchemaFieldId: tSync,
-      };
-    });
-  }
-  if (rule.targetObjectKind && rule.linkType) {
-    const ruleSync =
-      typeof rule.syncSchemaFieldId === "string" && rule.syncSchemaFieldId.trim()
-        ? rule.syncSchemaFieldId.trim()
-        : undefined;
-    return [
-      {
-        ruleId: rid,
-        trigger: trig,
-        targetKey: "default",
-        targetObjectKind: rule.targetObjectKind,
-        linkType: rule.linkType,
-        targetPresetTypeId: rule.targetPresetTypeId,
-        targetCollectionId: ruleLevelCol,
-        syncSchemaFieldId: ruleSync,
-        targetSyncSchemaFieldId: ruleTargetSync,
-      },
-    ];
-  }
-  return [];
-}
-
-const AUTO_LINK_NEW_CARD_TITLE_MAX = 500;
-
-/** @param {object|undefined|null} prop custom_props 单项 */
-function customPropValueAsAutoLinkTitle(prop) {
-  if (!prop || prop.value == null || prop.value === "") return "";
-  const v = prop.value;
-  const t = prop.type;
-  if (t === "text" || t === "url" || t === "date") return String(v).trim();
-  if (t === "number") return String(v).trim();
-  if (t === "choice") {
-    if (Array.isArray(v)) return v.map(String).filter(Boolean).join(", ").trim();
-    return String(v).trim();
-  }
-  if (t === "checkbox" || t === "cardLink") {
-    const seed =
-      typeof prop.seedTitle === "string" ? prop.seedTitle.trim() : "";
-    if (seed) return seed;
-    return "";
-  }
-  if (t === "cardLinks") return "";
-  if (t === "collectionLink") {
-    if (Array.isArray(v)) return v.length ? v.join(", ") : "";
-    return "";
-  }
-  return typeof v === "string" ? v.trim() : "";
-}
-
-function truncateAutoLinkCardTitle(s) {
-  const t = String(s ?? "").trim();
-  if (!t) return "";
-  if (t.length <= AUTO_LINK_NEW_CARD_TITLE_MAX) return t;
-  return t.slice(0, AUTO_LINK_NEW_CARD_TITLE_MAX);
-}
-
-/** 去掉简单 HTML 标签与常见实体，供自动建卡标题回退（剪藏正文多为 HTML） */
-function autoLinkPlainTextFromHtmlSnippet(html) {
-  const raw = String(html ?? "").trim();
-  if (!raw) return "";
-  const noTags = raw.replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ");
-  const decoded = noTags
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"');
-  return decoded.replace(/\s+/g, " ").trim();
-}
-
-function sanitizeAutoLinkTitleRaw(raw, forPerson) {
-  let t = String(raw ?? "").trim();
-  if (!t) return "";
-  if (/<[^>]+>/.test(t)) {
-    t = autoLinkPlainTextFromHtmlSnippet(t);
-  }
-  if (!t) return "";
-  if (forPerson && t.length > 80) {
-    return t.slice(0, 80).trim();
-  }
-  return t;
-}
-
-/**
- * 自动建卡：用源卡 schema 属性作为目标卡标题（cards.text）。
- * 优先 step.syncSchemaFieldId；无则 source 类目标尝试源上首个 url 字段；再回落正文首行。
- * 人物卡：不得用正文 HTML 作昵称回退（避免整段 <p> 写入人物名）。
- *
- * @param {{ syncSchemaFieldId?: string, linkType?: string, targetKey?: string, targetObjectKind?: string }} step
- * @param {{ text?: string, custom_props?: unknown }} sourceCardRow
- * @param {Map<string, object>} mergedFieldMap
- */
-function autoLinkNewCardTitleFromSource(step, sourceCardRow, mergedFieldMap) {
-  const props = Array.isArray(sourceCardRow.custom_props) ? sourceCardRow.custom_props : [];
-  const tgtKind =
-    typeof step.targetObjectKind === "string" ? step.targetObjectKind.trim() : "";
-  const forPerson = tgtKind === "person";
-
-  const readByFieldId = (fid) => {
-    const id = typeof fid === "string" ? fid.trim() : "";
-    if (!id) return "";
-    const p = props.find((x) => x && x.id === id);
-    return customPropValueAsAutoLinkTitle(p);
-  };
-
-  const syncId =
-    typeof step.syncSchemaFieldId === "string" && step.syncSchemaFieldId.trim()
-      ? step.syncSchemaFieldId.trim()
-      : "";
-  if (syncId) {
-    let fromSync = readByFieldId(syncId);
-    fromSync = sanitizeAutoLinkTitleRaw(fromSync, forPerson);
-    if (fromSync) return truncateAutoLinkCardTitle(fromSync);
-  }
-
-  const key = typeof step.targetKey === "string" ? step.targetKey : "";
-  const ltype = typeof step.linkType === "string" ? step.linkType : "";
-  if (key === "source" || ltype === "source") {
-    const urlFields = [...mergedFieldMap.values()].filter((f) => f && f.type === "url");
-    urlFields.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-    for (const f of urlFields) {
-      const t = readByFieldId(f.id);
-      if (t) return truncateAutoLinkCardTitle(sanitizeAutoLinkTitleRaw(t, false));
-    }
-  }
-
-  if (forPerson) {
-    return "";
-  }
-
-  const body = typeof sourceCardRow.text === "string" ? sourceCardRow.text.trim() : "";
-  if (body) {
-    const fromStrong = titleFromClipNoteHtml(body);
-    if (fromStrong) return truncateAutoLinkCardTitle(fromStrong);
-    const line = body.split("\n")[0].trim();
-    const plain = autoLinkPlainTextFromHtmlSnippet(line || body);
-    if (plain) return truncateAutoLinkCardTitle(plain);
-  }
-  return "";
-}
-
-/** 目标合集无 preset_type_id 时新建卡默认 note */
-function objectKindFromCollectionRow(colRow) {
-  if (!colRow) return "note";
-  const pid =
-    typeof colRow.preset_type_id === "string" ? colRow.preset_type_id.trim() : "";
-  return pid || "note";
-}
-
-function normalizeCardObjectKindRow(row) {
-  const raw = row?.object_kind;
-  if (typeof raw === "string" && raw.trim()) return raw.trim();
-  return "note";
-}
-
-/**
- * 未设置 source 条件时视为匹配（兼容内置 schema 规则）。
- * @param {object} cardRow cards 行（须含 object_kind）
- * @param {string[]} colIds 源卡 placement 合集 id
- * @param {Map<string, object>} colMap collections 行映射（须含 preset_type_id、parent_id）
- * @param {object} rule
- */
-function cardMatchesAutoLinkRuleSource(cardRow, colIds, colMap, rule) {
-  const scol =
-    typeof rule.sourceCollectionId === "string" && rule.sourceCollectionId.trim()
-      ? rule.sourceCollectionId.trim()
-      : "";
-  if (scol && !colIds.includes(scol)) return false;
-
-  const so =
-    typeof rule.sourceObjectKind === "string" && rule.sourceObjectKind.trim()
-      ? rule.sourceObjectKind.trim()
-      : "";
-  const sp =
-    typeof rule.sourcePresetTypeId === "string" && rule.sourcePresetTypeId.trim()
-      ? rule.sourcePresetTypeId.trim()
-      : "";
-  if (!so && !sp) return true;
-
-  if (so) {
-    const got = normalizeCardObjectKindRow(cardRow);
-    if (got !== so) return false;
-  }
-  if (sp) {
-    let found = false;
-    for (const colId of colIds) {
-      let cur = colMap.get(colId);
-      while (cur) {
-        const pid =
-          typeof cur.preset_type_id === "string" ? cur.preset_type_id.trim() : "";
-        if (pid && pid === sp) {
-          found = true;
-          break;
-        }
-        cur = cur.parent_id ? colMap.get(cur.parent_id) : null;
-      }
-      if (found) break;
-    }
-    if (!found) return false;
-  }
-  return true;
-}
-
-/** preset_type_id 候选（网页链接可回落到父类型 web） */
-function presetTypeIdCandidates(presetTypeId, objectKind) {
-  /** @type {string[]} */
-  const out = [];
-  const add = (x) => {
-    if (typeof x === "string" && x.trim() && !out.includes(x)) out.push(x.trim());
-  };
-  add(presetTypeId);
-  add(objectKind);
-  if (objectKind === "web_page") add("web");
-  return out;
-}
-
-/**
- * 为自动关联规则解析目标类别合集 id；找不到则返回 null（调用方用源卡首个合集）。
- * @param {string|null} userId
- * @param {string|undefined} presetTypeId
- * @param {string} objectKind
- */
-async function findPresetCollectionIdForAutoLink(userId, presetTypeId, objectKind) {
-  const { sql: tUidSql, params: tUidParams } = userIdCondition(userId, 2);
-  for (const pid of presetTypeIdCandidates(presetTypeId, objectKind)) {
-    const tColRes = await query(
-      `SELECT id FROM collections WHERE preset_type_id = $1 AND ${tUidSql} LIMIT 1`,
-      [pid, ...tUidParams]
-    );
-    if (tColRes.rowCount > 0) return tColRes.rows[0].id;
-  }
-  return null;
-}
-
-/**
- * 按 preset_type_id 查找用户（或单用户 null）的类别合集 id。
- * @param {string|null} userId
- * @param {string} presetTypeId
- * @returns {Promise<string|null>}
- */
-export async function getPresetCollectionId(userId, presetTypeId) {
-  const pid = String(presetTypeId || "").trim();
-  if (!pid) return null;
-  const { sql: uidSql, params: uidParams } = userIdCondition(userId, 2);
-  const res = await query(
-    `SELECT id FROM collections WHERE preset_type_id = $1 AND ${uidSql} LIMIT 1`,
-    [pid, ...uidParams]
-  );
-  return res.rowCount > 0 ? res.rows[0].id : null;
-}
-
-/**
- * 将 cardLink 引用写入源卡 custom_props（与 auto-link 同事务）。
- * @param {import("pg").PoolClient} client
- * @param {string|null} userId
- * @param {string} sourceCardId
- * @param {string} fieldId
- * @param {{ colId: string, cardId: string }} ref
- * @param {Map<string, object>} mergedFieldMap
- */
-function customPropsArrayFromDbCell(raw) {
-  if (raw == null) return [];
-  if (Array.isArray(raw)) return raw;
-  if (typeof raw === "string") {
-    try {
-      const p = JSON.parse(raw);
-      return Array.isArray(p) ? p : [];
-    } catch {
-      return [];
-    }
-  }
-  return [];
-}
-
-async function mergeCardLinkCustomPropWithClient(
-  client,
-  userId,
-  sourceCardId,
-  fieldId,
-  ref,
-  mergedFieldMap
-) {
-  if (!fieldId || !ref?.colId || !ref?.cardId) return;
-  const { sql: ownSql, params: ownParams } = cardOwnershipCondition(userId, 2);
-  const res = await client.query(
-    `SELECT custom_props FROM cards WHERE id = $1 AND (${ownSql}) AND trashed_at IS NULL`,
-    [sourceCardId, ...ownParams]
-  );
-  if (res.rowCount === 0) return;
-  const props = customPropsArrayFromDbCell(res.rows[0].custom_props);
-  const fieldMeta = mergedFieldMap.get(fieldId);
-  const name = fieldMeta?.name ?? fieldId;
-  const idx = props.findIndex((p) => p && p.id === fieldId);
-  const nextVal = { colId: ref.colId, cardId: ref.cardId };
-  let nextProps;
-  if (idx >= 0) {
-    nextProps = props.map((p, i) =>
-      i === idx
-        ? { ...p, id: fieldId, name: p.name || name, type: "cardLink", value: nextVal }
-        : p
-    );
-  } else {
-    nextProps = [...props, { id: fieldId, name, type: "cardLink", value: nextVal }];
-  }
-  /** $1=id，$2=jsonb；归属条件须从 $3 起，避免与 $2 冲突 */
-  const { sql: ownUpSql, params: ownUpParams } = cardOwnershipCondition(userId, 3);
-  await client.query(
-    `UPDATE cards SET custom_props = $2::jsonb WHERE id = $1 AND (${ownUpSql}) AND trashed_at IS NULL`,
-    [sourceCardId, JSON.stringify(nextProps), ...ownUpParams]
-  );
-}
-
-/** 剪藏正文误入人物名时常含标签且较长 */
-function personDisplayNameLooksLikeHtmlBlob(s) {
-  const t = String(s ?? "").trim();
-  return t.length >= 24 && /<[^>]+>/.test(t);
-}
-
-/**
- * 已关联的人物卡若名称曾被误写入剪藏 HTML，在自动建卡重跑时用源卡作者字段或纯文本兜底修正。
- */
-async function repairLinkedPersonNameIfHtmlBlob(
-  client,
-  userId,
-  personCardId,
-  step,
-  sourceCardRow,
-  mergedFieldMap
-) {
-  const kind =
-    typeof step.targetObjectKind === "string" ? step.targetObjectKind.trim() : "";
-  if (kind !== "person") return;
-  const syncId =
-    typeof step.syncSchemaFieldId === "string" && step.syncSchemaFieldId.trim()
-      ? step.syncSchemaFieldId.trim()
-      : "";
-  if (!syncId) return;
-
-  const { sql: ownSql, params: ownParams } = cardOwnershipCondition(userId, 2);
-  const res = await client.query(
-    `SELECT text, custom_props, object_kind FROM cards WHERE id = $1 AND (${ownSql}) AND trashed_at IS NULL`,
-    [personCardId, ...ownParams]
-  );
-  if (res.rowCount === 0) return;
-  const row = res.rows[0];
-  if (normalizeCardObjectKindRow(row) !== "person") return;
-
-  const props = customPropsArrayFromDbCell(row.custom_props);
-  const nameIdx = props.findIndex((p) => p && p.id === "sf-person-name");
-  let rawName = "";
-  if (nameIdx >= 0 && props[nameIdx]?.type === "text") {
-    const v = props[nameIdx].value;
-    if (typeof v === "string" && v.trim()) rawName = v.trim();
-  }
-  if (!rawName) rawName = String(row.text ?? "").trim();
-  if (!personDisplayNameLooksLikeHtmlBlob(rawName)) return;
-
-  const fromClip = autoLinkNewCardTitleFromSource(step, sourceCardRow, mergedFieldMap);
-  let nextName = "";
-  if (fromClip) {
-    nextName = fromClip;
-  } else {
-    const plain = sanitizeAutoLinkTitleRaw(rawName, true);
-    nextName = plain.length > 0 && plain.length <= 80 ? plain : "";
-  }
-  if (nextName === rawName) return;
-
-  let finalProps;
-  if (nameIdx >= 0) {
-    finalProps = props.map((p, i) =>
-      i === nameIdx ? { ...p, type: "text", value: nextName } : p
-    );
-  } else {
-    finalProps = [
-      ...props,
-      { id: "sf-person-name", name: "名称", type: "text", value: nextName },
-    ];
-  }
-
-  const { sql: ownUpSql, params: ownUpParams } = cardOwnershipCondition(userId, 4);
-  await client.query(
-    `UPDATE cards SET custom_props = $2::jsonb, text = $3 WHERE id = $1 AND (${ownUpSql}) AND trashed_at IS NULL`,
-    [personCardId, JSON.stringify(finalProps), nextName, ...ownUpParams]
-  );
-}
-
-/**
- * 解析合集树中一条合集链（colId → 父 → 爷…）的有效 Schema，
- * 合并 autoLinkRules（子优先覆盖父，按 ruleId 去重）。
- *
- * @param {Map<string, object>} colMap  - 所有合集的 id → row 映射
- * @param {string} colId
- * @returns {{ rules: Array, fields: Array }}
- */
-function resolveSchemaFromChain(colMap, colId) {
-  const chain = [];
-  let cur = colMap.get(colId);
-  while (cur) {
-    chain.unshift(cur);
-    cur = cur.parent_id ? colMap.get(cur.parent_id) : null;
-  }
-  const ruleMap = new Map();
-  const fieldMap = new Map();
-  for (const node of chain) {
-    const schema = node.card_schema ?? {};
-    for (const r of (schema.autoLinkRules ?? [])) ruleMap.set(r.ruleId, r);
-    for (const f of (schema.fields ?? [])) fieldMap.set(f.id, f);
-  }
-  return {
-    rules: [...ruleMap.values()],
-    fields: [...fieldMap.values()].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
-  };
-}
-
-/** 从 placement 合集沿父链查找 preset_type_id 与卡片 object_kind 一致时的深度（0=本合集）。 */
-function placementPresetMatchDepth(colMap, colId, objectKind) {
-  const want = typeof objectKind === "string" ? objectKind.trim() : "";
-  if (!want) return -1;
-  let cur = colMap.get(colId);
-  let depth = 0;
-  while (cur) {
-    const pid = typeof cur.preset_type_id === "string" ? cur.preset_type_id.trim() : "";
-    if (pid && pid === want) return depth;
-    cur = cur.parent_id ? colMap.get(cur.parent_id) : null;
-    depth++;
-  }
-  return -1;
-}
-
-/**
- * 与 src/notePresetTypesCatalog.ts 剪藏子类型 autoLinkRules 一致；仅当 DB 合集 card_schema 未写入规则时补救。
- * 若改目录请同步此处。
- */
-function builtinClipAutoLinkRuleForObjectKind(objectKind) {
-  const k = typeof objectKind === "string" ? objectKind.trim() : "";
-  if (k === "post_xhs") {
-    return {
-      ruleId: "xhs-auto-graph",
-      trigger: "on_save",
-      targets: [
-        {
-          targetKey: "creator",
-          targetObjectKind: "person",
-          linkType: "creator",
-          targetPresetTypeId: "person",
-          syncSchemaFieldId: "sf-xhs-author",
-        },
-        {
-          targetKey: "source",
-          targetObjectKind: "web",
-          linkType: "source",
-          targetPresetTypeId: "web",
-        },
-      ],
-      labelZh: "自动关联作者与链接对象",
-      labelEn: "Auto-link creator and URL card",
-    };
-  }
-  if (k === "post_bilibili") {
-    return {
-      ruleId: "bili-auto-graph",
-      trigger: "on_save",
-      targets: [
-        {
-          targetKey: "creator",
-          targetObjectKind: "person",
-          linkType: "creator",
-          targetPresetTypeId: "person",
-          syncSchemaFieldId: "sf-bili-author",
-        },
-        {
-          targetKey: "source",
-          targetObjectKind: "web",
-          linkType: "source",
-          targetPresetTypeId: "web",
-        },
-      ],
-      labelZh: "自动关联 UP 主与链接对象",
-      labelEn: "Auto-link uploader and URL card",
-    };
-  }
-  return null;
-}
-
-/**
- * 用户笔记偏好（与 trashed_notes.owner_key 一致：JWT sub 或 __single__）。
- * @param {Map<string, object>} ruleMap
- * @param {{ disabledAutoLinkRuleIds?: string[], extraAutoLinkRules?: object[] }} prefs
- */
-function applyNotePrefsToAutoLinkRuleMap(ruleMap, prefs) {
-  if (!prefs || typeof prefs !== "object") return;
-  const raw = prefs.disabledAutoLinkRuleIds;
-  if (Array.isArray(raw)) {
-    for (const id of raw) {
-      if (typeof id === "string" && id.trim()) ruleMap.delete(id.trim());
-    }
-  }
-  const extras = prefs.extraAutoLinkRules;
-  if (Array.isArray(extras)) {
-    for (const r of extras) {
-      if (r && typeof r === "object" && typeof r.ruleId === "string" && r.ruleId.trim()) {
-        ruleMap.set(r.ruleId.trim(), r);
-      }
-    }
-  }
-}
-
-/**
- * @param {string} ownerKey
- * @returns {Promise<{ disabledAutoLinkRuleIds: string[], extraAutoLinkRules: object[] }>}
- */
 export async function getNotePrefsForOwnerKey(ownerKey) {
-  const key = typeof ownerKey === "string" && ownerKey.trim() ? ownerKey.trim() : "__single__";
   const empty = { disabledAutoLinkRuleIds: [], extraAutoLinkRules: [] };
-  const res = await query(
-    `SELECT prefs FROM user_note_prefs WHERE owner_key = $1`,
-    [key]
-  );
-  if (res.rowCount === 0) return empty;
-  const p = res.rows[0].prefs;
-  if (!p || typeof p !== "object") return empty;
-  const disabled = Array.isArray(p.disabledAutoLinkRuleIds) ? p.disabledAutoLinkRuleIds : [];
-  const extra = Array.isArray(p.extraAutoLinkRules) ? p.extraAutoLinkRules : [];
-  const out = {
-    disabledAutoLinkRuleIds: disabled.filter((x) => typeof x === "string"),
-    extraAutoLinkRules: extra.filter((x) => x && typeof x === "object"),
-  };
-  if (typeof p.timelineGalleryOnRight === "boolean") {
-    out.timelineGalleryOnRight = p.timelineGalleryOnRight;
+  try {
+    const userId = await resolveUserId(ownerKey === "__single__" ? null : ownerKey);
+    const r = await query(`SELECT prefs_json FROM users WHERE id = $1`, [userId]);
+    const p = r.rows[0]?.prefs_json;
+    if (!p || typeof p !== "object") return empty;
+    const disabled = Array.isArray(p.disabledAutoLinkRuleIds) ? p.disabledAutoLinkRuleIds : [];
+    const extra = Array.isArray(p.extraAutoLinkRules) ? p.extraAutoLinkRules : [];
+    const out = {
+      disabledAutoLinkRuleIds: disabled.filter((x) => typeof x === "string"),
+      extraAutoLinkRules: extra.filter((x) => x && typeof x === "object"),
+    };
+    if (typeof p.timelineGalleryOnRight === "boolean") {
+      out.timelineGalleryOnRight = p.timelineGalleryOnRight;
+    }
+    return out;
+  } catch {
+    return empty;
   }
-  return out;
 }
 
 const NOTE_PREFS_MAX_DISABLED = 80;
 const NOTE_PREFS_MAX_EXTRA_RULES = 24;
 
-/**
- * @param {unknown} body
- * @returns {{ disabledAutoLinkRuleIds: string[], extraAutoLinkRules: object[] }}
- */
 export function normalizeNotePrefsPayload(body) {
   const o = body && typeof body === "object" ? body : {};
   const dis = Array.isArray(o.disabledAutoLinkRuleIds) ? o.disabledAutoLinkRuleIds : [];
@@ -2686,1423 +1549,1236 @@ export function normalizeNotePrefsPayload(body) {
   return normalized;
 }
 
-/**
- * @param {string} ownerKey
- * @param {{ disabledAutoLinkRuleIds: string[], extraAutoLinkRules: object[] }} prefs
- */
 export async function replaceNotePrefsForOwnerKey(ownerKey, prefs) {
-  const key = typeof ownerKey === "string" && ownerKey.trim() ? ownerKey.trim() : "__single__";
+  const userId = await resolveUserId(ownerKey === "__single__" ? null : ownerKey);
   const normalized = normalizeNotePrefsPayload(prefs);
-  await query(
-    `INSERT INTO user_note_prefs (owner_key, prefs, updated_at)
-     VALUES ($1, $2::jsonb, now())
-     ON CONFLICT (owner_key) DO UPDATE SET prefs = EXCLUDED.prefs, updated_at = now()`,
-    [key, JSON.stringify(normalized)]
-  );
+  await query(`UPDATE users SET prefs_json = $2::jsonb WHERE id = $1`, [
+    userId,
+    JSON.stringify(normalized),
+  ]);
   return normalized;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Stage B: Files 页（附件浏览 / 计数 / 总字节）
+// ─────────────────────────────────────────────────────────────────────────────
+
 /**
- * 保存卡片后，根据所在合集的 autoLinkRules 静默创建缺失的关联卡片并双向连接。
- * fire-and-forget 设计：规则级异常单独 catch + 日志，不影响主请求。
- *
- * @param {string|null} userId
- * @param {string} cardId
+ * 把前端 filter 字符串拆成 SQL WHERE 片段 + 参数。
+ * - image/video/audio 按 preset_slug 直接命中；
+ * - document：kind=file 且名字（card_files.original_name 或 url 末段）命中文档扩展名；
+ * - other：kind=file 且不是文档扩展名；
+ * - all：无额外条件。
  */
-export async function runAutoLinkRulesForCard(userId, cardId) {
-  try {
-    // 1. 验证卡片存在
-    const { sql: cOwnSql, params: cOwnParams } = cardOwnershipCondition(userId, 2);
-    const cardRes = await query(
-      `SELECT id, user_id, object_kind, text, custom_props FROM cards WHERE id = $1 AND (${cOwnSql}) AND trashed_at IS NULL`,
-      [cardId, ...cOwnParams]
-    );
-    if (cardRes.rowCount === 0) return;
-    const uid = cardRes.rows[0].user_id;
-    const cardRow = {
-      ...cardRes.rows[0],
-      custom_props: customPropsArrayFromDbCell(cardRes.rows[0].custom_props),
+const DOC_EXT_REGEX = String.raw`\.(pdf|docx?|xlsx?|pptx?|txt|md|csv|rtf|pages|numbers|key|epub|json|xml|yml|yaml)$`;
+
+function buildAttachmentFilterClause(filterKey, nextParamIdx) {
+  const key = (filterKey || "all").toLowerCase();
+  if (key === "image") {
+    return { sql: `AND ct.preset_slug = $${nextParamIdx}`, params: ["file_image"], next: nextParamIdx + 1 };
+  }
+  if (key === "video") {
+    return { sql: `AND ct.preset_slug = $${nextParamIdx}`, params: ["file_video"], next: nextParamIdx + 1 };
+  }
+  if (key === "audio") {
+    return { sql: `AND ct.preset_slug = $${nextParamIdx}`, params: ["file_audio"], next: nextParamIdx + 1 };
+  }
+  if (key === "document") {
+    return {
+      sql: `AND ct.preset_slug IN ('file_document','file_other')
+            AND (LOWER(COALESCE(NULLIF(cf.original_name,''), regexp_replace(cf.url, '^.*/', ''))) ~* $${nextParamIdx})`,
+      params: [DOC_EXT_REGEX],
+      next: nextParamIdx + 1,
     };
-
-    // 2. 找到卡片所在的所有合集
-    const placementsRes = await query(
-      `SELECT collection_id FROM card_placements WHERE card_id = $1`,
-      [cardId]
-    );
-    const colIds = placementsRes.rows.map((r) => r.collection_id);
-    if (colIds.length === 0) return;
-
-    // 3. 加载当前用户的全部合集（用于父链遍历）
-    const { sql: colUidSql, params: colUidParams } = userIdCondition(userId, 1);
-    const allColsRes = await query(
-      `SELECT id, parent_id, is_category, card_schema, preset_type_id FROM collections WHERE ${colUidSql}`,
-      colUidParams
-    );
-    const colMap = new Map(allColsRes.rows.map((r) => [r.id, r]));
-
-    const ok = normalizeCardObjectKindRow(cardRow);
-    const colIdsSorted = [...colIds].sort((a, b) => {
-      const da = placementPresetMatchDepth(colMap, a, ok);
-      const db = placementPresetMatchDepth(colMap, b, ok);
-      const ka = da < 0 ? 0 : 100 - da;
-      const kb = db < 0 ? 0 : 100 - db;
-      if (ka !== kb) return ka - kb;
-      return String(a).localeCompare(String(b));
-    });
-
-    // 4. 合并所有 placement 上的规则（同 ruleId 后者覆盖前者；优先处理与 object_kind 更匹配的归属合集）
-    const allRules = new Map();
-    for (const colId of colIdsSorted) {
-      const { rules } = resolveSchemaFromChain(colMap, colId);
-      for (const rule of rules) {
-        const rid = rule && typeof rule.ruleId === "string" ? rule.ruleId.trim() : "";
-        if (rid) allRules.set(rid, rule);
-      }
-    }
-
-    const fallbackRule = builtinClipAutoLinkRuleForObjectKind(ok);
-    if (fallbackRule && !allRules.has(fallbackRule.ruleId)) {
-      allRules.set(fallbackRule.ruleId, fallbackRule);
-    }
-
-    const prefsOwnerKey = uid != null ? String(uid) : "__single__";
-    const notePrefs = await getNotePrefsForOwnerKey(prefsOwnerKey);
-    applyNotePrefsToAutoLinkRuleMap(allRules, notePrefs);
-
-    if (allRules.size === 0) return;
-
-    const mergedFieldMap = new Map();
-    for (const cid of colIdsSorted) {
-      const { fields } = resolveSchemaFromChain(colMap, cid);
-      for (const f of fields) mergedFieldMap.set(f.id, f);
-    }
-
-    // 5. 对每条规则的每个 target：按需建卡 + 写入 cardLink 型 custom_props
-    for (const [, rule] of allRules) {
-      if (!cardMatchesAutoLinkRuleSource(cardRow, colIds, colMap, rule)) continue;
-      const steps = expandAutoLinkRuleSteps(rule);
-      if (steps.length === 0) continue;
-
-      for (const step of steps) {
-        try {
-          const existLink = await query(
-            `SELECT l.to_card_id
-             FROM card_links l
-             INNER JOIN cards tc ON tc.id = l.to_card_id AND tc.trashed_at IS NULL
-             WHERE l.from_card_id = $1 AND l.link_type = $2 AND tc.object_kind = $3
-             LIMIT 1`,
-            [cardId, step.linkType, step.targetObjectKind]
-          );
-
-          if (existLink.rowCount > 0 && !step.syncSchemaFieldId) continue;
-
-          const client = await getClient();
-          try {
-            await client.query("BEGIN");
-            let linkedColId;
-            let linkedCardId;
-            let skipCommit = false;
-
-            if (existLink.rowCount > 0) {
-              linkedCardId = existLink.rows[0].to_card_id;
-              const pl = await client.query(
-                `SELECT collection_id FROM card_placements WHERE card_id = $1 ORDER BY collection_id LIMIT 1`,
-                [linkedCardId]
-              );
-              linkedColId = pl.rows[0]?.collection_id ?? colIds[0];
-            } else {
-              let targetColId = colIds[0];
-              const explicitCol =
-                typeof step.targetCollectionId === "string"
-                  ? step.targetCollectionId.trim()
-                  : "";
-              if (explicitCol) {
-                const { sql: ownColSql, params: ownColParams } = userIdCondition(
-                  userId,
-                  2
-                );
-                const colOk = await client.query(
-                  `SELECT id FROM collections WHERE id = $1 AND (${ownColSql})`,
-                  [explicitCol, ...ownColParams]
-                );
-                if (colOk.rowCount > 0) targetColId = explicitCol;
-              } else {
-                const resolved = await findPresetCollectionIdForAutoLink(
-                  userId,
-                  step.targetPresetTypeId,
-                  step.targetObjectKind
-                );
-                if (resolved) targetColId = resolved;
-              }
-
-              const { addedOn, minutesOfDay } = nowDateParts();
-              const newId = newCardId();
-              const colRowForKind = colMap.get(targetColId);
-              const effectiveObjectKind =
-                step.targetObjectKind && String(step.targetObjectKind).trim()
-                  ? String(step.targetObjectKind).trim()
-                  : objectKindFromCollectionRow(colRowForKind);
-              const newCardTitle = autoLinkNewCardTitleFromSource(
-                step,
-                cardRow,
-                mergedFieldMap
-              );
-              const personNoTitle =
-                effectiveObjectKind === "person" &&
-                !String(newCardTitle ?? "").trim();
-              if (personNoTitle) {
-                await client.query("ROLLBACK");
-                skipCommit = true;
-              } else {
-                /** 人物卡列表标题读 sf-person-name；网页卡可读 sf-web-url */
-                let initialCustomProps = [];
-                if (newCardTitle && effectiveObjectKind === "person") {
-                  initialCustomProps = [
-                    {
-                      id: "sf-person-name",
-                      name: "名称",
-                      type: "text",
-                      value: newCardTitle,
-                    },
-                  ];
-                } else if (
-                  newCardTitle &&
-                  (effectiveObjectKind === "web" ||
-                    effectiveObjectKind === "web_page") &&
-                  /^https?:\/\//i.test(newCardTitle)
-                ) {
-                  initialCustomProps = [
-                    {
-                      id: "sf-web-url",
-                      name: "链接",
-                      type: "url",
-                      value: newCardTitle,
-                    },
-                  ];
-                }
-
-                await createCard(
-                  userId,
-                  targetColId,
-                  {
-                    id: newId,
-                    text: newCardTitle,
-                    minutesOfDay,
-                    addedOn,
-                    objectKind: effectiveObjectKind,
-                    tags: [],
-                    relatedRefs: [],
-                    media: [],
-                    customProps: initialCustomProps,
-                    insertAtStart: false,
-                  },
-                  client
-                );
-                await client.query(
-                  `INSERT INTO card_links (user_id, from_card_id, to_card_id, link_type)
-                   VALUES ($1, $2, $3, $4)
-                   ON CONFLICT (from_card_id, to_card_id, link_type) DO NOTHING`,
-                  [uid, cardId, newId, step.linkType]
-                );
-                await client.query(
-                  `INSERT INTO card_links (user_id, from_card_id, to_card_id, link_type)
-                   VALUES ($1, $2, $3, $4)
-                   ON CONFLICT (from_card_id, to_card_id, link_type) DO NOTHING`,
-                  [uid, newId, cardId, step.linkType]
-                );
-                linkedColId = targetColId;
-                linkedCardId = newId;
-              }
-            }
-
-            if (!skipCommit) {
-              if (step.syncSchemaFieldId) {
-                await mergeCardLinkCustomPropWithClient(
-                  client,
-                  userId,
-                  cardId,
-                  step.syncSchemaFieldId,
-                  { colId: linkedColId, cardId: linkedCardId },
-                  mergedFieldMap
-                );
-              }
-
-              if (step.targetSyncSchemaFieldId) {
-                const targetMerged = new Map();
-                const { fields: tf } = resolveSchemaFromChain(colMap, linkedColId);
-                for (const f of tf) targetMerged.set(f.id, f);
-                const srcColForRef =
-                  typeof rule.sourceCollectionId === "string" &&
-                  rule.sourceCollectionId.trim() &&
-                  colIds.includes(rule.sourceCollectionId.trim())
-                    ? rule.sourceCollectionId.trim()
-                    : colIds[0];
-                await mergeCardLinkCustomPropWithClient(
-                  client,
-                  userId,
-                  linkedCardId,
-                  step.targetSyncSchemaFieldId,
-                  { colId: srcColForRef, cardId: cardId },
-                  targetMerged
-                );
-              }
-
-              await repairLinkedPersonNameIfHtmlBlob(
-                client,
-                userId,
-                linkedCardId,
-                step,
-                cardRow,
-                mergedFieldMap
-              );
-
-              await client.query("COMMIT");
-            }
-          } catch (e) {
-            await safeRollback(client);
-            console.error(
-              `[auto-link] rule ${step.ruleId}/${step.targetKey} card ${cardId}:`,
-              e.message
-            );
-          } finally {
-            client.release();
-          }
-        } catch (e) {
-          console.error(`[auto-link] rule check ${rule.ruleId}:`, e.message);
-        }
-      }
-    }
-  } catch (e) {
-    console.error("[auto-link] outer error:", e.message);
   }
+  if (key === "other") {
+    return {
+      sql: `AND ct.preset_slug IN ('file_document','file_other')
+            AND (LOWER(COALESCE(NULLIF(cf.original_name,''), regexp_replace(cf.url, '^.*/', ''))) !~* $${nextParamIdx})`,
+      params: [DOC_EXT_REGEX],
+      next: nextParamIdx + 1,
+    };
+  }
+  // 'all' / 'file' / 未知 → 不附加条件
+  return { sql: "", params: [], next: nextParamIdx };
 }
 
-/**
- * 计算卡片在所有 category 合集（含父链）上的合并有效 Schema。
- * 用于前端展示 Schema 感知属性面板。
- *
- * @param {string|null} userId
- * @param {string} cardId
- * @returns {Promise<{ fields: Array, autoLinkRules: Array }>}
- */
-export async function getEffectiveSchemaForCard(userId, cardId) {
-  const empty = { fields: [], autoLinkRules: [] };
-
-  const { sql: cOwnSql, params: cOwnParams } = cardOwnershipCondition(userId, 2);
-  const exists = await query(
-    `SELECT user_id FROM cards WHERE id = $1 AND (${cOwnSql}) AND trashed_at IS NULL`,
-    [cardId, ...cOwnParams]
-  );
-  if (exists.rowCount === 0) return empty;
-  const cardUid = exists.rows[0].user_id;
-
-  const placementsRes = await query(
-    `SELECT collection_id FROM card_placements WHERE card_id = $1`,
-    [cardId]
-  );
-  const colIds = placementsRes.rows.map((r) => r.collection_id);
-  if (colIds.length === 0) return empty;
-
-  const { sql: colUidSql, params: colUidParams } = userIdCondition(userId, 1);
-  const allColsRes = await query(
-    `SELECT id, parent_id, is_category, card_schema FROM collections WHERE ${colUidSql}`,
-    colUidParams
-  );
-  const colMap = new Map(allColsRes.rows.map((r) => [r.id, r]));
-
-  const mergedFields = new Map();
-  const mergedRules = new Map();
-  for (const colId of colIds) {
-    const { fields, rules } = resolveSchemaFromChain(colMap, colId);
-    for (const f of fields) mergedFields.set(f.id, f);
-    for (const r of rules) mergedRules.set(r.ruleId, r);
-  }
-
-  const prefsOwnerKey = cardUid != null ? String(cardUid) : "__single__";
-  const notePrefs = await getNotePrefsForOwnerKey(prefsOwnerKey);
-  applyNotePrefsToAutoLinkRuleMap(mergedRules, notePrefs);
-
-  /** 与父级 sf-clip-url 重复，已由 catalog 移除；旧合集 card_schema 仍可能含此 id */
-  const deprecatedSchemaFieldIds = new Set(["sf-xhs-url", "sf-bili-url"]);
-  return {
-    fields: [...mergedFields.values()]
-      .filter((f) => f && !deprecatedSchemaFieldIds.has(f.id))
-      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
-    autoLinkRules: [...mergedRules.values()],
-  };
+/** card_files 行 → 前端 NoteMediaItem */
+function cardFileRowToMediaItem(r) {
+  const kind = FILE_SLUG_TO_MEDIA_KIND[r.preset_slug] || "file";
+  const item = { url: r.url, kind };
+  if (r.original_name) item.name = r.original_name;
+  if (r.thumb_url) item.thumbnailUrl = r.thumb_url;
+  if (r.cover_url) item.coverUrl = r.cover_url;
+  if (r.cover_thumb_url) item.coverThumbnailUrl = r.cover_thumb_url;
+  if (r.bytes != null) item.sizeBytes = Number(r.bytes);
+  return item;
 }
 
-/**
- * 批量将现有卡片的 media[] 附件迁移为独立文件卡片，并双向连接。
- * 幂等：通过检查已有 attachment 链接 + 匹配 URL 跳过已处理项。
- *
- * @param {string|null} userId
- * @param {{ fileCollectionId: string, clearOriginalMedia?: boolean }} opts
- * @returns {Promise<{ processed: number, created: number, skipped: number }>}
- */
-export async function batchMigrateAttachmentsToFileCards(userId, opts) {
-  const { fileCollectionId, clearOriginalMedia = false } = opts ?? {};
-  if (!fileCollectionId) throw new Error("缺少 fileCollectionId");
-
-  const { sql: colUidSql, params: colUidParams } = userIdCondition(userId, 2);
-  const colCheck = await query(
-    `SELECT id FROM collections WHERE id = $1 AND ${colUidSql}`,
-    [fileCollectionId, ...colUidParams]
-  );
-  if (colCheck.rowCount === 0) throw new Error("目标文件合集不存在或无权限");
-
-  const { sql: cUidSql, params: cUidParams } = cardOwnershipCondition(userId, 1);
-  const cardsRes = await query(
-    `SELECT id, user_id, media FROM cards
-     WHERE (${cUidSql})
-       AND trashed_at IS NULL
-       AND jsonb_array_length(COALESCE(media, '[]'::jsonb)) > 0`,
-    cUidParams
-  );
-
-  let processed = 0;
-  let created = 0;
-  let skipped = 0;
-
-  for (const cardRow of cardsRes.rows) {
-    const noteCardId = cardRow.id;
-    const uid = cardRow.user_id;
-    const mediaItems = Array.isArray(cardRow.media) ? cardRow.media : [];
-
-    for (const raw of mediaItems) {
-      const url = typeof raw.url === "string" ? raw.url.trim() : "";
-      if (!url) { skipped++; continue; }
-      processed++;
-
-      try {
-        // 幂等检查
-        const existLink = await query(
-          `SELECT l.to_card_id
-           FROM card_links l
-           INNER JOIN cards tc ON tc.id = l.to_card_id AND tc.trashed_at IS NULL
-           WHERE l.from_card_id = $1
-             AND l.link_type = 'attachment'
-             AND (tc.media->0->>'url') = $2
-           LIMIT 1`,
-          [noteCardId, url]
-        );
-        if (existLink.rowCount > 0) { skipped++; continue; }
-
-        const kind = ["image", "video", "audio", "file"].includes(raw.kind) ? raw.kind : "file";
-        const objectKind =
-          kind === "image" ? "file_image"
-          : kind === "video" ? "file_video"
-          : kind === "audio" ? "file_audio"
-          : "file_document";
-
-        const mediaItem = { url, kind };
-        if (raw.name) mediaItem.name = raw.name;
-        if (raw.coverUrl) mediaItem.coverUrl = raw.coverUrl;
-        if (raw.thumbnailUrl) mediaItem.thumbnailUrl = raw.thumbnailUrl;
-        if (typeof raw.sizeBytes === "number") mediaItem.sizeBytes = raw.sizeBytes;
-        if (typeof raw.durationSec === "number") mediaItem.durationSec = raw.durationSec;
-
-        const { addedOn, minutesOfDay } = nowDateParts();
-        const newId = newCardId();
-        const titleFromMigrate =
-          typeof raw.name === "string" && raw.name.trim()
-            ? stripExtFilename(raw.name.trim())
-            : deriveFileCardTitleFromMediaItem(mediaItem);
-        const customPropsMigrate = titleFromMigrate
-          ? [
-              {
-                id: "sf-file-title",
-                name: "标题",
-                type: "text",
-                value: titleFromMigrate,
-              },
-            ]
-          : [];
-
-        const client = await getClient();
-        try {
-          await client.query("BEGIN");
-          await createCard(
-            userId,
-            fileCollectionId,
-            {
-              id: newId,
-              text: raw.name ? `## ${raw.name}` : "",
-              minutesOfDay,
-              addedOn,
-              objectKind,
-              tags: [],
-              relatedRefs: [],
-              media: [mediaItem],
-              customProps: customPropsMigrate,
-              insertAtStart: false,
-            },
-            client
-          );
-          await client.query(
-            `INSERT INTO card_links (user_id, from_card_id, to_card_id, link_type)
-             VALUES ($1, $2, $3, 'attachment')
-             ON CONFLICT (from_card_id, to_card_id, link_type) DO NOTHING`,
-            [uid, noteCardId, newId]
-          );
-          await client.query(
-            `INSERT INTO card_links (user_id, from_card_id, to_card_id, link_type)
-             VALUES ($1, $2, $3, 'attachment')
-             ON CONFLICT (from_card_id, to_card_id, link_type) DO NOTHING`,
-            [uid, newId, noteCardId]
-          );
-
-          if (clearOriginalMedia) {
-            await client.query(
-              `UPDATE cards
-               SET media = (
-                 SELECT COALESCE(jsonb_agg(elem), '[]'::jsonb)
-                 FROM jsonb_array_elements(COALESCE(media, '[]'::jsonb)) AS elem
-                 WHERE trim(elem->>'url') <> $2
-               )
-               WHERE id = $1`,
-              [noteCardId, url]
-            );
-          }
-
-          await client.query("COMMIT");
-          created++;
-        } catch (e) {
-          await safeRollback(client);
-          console.error(`[migrate-attachments] card ${noteCardId} url ${url}:`, e.message);
-          skipped++;
-        } finally {
-          client.release();
-        }
-      } catch (e) {
-        console.error(`[migrate-attachments] outer card ${noteCardId}:`, e.message);
-        skipped++;
-      }
-    }
-  }
-
-  return { processed, created, skipped };
-}
-
-/** @param {unknown} raw */
-function bilibiliAuthorFromCustomProps(raw) {
-  const props = Array.isArray(raw) ? raw : [];
-  for (const p of props) {
-    if (!p || typeof p !== "object") continue;
-    const id = typeof p.id === "string" ? p.id : "";
-    const typ = typeof p.type === "string" ? p.type : "";
-    if (id === "sf-bili-author" && typ === "cardLink") {
-      const v = p.value;
-      const cid =
-        v && typeof v === "object" && typeof v.cardId === "string" ? v.cardId.trim() : "";
-      if (cid) return null;
-      const seed = typeof p.seedTitle === "string" ? p.seedTitle.trim() : "";
-      if (seed) return seed;
-    }
-    if (typ === "cardLink" && typeof p.name === "string" && p.name.trim() === "UP 主") {
-      const v = p.value;
-      const cid =
-        v && typeof v === "object" && typeof v.cardId === "string" ? v.cardId.trim() : "";
-      if (cid) return null;
-      const seed = typeof p.seedTitle === "string" ? p.seedTitle.trim() : "";
-      if (seed) return seed;
-    }
-  }
-  for (const p of props) {
-    if (!p || typeof p !== "object") continue;
-    const id = typeof p.id === "string" ? p.id : "";
-    const name = typeof p.name === "string" ? p.name.trim() : "";
-    const typ = typeof p.type === "string" ? p.type : "";
-    if (id === "sf-bili-author" && typ === "text") {
-      const v = p.value;
-      const s = typeof v === "string" ? v.trim() : "";
-      if (s) return s;
-    }
-    if (name === "作者" && typ === "text") {
-      const v = p.value;
-      const s = typeof v === "string" ? v.trim() : "";
-      if (s) return s;
-    }
-  }
-  return null;
-}
-
-/** @param {unknown} raw */
-function bilibiliAuthorCardLinkAlreadySet(raw) {
-  const props = Array.isArray(raw) ? raw : [];
-  for (const p of props) {
-    if (!p || typeof p !== "object") continue;
-    const id = typeof p.id === "string" ? p.id : "";
-    const typ = typeof p.type === "string" ? p.type : "";
-    if (id !== "sf-bili-author" || typ !== "cardLink") continue;
-    const v = p.value;
-    if (v && typeof v === "object") {
-      const cid = typeof v.cardId === "string" ? v.cardId.trim() : "";
-      if (cid) return true;
-    }
-  }
-  return false;
-}
-
-/** @param {string} text */
-function personHeadlineNormForMatch(text) {
-  let t = String(text || "")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  const m = t.match(/^#{1,6}\s+(.+)$/m);
-  if (m) t = m[1].trim().replace(/\s+/g, " ");
-  return t.trim().toLowerCase();
-}
-
-/** @param {unknown[]} props @param {{ colId: string, cardId: string }} ref */
-function mergeBilibiliAuthorCustomProps(props, ref) {
-  const list = Array.isArray(props) ? [...props] : [];
-  const filtered = list.filter((p) => {
-    if (!p || typeof p !== "object") return true;
-    const name = typeof p.name === "string" ? p.name.trim() : "";
-    const typ = typeof p.type === "string" ? p.type : "";
-    if (name === "作者" && typ === "text") return false;
-    return true;
-  });
-  const fieldId = "sf-bili-author";
-  const fieldName = "UP 主";
-  const idx = filtered.findIndex((p) => p && p.id === fieldId);
-  const nextVal = { colId: ref.colId, cardId: ref.cardId };
-  if (idx >= 0) {
-    return filtered.map((p, i) =>
-      i === idx
-        ? { ...p, id: fieldId, name: fieldName, type: "cardLink", value: nextVal }
-        : p
-    );
-  }
-  return [...filtered, { id: fieldId, name: fieldName, type: "cardLink", value: nextVal }];
-}
-
-/** @param {unknown} raw */
-function readSfPersonNameFromPropsJson(raw) {
-  const props = Array.isArray(raw) ? raw : [];
-  for (const p of props) {
-    if (!p || typeof p !== "object") continue;
-    if (p.id === "sf-person-name" && p.type === "text") {
-      const v = p.value;
-      if (typeof v === "string" && v.trim()) return v.trim();
-    }
-  }
-  return null;
-}
-
-/** @param {unknown[]} props @param {string} name */
-function mergePersonNameIntoPropsArray(props, name) {
-  const list = Array.isArray(props) ? [...props] : [];
-  const idx = list.findIndex((p) => p && p.id === "sf-person-name");
-  const v = String(name || "").trim();
-  if (idx >= 0) {
-    return list.map((p, i) =>
-      i === idx
-        ? { ...p, id: "sf-person-name", name: p.name || "名称", type: "text", value: v }
-        : p
-    );
-  }
-  return [...list, { id: "sf-person-name", name: "名称", type: "text", value: v }];
-}
-
-/**
- * 正文仅为单个标题（HTML h* 或行首 # 的 Markdown）时返回名称，否则 null。
- * @param {unknown} raw
- */
-function legacyPersonNameFromBodyText(raw) {
-  const t = String(raw ?? "").trim();
-  if (!t) return null;
-  const hm = t.match(/<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>/i);
-  if (hm) {
-    const inner = hm[1].replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
-    if (!inner) return null;
-    const after = t.slice(t.indexOf(hm[0]) + hm[0].length).trim();
-    const afterPlain = after.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
-    if (afterPlain) return null;
-    return inner;
-  }
-  const plain = t.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-  const m = plain.match(/^#{1,6}\s+(.+)$/);
-  if (m) {
-    const rest = plain.slice(m[0].length).trim();
-    if (rest) return null;
-    return m[1].trim();
-  }
-  return null;
-}
-
-/** @param {unknown} text @param {unknown} customProps */
-function personCardNameMatchKey(text, customProps) {
-  const fromProp = readSfPersonNameFromPropsJson(customProps);
-  if (fromProp) return personHeadlineNormForMatch(fromProp);
-  return personHeadlineNormForMatch(text);
-}
-
-/**
- * 将旧版「正文只有 ## 名」的人物卡迁入 sf-person-name 并清空正文。
- * @param {string|null} userId
- * @param {string} personColId
- * @param {boolean} dryRun
- * @param {{ migratedPersonNameFromBody: number, errors: number }} stats
- */
-async function repairLegacyPersonCardsInCollection(userId, personColId, dryRun, stats) {
-  const { sql: cOwnSql, params: cOwnParams } = cardOwnershipCondition(userId, 1);
-  const colParamIdx = cOwnParams.length + 1;
+export async function countCardAttachments(ownerKey, filterKey = "all") {
+  const userId = await resolveUserId(ownerKey === "__single__" ? null : ownerKey);
+  const params = [userId];
+  const flt = buildAttachmentFilterClause(filterKey, 2);
+  params.push(...flt.params);
   const r = await query(
-    `SELECT c.id, c.text, c.custom_props
-     FROM cards c
-     INNER JOIN card_placements p ON p.card_id = c.id AND p.collection_id = $${colParamIdx}
-     WHERE (${cOwnSql.replace(/\buser_id\b/g, "c.user_id")})
-       AND c.trashed_at IS NULL
-       AND c.object_kind = 'person'`,
-    [...cOwnParams, personColId]
+    `SELECT COUNT(*)::int AS n
+       FROM cards fc
+       JOIN card_types ct ON ct.id = fc.card_type_id
+       JOIN card_files  cf ON cf.card_id = fc.id
+      WHERE fc.user_id = $1
+        AND fc.trashed_at IS NULL
+        AND ct.kind = 'file'
+        ${flt.sql}`,
+    params
   );
-  for (const row of r.rows) {
-    const prop = readSfPersonNameFromPropsJson(row.custom_props);
-    const legacy = legacyPersonNameFromBodyText(row.text);
-    /** @type {unknown[] | null} */
-    let nextProps = null;
-    let nextText = null;
-    if (!prop && legacy) {
-      nextProps = mergePersonNameIntoPropsArray(
-        Array.isArray(row.custom_props) ? row.custom_props : [],
-        legacy
-      );
-      nextText = "";
-    } else if (prop && legacy && personHeadlineNormForMatch(legacy) === personHeadlineNormForMatch(prop)) {
-      nextProps = mergePersonNameIntoPropsArray(
-        Array.isArray(row.custom_props) ? row.custom_props : [],
-        prop
-      );
-      nextText = "";
-    } else {
-      continue;
-    }
-    if (dryRun) {
-      stats.migratedPersonNameFromBody++;
-      continue;
-    }
-    const client = await getClient();
-    try {
-      await client.query(
-        `UPDATE cards SET custom_props = $2::jsonb, text = $3
-         WHERE id = $1 AND trashed_at IS NULL`,
-        [row.id, JSON.stringify(nextProps), nextText ?? ""]
-      );
-      stats.migratedPersonNameFromBody++;
-    } catch (e) {
-      console.error(`[backfill-bilibili-person] repair person ${row.id}:`, e.message);
-      stats.errors++;
-    } finally {
-      client.release();
-    }
-  }
+  return r.rows[0]?.n || 0;
 }
 
-const PERSON_PRESET_BACKFILL = "person";
-const PERSON_DOT_BACKFILL = "rgba(249, 115, 22, 0.14)";
+export async function listCardAttachmentsPage(ownerKey, opts = {}) {
+  const userId = await resolveUserId(ownerKey === "__single__" ? null : ownerKey);
+  const limit = Math.min(
+    200,
+    Math.max(1, Number.isFinite(Number(opts.limit)) ? Number(opts.limit) : 40)
+  );
+  const offset = Math.max(0, Number.isFinite(Number(opts.offset)) ? Number(opts.offset) : 0);
+  const params = [userId, limit, offset];
+  const flt = buildAttachmentFilterClause(opts.filterKey, 4);
+  params.push(...flt.params);
 
-/**
- * @param {string|null} userId
- */
-async function ensurePersonCollectionForBackfill(userId) {
-  const ex =
-    userId === null || userId === undefined
-      ? await query(
-          `SELECT id FROM collections WHERE user_id IS NULL AND preset_type_id = $1`,
-          [PERSON_PRESET_BACKFILL]
-        )
-      : await query(
-          `SELECT id FROM collections WHERE user_id = $1 AND preset_type_id = $2`,
-          [userId, PERSON_PRESET_BACKFILL]
-        );
-  if (ex.rowCount > 0) return ex.rows[0].id;
-
-  const id = `preset-${PERSON_PRESET_BACKFILL}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  await createCollection(userId, {
-    id,
-    name: "人物",
-    dotColor: PERSON_DOT_BACKFILL,
-    parentId: null,
-  });
-  await updateCollection(userId, id, {
-    isCategory: true,
-    presetTypeId: PERSON_PRESET_BACKFILL,
-    cardSchema: {},
-  });
-  return id;
-}
-
-/**
- * 扫描带 bilibili 标签的笔记：从 custom_props 读取扩展写入的「作者」或 sf-bili-author（text），
- * 在人物预设合集建/复用人物卡，写入 creator 双边边与 sf-bili-author（cardLink）。
- *
- * @param {{ userId?: string|null, dryRun?: boolean }} opts
- *   userId 省略=全部用户；userId: null 仅匿名 user_id IS NULL。
- * @returns {Promise<object>}
- */
-export async function backfillBilibiliCreatorsAsPersonCards(opts = {}) {
-  const dryRun = opts.dryRun === true;
-  const filterUserId = opts.userId;
-  const params = [];
-  let pIdx = 1;
-  let userClause = "";
-  if (filterUserId !== undefined) {
-    if (filterUserId === null) {
-      userClause = "AND c.user_id IS NULL";
-    } else {
-      userClause = `AND c.user_id = $${pIdx++}`;
-      params.push(filterUserId);
-    }
-  }
-
-  const listRes = await query(
-    `SELECT c.id, c.user_id, c.custom_props
-     FROM cards c
-     WHERE c.trashed_at IS NULL
-       AND EXISTS (
-         SELECT 1 FROM unnest(c.tags) AS t(tag)
-         WHERE lower(tag) = 'bilibili'
-       )
-       ${userClause}`,
+  const res = await query(
+    `SELECT fc.id AS file_card_id, fc.created_at,
+            cf.url, cf.original_name, cf.thumb_url, cf.cover_url, cf.cover_thumb_url, cf.bytes,
+            ct.preset_slug,
+            (SELECT l.from_card_id FROM card_links l
+               WHERE l.to_card_id = fc.id AND l.property_key = 'attachment'
+               ORDER BY l.sort_order ASC, l.from_card_id ASC LIMIT 1) AS note_card_id,
+            (SELECT l.sort_order FROM card_links l
+               WHERE l.to_card_id = fc.id AND l.property_key = 'attachment'
+               ORDER BY l.sort_order ASC, l.from_card_id ASC LIMIT 1) AS media_index
+       FROM cards fc
+       JOIN card_types ct ON ct.id = fc.card_type_id
+       JOIN card_files  cf ON cf.card_id = fc.id
+      WHERE fc.user_id = $1
+        AND fc.trashed_at IS NULL
+        AND ct.kind = 'file'
+        ${flt.sql}
+      ORDER BY fc.created_at DESC, fc.id DESC
+      LIMIT $2 OFFSET $3`,
     params
   );
 
-  const stats = {
-    notesSeen: listRes.rowCount,
-    skippedNoAuthor: 0,
-    skippedAlreadyCardLink: 0,
-    skippedNoPersonCollection: 0,
-    ensuredPersonCollections: 0,
-    createdPersonCards: 0,
-    reusedPersonCards: 0,
-    linkedNotes: 0,
-    filledPersonNameProp: 0,
-    migratedPersonNameFromBody: 0,
-    errors: 0,
-  };
-
-  /** @type {Map<string, { userId: string|null, rows: object[] }>} */
-  const byUser = new Map();
-  for (const row of listRes.rows) {
-    const key = row.user_id == null ? "__null__" : String(row.user_id);
-    if (!byUser.has(key)) {
-      byUser.set(key, { userId: row.user_id ?? null, rows: [] });
-    }
-    byUser.get(key).rows.push(row);
-  }
-
-  for (const { userId: uid, rows } of byUser.values()) {
-    let personColId = await findPresetCollectionIdForAutoLink(uid, "person", "person");
-    const hadPersonCol = Boolean(personColId);
-    if (!personColId && !dryRun) {
-      personColId = await ensurePersonCollectionForBackfill(uid);
-      if (!hadPersonCol) stats.ensuredPersonCollections++;
-    }
-    if (!personColId) {
-      for (const row of rows) {
-        const author = bilibiliAuthorFromCustomProps(row.custom_props);
-        if (!author) stats.skippedNoAuthor++;
-        else if (bilibiliAuthorCardLinkAlreadySet(row.custom_props))
-          stats.skippedAlreadyCardLink++;
-        else stats.skippedNoPersonCollection++;
-      }
-      console.error(
-        `[backfill-bilibili-person] user_id=${uid ?? "null"}: 无人物预设合集；` +
-          (dryRun ? "请先启用「人物」或去掉 --dry-run 以自动创建。" : "未能创建合集。")
-      );
-      continue;
-    }
-
-    const { sql: cOwnSql, params: cOwnParams } = cardOwnershipCondition(uid, 1);
-    const colParamIdx = cOwnParams.length + 1;
-    const pmapRes = await query(
-      `SELECT c.id, c.text, c.custom_props
-       FROM cards c
-       INNER JOIN card_placements p ON p.card_id = c.id AND p.collection_id = $${colParamIdx}
-       WHERE (${cOwnSql.replace(/\buser_id\b/g, "c.user_id")})
-         AND c.trashed_at IS NULL
-         AND (c.object_kind = 'person' OR c.object_kind IS NULL)`,
-      [...cOwnParams, personColId]
+  const items = [];
+  for (const row of res.rows) {
+    // 点击附件应直接打开"文件卡"本身（v2 模型下每个附件都是独立卡）。
+    // colId 取该文件卡自己的 placement；若无 placement 退回引用它的 note 卡的 placement。
+    const fileCardId = row.file_card_id;
+    let plRes = await query(
+      `SELECT collection_id FROM card_placements
+         WHERE card_id = $1 ORDER BY sort_order ASC, collection_id ASC LIMIT 1`,
+      [fileCardId]
     );
-    /** @type {Map<string, string>} */
-    const nameToPersonId = new Map();
-    for (const pr of pmapRes.rows) {
-      const k = personCardNameMatchKey(pr.text, pr.custom_props);
-      if (k && !nameToPersonId.has(k)) nameToPersonId.set(k, pr.id);
+    let colId = plRes.rows[0]?.collection_id || "";
+    if (!colId && row.note_card_id) {
+      plRes = await query(
+        `SELECT collection_id FROM card_placements
+           WHERE card_id = $1 ORDER BY sort_order ASC, collection_id ASC LIMIT 1`,
+        [row.note_card_id]
+      );
+      colId = plRes.rows[0]?.collection_id || "";
     }
-
-    for (const row of rows) {
-      const noteId = row.id;
-      try {
-        if (bilibiliAuthorCardLinkAlreadySet(row.custom_props)) {
-          stats.skippedAlreadyCardLink++;
-          continue;
-        }
-        const author = bilibiliAuthorFromCustomProps(row.custom_props);
-        if (!author) {
-          stats.skippedNoAuthor++;
-          continue;
-        }
-        const authorKey = personHeadlineNormForMatch(author);
-        if (!authorKey) {
-          stats.skippedNoAuthor++;
-          continue;
-        }
-
-        const exCr = await query(
-          `SELECT l.to_card_id
-           FROM card_links l
-           INNER JOIN cards tc ON tc.id = l.to_card_id AND tc.trashed_at IS NULL
-           WHERE l.from_card_id = $1
-             AND l.link_type = 'creator'
-             AND tc.object_kind = 'person'
-           LIMIT 1`,
-          [noteId]
-        );
-
-        let personCardId =
-          exCr.rowCount > 0 ? exCr.rows[0].to_card_id : nameToPersonId.get(authorKey) ?? null;
-        let createdNew = false;
-
-        if (!personCardId) {
-          createdNew = true;
-          personCardId = dryRun ? `__dry_${noteId}__` : newCardId();
-          if (dryRun) {
-            nameToPersonId.set(authorKey, personCardId);
-            stats.createdPersonCards++;
-            stats.linkedNotes++;
-            continue;
-          }
-        }
-
-        const reusedByName = !createdNew && exCr.rowCount === 0;
-
-        if (dryRun) {
-          stats.linkedNotes++;
-          if (reusedByName) stats.reusedPersonCards++;
-          continue;
-        }
-
-        const client = await getClient();
-        try {
-          await client.query("BEGIN");
-          if (createdNew) {
-            const { addedOn, minutesOfDay } = nowDateParts();
-            await createCard(
-              uid,
-              personColId,
-              {
-                id: personCardId,
-                text: "",
-                minutesOfDay,
-                addedOn,
-                objectKind: "person",
-                tags: [],
-                relatedRefs: [],
-                media: [],
-                customProps: mergePersonNameIntoPropsArray([], author),
-                insertAtStart: false,
-              },
-              client
-            );
-            nameToPersonId.set(authorKey, personCardId);
-          } else {
-            const prow = await client.query(
-              `SELECT text, custom_props FROM cards WHERE id = $1 AND trashed_at IS NULL`,
-              [personCardId]
-            );
-            if (prow.rowCount > 0) {
-              let pProps = Array.isArray(prow.rows[0].custom_props)
-                ? prow.rows[0].custom_props
-                : [];
-              let t = String(prow.rows[0].text ?? "");
-              let changed = false;
-              if (!readSfPersonNameFromPropsJson(pProps)) {
-                pProps = mergePersonNameIntoPropsArray(pProps, author);
-                changed = true;
-              }
-              const leg = legacyPersonNameFromBodyText(t);
-              if (
-                leg &&
-                personHeadlineNormForMatch(leg) === personHeadlineNormForMatch(author)
-              ) {
-                t = "";
-                changed = true;
-              }
-              if (changed) {
-                await client.query(
-                  `UPDATE cards SET custom_props = $2::jsonb, text = $3 WHERE id = $1`,
-                  [personCardId, JSON.stringify(pProps), t]
-                );
-                stats.filledPersonNameProp++;
-              }
-            }
-          }
-
-          await client.query(
-            `INSERT INTO card_links (user_id, from_card_id, to_card_id, link_type)
-             VALUES ($1, $2, $3, 'creator')
-             ON CONFLICT (from_card_id, to_card_id, link_type) DO NOTHING`,
-            [uid, noteId, personCardId]
-          );
-          await client.query(
-            `INSERT INTO card_links (user_id, from_card_id, to_card_id, link_type)
-             VALUES ($1, $2, $3, 'creator')
-             ON CONFLICT (from_card_id, to_card_id, link_type) DO NOTHING`,
-            [uid, personCardId, noteId]
-          );
-
-          const props = Array.isArray(row.custom_props) ? row.custom_props : [];
-          const nextProps = mergeBilibiliAuthorCustomProps(props, {
-            colId: personColId,
-            cardId: personCardId,
-          });
-          await client.query(`UPDATE cards SET custom_props = $2::jsonb WHERE id = $1`, [
-            noteId,
-            JSON.stringify(nextProps),
-          ]);
-
-          await client.query("COMMIT");
-          stats.linkedNotes++;
-          if (createdNew) stats.createdPersonCards++;
-          else if (reusedByName) stats.reusedPersonCards++;
-        } catch (e) {
-          await safeRollback(client);
-          console.error(`[backfill-bilibili-person] note ${noteId}:`, e.message);
-          stats.errors++;
-        } finally {
-          client.release();
-        }
-      } catch (e) {
-        console.error(`[backfill-bilibili-person] outer ${noteId}:`, e.message);
-        stats.errors++;
-      }
-    }
-
-    await repairLegacyPersonCardsInCollection(uid, personColId, dryRun, stats);
-  }
-
-  return stats;
-}
-
-/** @param {unknown} tags */
-function clipPresetTypeForTags(tags) {
-  if (!Array.isArray(tags)) return null;
-  const hasBili = tags.some((t) => String(t).toLowerCase() === "bilibili");
-  const hasXhs = tags.some((t) => t === "小红书");
-  if (hasBili) return "post_bilibili";
-  if (hasXhs) return "post_xhs";
-  return null;
-}
-
-/** @param {unknown} tags */
-function stripClipSourceTags(tags) {
-  if (!Array.isArray(tags)) return [];
-  return tags.filter((t) => t !== "小红书" && String(t).toLowerCase() !== "bilibili");
-}
-
-/** @param {unknown} raw */
-function readLegacyClipUrlFromProps(raw) {
-  const props = Array.isArray(raw) ? raw : [];
-  for (const p of props) {
-    if (!p || typeof p !== "object" || p.type !== "url") continue;
-    const id = typeof p.id === "string" ? p.id : "";
-    if (id === "sf-xhs-url" || id === "sf-bili-url" || id === "sf-clip-url") {
-      const v = p.value;
-      if (typeof v === "string" && v.trim()) return v.trim();
-    }
-  }
-  for (const p of props) {
-    if (!p || typeof p !== "object" || p.type !== "url") continue;
-    const name = typeof p.name === "string" ? p.name.trim() : "";
-    if (name === "链接") {
-      const v = p.value;
-      if (typeof v === "string" && v.trim()) return v.trim();
-    }
-  }
-  return "";
-}
-
-/** @param {unknown} raw */
-function readLegacyClipAuthorTextFromProps(raw) {
-  const fromBili = bilibiliAuthorFromCustomProps(raw);
-  if (fromBili) return fromBili;
-  const props = Array.isArray(raw) ? raw : [];
-  for (const p of props) {
-    if (!p || typeof p !== "object") continue;
-    if (
-      (p.id === "sf-xhs-author" || p.id === "sf-bili-author") &&
-      p.type === "cardLink" &&
-      typeof p.seedTitle === "string" &&
-      p.seedTitle.trim()
-    ) {
-      return p.seedTitle.trim();
-    }
-    if (p.id === "sf-xhs-author" && p.type === "text") {
-      const v = p.value;
-      if (typeof v === "string" && v.trim()) return v.trim();
-    }
-    if (typeof p.name === "string" && p.name.trim() === "作者" && p.type === "text") {
-      const v = p.value;
-      if (typeof v === "string" && v.trim()) return v.trim();
-    }
-  }
-  return "";
-}
-
-/** @param {unknown} raw */
-function readLegacyClipTitleFromProps(raw) {
-  const props = Array.isArray(raw) ? raw : [];
-  for (const p of props) {
-    if (!p || typeof p !== "object") continue;
-    if (p.id === "sf-clip-title" && p.type === "text") {
-      const v = p.value;
-      if (typeof v === "string" && v.trim()) return v.trim();
-    }
-  }
-  return "";
-}
-
-/** 扩展/旧正文首段 <p><strong>标题</strong></p> */
-function titleFromClipNoteHtml(html) {
-  const raw = String(html ?? "");
-  const m = raw.match(/<p>\s*<strong>([\s\S]*?)<\/strong>\s*<\/p>/i);
-  if (!m) return "";
-  return String(m[1] ?? "")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function clipHtmlStripLeadingTitleParagraph(html) {
-  return String(html ?? "")
-    .replace(/^\s*<p>\s*<strong>[\s\S]*?<\/strong>\s*<\/p>\s*/i, "")
-    .trim();
-}
-
-/**
- * 为已存在子类字段的剪藏卡补父级「链接」「标题」，不删其它自定义字段。
- * @param {unknown[]} rawProps
- * @param {string} url
- * @param {string} clipTitle
- */
-function patchClipParentFieldsIntoProps(rawProps, url, clipTitle) {
-  const list = Array.isArray(rawProps) ? [...rawProps] : [];
-  const u = typeof url === "string" ? url.trim() : "";
-  const t = typeof clipTitle === "string" ? clipTitle.trim() : "";
-  const idxAuthor = list.findIndex(
-    (p) =>
-      p &&
-      (p.id === "sf-xhs-author" ||
-        p.id === "sf-bili-author" ||
-        p.id === "sf-xhs-url" ||
-        p.id === "sf-bili-url")
-  );
-  const anchor = idxAuthor >= 0 ? idxAuthor : list.length;
-
-  if (u && !list.some((p) => p && p.id === "sf-clip-url")) {
-    list.splice(anchor, 0, {
-      id: "sf-clip-url",
-      name: "链接",
-      type: "url",
-      value: u,
+    items.push({
+      colId,
+      cardId: fileCardId,
+      // 文件卡只有一项主文件，mediaIndex 固定 0
+      mediaIndex: 0,
+      item: cardFileRowToMediaItem(row),
     });
   }
-  if (t && !list.some((p) => p && p.id === "sf-clip-title")) {
-    const clipUrlIdx = list.findIndex((p) => p && p.id === "sf-clip-url");
-    const ins = clipUrlIdx >= 0 ? clipUrlIdx + 1 : anchor;
-    list.splice(ins, 0, {
-      id: "sf-clip-title",
-      name: "标题",
-      type: "text",
-      value: t,
-    });
-  }
-  return list;
+
+  const total = await countCardAttachments(ownerKey, opts.filterKey);
+  return { items, total };
 }
 
-/**
- * @param {string} presetTypeId
- * @param {string} url
- * @param {string} authorText
- * @param {string} clipTitle
- */
-function buildPresetClipCustomPropsArray(presetTypeId, url, authorText, clipTitle) {
-  const u = typeof url === "string" ? url.trim() : "";
-  const a = typeof authorText === "string" ? authorText.trim() : "";
-  const tit = typeof clipTitle === "string" ? clipTitle.trim() : "";
-  const clipBase = [
-    { id: "sf-clip-url", name: "链接", type: "url", value: u || null },
-    { id: "sf-clip-title", name: "标题", type: "text", value: tit || null },
-  ];
-  if (presetTypeId === "post_xhs") {
-    return [
-      ...clipBase,
-      {
-        id: "sf-xhs-author",
-        name: "作者",
-        type: "cardLink",
-        value: null,
-        cardLinkFromEdge: "creator",
-        ...(a ? { seedTitle: a } : {}),
-      },
-    ];
-  }
-  if (presetTypeId === "post_bilibili") {
-    return [
-      ...clipBase,
-      {
-        id: "sf-bili-author",
-        name: "UP 主",
-        type: "cardLink",
-        value: null,
-        cardLinkFromEdge: "creator",
-        ...(a ? { seedTitle: a } : {}),
-      },
-    ];
-  }
-  return [];
+export async function attachmentStorageBytesByUserId() {
+  const r = await query(
+    `SELECT fc.user_id, COALESCE(SUM(cf.bytes), 0)::bigint AS bytes
+       FROM cards fc
+       JOIN card_types ct ON ct.id = fc.card_type_id
+       JOIN card_files  cf ON cf.card_id = fc.id
+      WHERE fc.trashed_at IS NULL AND ct.kind = 'file'
+   GROUP BY fc.user_id`
+  );
+  const out = new Map();
+  for (const row of r.rows) out.set(row.user_id, Number(row.bytes || 0));
+  return out;
 }
 
-/**
- * @param {unknown} raw
- * @param {string} presetTypeId
- * @param {object[]} baseProps
- */
-function mergeAuthorCardLinkFromLegacy(raw, presetTypeId, baseProps) {
-  const idAuthor =
-    presetTypeId === "post_bilibili" ? "sf-bili-author" : "sf-xhs-author";
-  const props = Array.isArray(raw) ? raw : [];
-  const existing = props.find(
-    (p) =>
-      p &&
-      typeof p === "object" &&
-      p.id === idAuthor &&
-      p.type === "cardLink" &&
-      p.value &&
-      typeof p.value === "object" &&
-      typeof p.value.cardId === "string" &&
-      p.value.cardId.trim()
-  );
-  if (!existing) return baseProps;
-  return baseProps.map((p) =>
-    p.id === idAuthor ? { ...existing, name: p.name } : p
-  );
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// Stage C/D 占位导出（未实现；访问时快速失败）
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Stage B: 单条附件级 API
+// ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * 将带扩展写入的「小红书」「bilibili」标签的笔记迁入剪藏预设子类（post_xhs / post_bilibili），
- * 去掉来源标签，写入 schema 字段 id，并从「未归类」移除归属（若存在）。
- *
- * @param {string|null} userId
- * @param {{ dryRun?: boolean }} [opts]
+ * 基于 note 的一条 media 元数据"显式"创建一张独立文件卡，并与 note 建 attachment 链。
+ * 与旧 API 行为一致：返回 { fileCardId, noteCardId }；若同 url 已有附件卡则复用。
+ * 还会把文件卡加入 placementCollectionId 合集（若提供）。
  */
-export async function migrateClipTaggedNotesToPresetCards(userId, opts = {}) {
-  const dryRun = opts.dryRun === true;
-  /** @type {{ scanned: number, migrated: number, skippedNoPreset: number, skippedNoKind: number, errors: number, backfillTitles: number }} */
-  const stats = {
-    scanned: 0,
-    migrated: 0,
-    skippedNoPreset: 0,
-    skippedNoKind: 0,
-    errors: 0,
-    backfillTitles: 0,
-  };
+export async function createFileCardForNoteMedia(userIdIn, noteCardId, body) {
+  const userId = await resolveUserId(userIdIn);
+  const placementCollectionId =
+    typeof body?.placementCollectionId === "string"
+      ? body.placementCollectionId.trim()
+      : "";
+  const raw = body?.media;
+  if (!placementCollectionId || !raw || typeof raw !== "object") {
+    throw new Error("缺少 placementCollectionId 或 media");
+  }
+  const item = normalizeIncomingMediaItem(raw);
+  if (!item) throw new Error("media.url 为必填");
 
-  const { sql: cOwnSql, params: cOwnParams } = cardOwnershipCondition(userId, 1);
-  const listRes = await query(
-    `SELECT c.id, c.tags, c.custom_props, c.text
-     FROM cards c
-     WHERE c.trashed_at IS NULL
-       AND (c.object_kind IS NULL OR c.object_kind = 'note')
-       AND (
-         EXISTS (SELECT 1 FROM unnest(c.tags) AS t(tag) WHERE tag = '小红书')
-         OR EXISTS (SELECT 1 FROM unnest(c.tags) AS t(tag) WHERE lower(tag) = 'bilibili')
-       )
-       AND (${cOwnSql.replace(/\buser_id\b/g, "c.user_id")})`,
-    [...cOwnParams]
+  // 验证 note 存在且属于当前用户
+  const noteRes = await query(
+    `SELECT id FROM cards WHERE id = $1 AND user_id = $2 AND trashed_at IS NULL`,
+    [noteCardId, userId]
   );
+  if (noteRes.rowCount === 0) throw new Error("笔记不存在或无权限");
 
-  for (const row of listRes.rows) {
-    stats.scanned++;
-    const tags = row.tags ?? [];
-    const presetType = clipPresetTypeForTags(tags);
-    if (!presetType) {
-      stats.skippedNoKind++;
-      continue;
-    }
-    const tgtCol = await getPresetCollectionId(userId, presetType);
-    if (!tgtCol) {
-      stats.skippedNoPreset++;
-      continue;
-    }
+  // 验证目标合集属于当前用户
+  const colRes = await query(
+    `SELECT id FROM collections WHERE id = $1 AND user_id = $2`,
+    [placementCollectionId, userId]
+  );
+  if (colRes.rowCount === 0) throw new Error("目标合集不存在或无权限");
 
-    if (dryRun) {
-      stats.migrated++;
-      continue;
-    }
+  const client = await getClient();
+  try {
+    await client.query("BEGIN");
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1::text))`, [
+      `fileobj:${noteCardId}|${item.url}`,
+    ]);
 
-    const client = await getClient();
-    try {
-      await client.query("BEGIN");
-      const url = readLegacyClipUrlFromProps(row.custom_props);
-      const author = readLegacyClipAuthorTextFromProps(row.custom_props);
-      const fromHtmlTitle = titleFromClipNoteHtml(row.text);
-      const clipTitle =
-        readLegacyClipTitleFromProps(row.custom_props) || fromHtmlTitle;
-      let nextProps = buildPresetClipCustomPropsArray(
-        presetType,
-        url,
-        author,
-        clipTitle
+    // 若 note 已有指向同 url 的 attachment 链 → 复用
+    const existed = await client.query(
+      `SELECT l.to_card_id
+         FROM card_links l
+         JOIN card_files cf ON cf.card_id = l.to_card_id
+        WHERE l.from_card_id = $1 AND l.property_key = 'attachment'
+          AND cf.url = $2
+        LIMIT 1`,
+      [noteCardId, item.url]
+    );
+    let fileCardId = existed.rows[0]?.to_card_id;
+
+    if (!fileCardId) {
+      fileCardId = await insertFileCard(
+        (sql, params) => client.query(sql, params),
+        userId,
+        item
       );
-      nextProps = mergeAuthorCardLinkFromLegacy(row.custom_props, presetType, nextProps);
-      const nextTags = stripClipSourceTags(tags);
-      let nextText = row.text;
-      if (fromHtmlTitle) {
-        const stripped = clipHtmlStripLeadingTitleParagraph(row.text);
-        nextText = stripped || "<p>（无正文）</p>";
-      }
-
-      await client.query(
-        `UPDATE cards
-         SET object_kind = $2, tags = $3, custom_props = $4::jsonb, text = $5
-         WHERE id = $1 AND trashed_at IS NULL`,
-        [row.id, presetType, nextTags, JSON.stringify(nextProps), nextText]
-      );
-
-      const orderRes = await client.query(
-        `SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM card_placements WHERE collection_id = $1`,
-        [tgtCol]
-      );
-      const sortOrder = orderRes.rows[0].next;
+      // 放入 placement 合集
+      const ord = (
+        await client.query(
+          `SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM card_placements WHERE collection_id = $1`,
+          [placementCollectionId]
+        )
+      ).rows[0].next;
       await client.query(
         `INSERT INTO card_placements (card_id, collection_id, pinned, sort_order)
-         VALUES ($1, $2, false, $3)
-         ON CONFLICT (card_id, collection_id) DO NOTHING`,
-        [row.id, tgtCol, sortOrder]
+         VALUES ($1,$2,false,$3)`,
+        [fileCardId, placementCollectionId, ord]
       );
-
+      // note → file 附件链
+      const tr = await client.query(`SELECT card_type_id FROM cards WHERE id = $1`, [fileCardId]);
+      const nextSort = (
+        await client.query(
+          `SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM card_links
+            WHERE from_card_id = $1 AND property_key = 'attachment'`,
+          [noteCardId]
+        )
+      ).rows[0].next;
       await client.query(
-        `DELETE FROM card_placements WHERE card_id = $1 AND collection_id = $2`,
-        [row.id, LOOSE_NOTES_COLLECTION_ID]
+        `INSERT INTO card_links (from_card_id, property_key, to_card_id, target_type_id, user_id, sort_order)
+         VALUES ($1,'attachment',$2,$3,$4,$5)
+         ON CONFLICT (from_card_id, property_key, to_card_id) DO NOTHING`,
+        [noteCardId, fileCardId, tr.rows[0]?.card_type_id || null, userId, nextSort]
       );
-
-      await client.query("COMMIT");
-      stats.migrated++;
-      runAutoLinkRulesForCard(userId, row.id).catch((e) =>
-        console.error("[migrate-clip-tagged] auto-link:", e.message)
-      );
-    } catch (e) {
-      await safeRollback(client);
-      console.error(`[migrate-clip-tagged] card ${row.id}:`, e.message);
-      stats.errors++;
-    } finally {
-      client.release();
     }
-  }
 
-  if (!dryRun) {
-    const bf = await backfillClipPresetTitlesFromHtml(userId);
-    stats.backfillTitles = bf.updated;
+    await client.query("COMMIT");
+    return { fileCardId, noteCardId };
+  } catch (e) {
+    await safeRollback(client);
+    throw e;
+  } finally {
+    client.release();
   }
-
-  return stats;
 }
 
 /**
- * 已为剪藏子类、但缺少父级「标题」的旧数据：从正文首段 strong 补 sf-clip-title（及缺省时 sf-clip-url）。
- * @param {string|null} userId
- * @returns {Promise<{ updated: number }>}
+ * 只填空：若探测到 durationSec/sizeBytes/widthPx/heightPx 等，更新到目标附件卡的 card_files
+ * + 同步把 widthPx/heightPx/durationSec 写到"该附件卡" cards.custom_props（前端需要的话）。
+ * 兼容旧路径的 index 语义：sort_order = index 的 attachment link 的目标 file 卡。
  */
-export async function backfillClipPresetTitlesFromHtml(userId) {
-  let updated = 0;
-  const { sql: cOwnSql, params: cOwnParams } = cardOwnershipCondition(userId, 1);
-  const listRes = await query(
-    `SELECT c.id, c.text, c.custom_props, c.object_kind
-     FROM cards c
-     WHERE c.trashed_at IS NULL
-       AND c.object_kind IN ('post_xhs', 'post_bilibili')
-       AND (${cOwnSql.replace(/\buser_id\b/g, "c.user_id")})`,
-    [...cOwnParams]
-  );
+export async function patchCardMediaItemAtIndex(userIdIn, cardId, mediaIndex, patch) {
+  const userId = await resolveUserId(userIdIn);
+  const cid = String(cardId || "").trim();
+  if (!cid) throw new Error("缺少卡片 id");
+  const idx = Math.floor(Number(mediaIndex));
+  if (!Number.isFinite(idx) || idx < 0) throw new Error("附件索引无效");
 
-  for (const row of listRes.rows) {
-    const props = Array.isArray(row.custom_props) ? row.custom_props : [];
-    const hasTitle = props.some(
-      (p) =>
-        p &&
-        p.id === "sf-clip-title" &&
-        typeof p.value === "string" &&
-        p.value.trim()
+  // 所属卡必须属于当前用户
+  const own = await query(
+    `SELECT 1 FROM cards WHERE id = $1 AND user_id = $2 AND trashed_at IS NULL`,
+    [cid, userId]
+  );
+  if (own.rowCount === 0) throw new Error("笔记不存在或无权限");
+
+  // 定位目标 file 卡：优先 attachment link at sort_order=idx（note 场景）；
+  // 若该卡本身就是 file 卡（单附件），idx 必须为 0
+  let targetFileCardId = null;
+  const lnk = await query(
+    `SELECT to_card_id FROM card_links
+      WHERE from_card_id = $1 AND property_key = 'attachment' AND sort_order = $2
+      LIMIT 1`,
+    [cid, idx]
+  );
+  if (lnk.rowCount > 0) {
+    targetFileCardId = lnk.rows[0].to_card_id;
+  } else if (idx === 0) {
+    const self = await query(
+      `SELECT 1 FROM card_files WHERE card_id = $1`,
+      [cid]
     );
-    if (hasTitle) continue;
-    const fromHtml = titleFromClipNoteHtml(row.text);
-    if (!fromHtml) continue;
-    const url = readLegacyClipUrlFromProps(props);
-    const nextProps = patchClipParentFieldsIntoProps(props, url, fromHtml);
-    const nextText =
-      clipHtmlStripLeadingTitleParagraph(row.text) || "<p>（无正文）</p>";
-    try {
-      await query(
-        `UPDATE cards SET custom_props = $2::jsonb, text = $3
-         WHERE id = $1 AND trashed_at IS NULL`,
-        [row.id, JSON.stringify(nextProps), nextText]
-      );
-      updated++;
-    } catch (e) {
-      console.error(`[backfill-clip-title] card ${row.id}:`, e.message);
+    if (self.rowCount > 0) targetFileCardId = cid;
+  }
+  if (!targetFileCardId) throw new Error("附件索引无效");
+
+  const p = patch && typeof patch === "object" ? patch : {};
+
+  // 1) card_files.bytes（仅在当前为空时写入）
+  let updatedBytes = false;
+  if (
+    typeof p.sizeBytes === "number" &&
+    Number.isFinite(p.sizeBytes) &&
+    p.sizeBytes >= 0 &&
+    p.sizeBytes <= Number.MAX_SAFE_INTEGER
+  ) {
+    const r = await query(
+      `UPDATE card_files SET bytes = $2 WHERE card_id = $1 AND (bytes IS NULL OR bytes = 0)`,
+      [targetFileCardId, Math.floor(p.sizeBytes)]
+    );
+    updatedBytes = r.rowCount > 0;
+  }
+
+  // 2) duration / resolution → 写到对应 schema 字段（与 catalog 一致）
+  // 取目标卡 preset_slug，决定写哪条 schema field id
+  const tt = await query(
+    `SELECT ct.preset_slug FROM cards c JOIN card_types ct ON ct.id = c.card_type_id WHERE c.id = $1`,
+    [targetFileCardId]
+  );
+  const slug = tt.rows[0]?.preset_slug || "";
+  const propsToSet = []; // [{id, name, type, value}]
+
+  if (
+    typeof p.durationSec === "number" &&
+    Number.isFinite(p.durationSec) &&
+    p.durationSec >= 0 &&
+    p.durationSec <= 86400000
+  ) {
+    if (slug === "file_video") {
+      propsToSet.push({
+        id: "sf-vid-duration-sec",
+        name: "时长（秒）",
+        type: "number",
+        value: Math.round(p.durationSec),
+      });
+    } else if (slug === "file_audio") {
+      propsToSet.push({
+        id: "sf-aud-duration-sec",
+        name: "时长（秒）",
+        type: "number",
+        value: Math.round(p.durationSec),
+      });
     }
   }
-  return { updated };
-}
+  if (
+    typeof p.widthPx === "number" &&
+    Number.isFinite(p.widthPx) &&
+    p.widthPx > 0 &&
+    p.widthPx <= 32767 &&
+    typeof p.heightPx === "number" &&
+    Number.isFinite(p.heightPx) &&
+    p.heightPx > 0 &&
+    p.heightPx <= 32767 &&
+    slug.startsWith("file_")
+  ) {
+    propsToSet.push({
+      id: "sf-file-resolution",
+      name: "分辨率",
+      type: "text",
+      value: `${Math.round(p.widthPx)}x${Math.round(p.heightPx)}`,
+    });
+    if (slug === "file_video") {
+      // 兼容旧读取逻辑：视频继续补写历史字段
+      propsToSet.push({
+        id: "sf-vid-resolution",
+        name: "分辨率",
+        type: "text",
+        value: `${Math.round(p.widthPx)}x${Math.round(p.heightPx)}`,
+      });
+    }
+  }
 
-/**
- * 将仍留在 cards.related_refs JSON 中的引用写入 card_links（双向 related），并清空 JSON 列。
- * 供旧库或未跑全量迁移的实例一次性执行。
- *
- * @param {string|null} userId
- * @returns {Promise<{ withJson: number, migrated: number }>}
- */
-export async function migrateRelatedRefsJsonToCardLinks(userId) {
-  const { sql: cUidSql, params: cUidParams } = cardOwnershipCondition(userId, 1);
-  const res = await query(
-    `SELECT id, related_refs FROM cards
-     WHERE (${cUidSql}) AND trashed_at IS NULL
-       AND jsonb_array_length(COALESCE(related_refs, '[]'::jsonb)) > 0`,
-    cUidParams
-  );
-  let migrated = 0;
-  for (const row of res.rows) {
-    const raw = row.related_refs;
-    const refs = [];
-    if (Array.isArray(raw)) {
-      for (const r of raw) {
-        const cardId = r && typeof r.cardId === "string" ? r.cardId.trim() : "";
-        if (!cardId) continue;
-        const colId =
-          r && typeof r.colId === "string" && r.colId.trim() ? r.colId.trim() : undefined;
-        refs.push(colId ? { colId, cardId } : { cardId });
+  let updatedProps = false;
+  if (propsToSet.length > 0) {
+    const cur = await query(
+      `SELECT custom_props FROM cards WHERE id = $1`,
+      [targetFileCardId]
+    );
+    const arr = Array.isArray(cur.rows[0]?.custom_props) ? cur.rows[0].custom_props.slice() : [];
+    let changed = false;
+    for (const np of propsToSet) {
+      const existing = arr.find((x) => x?.id === np.id);
+      if (!existing) {
+        arr.push(np);
+        changed = true;
+      } else if (existing.value === null || existing.value === undefined || existing.value === "") {
+        Object.assign(existing, np);
+        changed = true;
       }
     }
-    if (refs.length === 0) continue;
-    const client = await getClient();
-    try {
-      await syncCardRelatedLinksWithClient(client, userId, row.id, refs);
-      migrated++;
-    } catch (e) {
-      console.error(`[migrate-related-refs-json] card ${row.id}:`, e.message);
-    } finally {
-      client.release();
+    if (changed) {
+      await query(`UPDATE cards SET custom_props = $2::jsonb WHERE id = $1`, [
+        targetFileCardId,
+        JSON.stringify(arr),
+      ]);
+      updatedProps = true;
     }
   }
-  return { withJson: res.rowCount, migrated };
+
+  return { updated: updatedBytes || updatedProps };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Stage B: 批量替换树（/api/collections PUT）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 最小可用版：清掉该用户所有 collections（及 placements/links 级联）并按新树重建。
+ * cards 表不清空（避免误删跨集合数据），仅重建归属与新集合。导入场景如有需要可扩展。
+ */
+export async function replaceCollectionsTree(userIdIn, collectionsArray) {
+  const userId = await resolveUserId(userIdIn);
+  if (!Array.isArray(collectionsArray)) throw new Error("collectionsArray 须为数组");
+
+  const client = await getClient();
+  try {
+    await client.query("BEGIN");
+    await client.query("SET CONSTRAINTS ALL DEFERRED");
+    await client.query(`DELETE FROM collections WHERE user_id = $1`, [userId]);
+
+    const walker = async (nodes, parentId) => {
+      for (let i = 0; i < nodes.length; i += 1) {
+        const node = nodes[i];
+        if (!node || typeof node !== "object") continue;
+        const id = String(node.id || "").trim();
+        if (!id) continue;
+        const name = String(node.name ?? "");
+        const dotColor = String(node.dotColor ?? "");
+        const description = String(node.hint ?? "");
+        await client.query(
+          `INSERT INTO collections (id, user_id, parent_id, name, description, dot_color, sort_order)
+           VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+          [id, userId, parentId, name, description, dotColor, i]
+        );
+        // 归属行：如果 node.cards 里有 card id 且存在于当前用户的 cards，建 placement
+        const cardList = Array.isArray(node.cards) ? node.cards : [];
+        for (let ci = 0; ci < cardList.length; ci += 1) {
+          const c = cardList[ci];
+          if (!c || typeof c !== "object") continue;
+          const cid = String(c.id || "").trim();
+          if (!cid) continue;
+          const exists = await client.query(
+            `SELECT 1 FROM cards WHERE id = $1 AND user_id = $2`,
+            [cid, userId]
+          );
+          if (exists.rowCount === 0) continue;
+          await client.query(
+            `INSERT INTO card_placements (card_id, collection_id, pinned, sort_order)
+             VALUES ($1,$2,$3,$4)
+             ON CONFLICT (card_id, collection_id) DO UPDATE SET
+               pinned = EXCLUDED.pinned, sort_order = EXCLUDED.sort_order`,
+            [cid, id, !!c.pinned, ci]
+          );
+        }
+        if (Array.isArray(node.children) && node.children.length > 0) {
+          await walker(node.children, id);
+        }
+      }
+    };
+    await walker(collectionsArray, null);
+
+    await client.query("COMMIT");
+  } catch (e) {
+    await safeRollback(client);
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Stage C: 回收站
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function listTrashedNotes(ownerKey) {
+  const userId = await resolveUserId(ownerKey === "__single__" ? null : ownerKey);
+  const res = await query(
+    `SELECT c.id, c.title, c.body, c.minutes_of_day, c.added_on, c.tags, c.custom_props,
+            c.trashed_at, c.trash_snapshot_json,
+            ct.preset_slug
+       FROM cards c
+       JOIN card_types ct ON ct.id = c.card_type_id
+      WHERE c.user_id = $1 AND c.trashed_at IS NOT NULL
+      ORDER BY c.trashed_at DESC`,
+    [userId]
+  );
+  const ids = res.rows.map((r) => r.id);
+  const personIds = res.rows.filter((r) => r.preset_slug === "person").map((r) => r.id);
+  const fileIds = res.rows
+    .filter((r) => (r.preset_slug || "").startsWith("file"))
+    .map((r) => r.id);
+  const [
+    reminders,
+    mediaByCard,
+    relatedByCard,
+    personWorksByCard,
+    fileSourceByCard,
+  ] = await Promise.all([
+    loadRemindersForCards(ids, query),
+    loadMediaForCards(ids, query),
+    loadRelatedRefsForCards(ids, query),
+    loadPersonWorksForCards(personIds, query),
+    loadFileSourceForCards(fileIds, query),
+  ]);
+  return res.rows.map((r) => {
+    const snap = r.trash_snapshot_json && typeof r.trash_snapshot_json === "object"
+      ? r.trash_snapshot_json
+      : {};
+    return {
+      trashId: r.id,
+      colId: String(snap.colId || ""),
+      colPathLabel: String(snap.pathLabel || ""),
+      card: assembleCardRow(r, {
+        reminders,
+        mediaByCard,
+        relatedByCard,
+        personWorksByCard,
+        fileSourceByCard,
+      }),
+      deletedAt:
+        r.trashed_at instanceof Date
+          ? r.trashed_at.toISOString()
+          : String(r.trashed_at || ""),
+    };
+  });
+}
+
+export async function softTrashCard(ownerKey, row) {
+  const userId = await resolveUserId(ownerKey === "__single__" ? null : ownerKey);
+  const { colId, colPathLabel = "", cardId, deletedAt } = row || {};
+  if (!colId || !cardId) throw new Error("回收站条目缺少 colId 或 card.id");
+
+  const client = await getClient();
+  try {
+    await client.query("BEGIN");
+    const chk = await client.query(
+      `SELECT trashed_at FROM cards WHERE id = $1 AND user_id = $2`,
+      [cardId, userId]
+    );
+    if (chk.rowCount === 0) throw new Error("卡片不存在或无权限");
+    if (chk.rows[0].trashed_at != null) throw new Error("卡片已在回收站中");
+
+    await client.query(`DELETE FROM card_placements WHERE card_id = $1`, [cardId]);
+    const ts = deletedAt ? new Date(deletedAt) : new Date();
+    const snap = { colId: String(colId), pathLabel: String(colPathLabel ?? "") };
+    const up = await client.query(
+      `UPDATE cards SET trashed_at = $1::timestamptz, trash_snapshot_json = $2::jsonb
+        WHERE id = $3 AND user_id = $4 AND trashed_at IS NULL`,
+      [ts.toISOString(), JSON.stringify(snap), cardId, userId]
+    );
+    if (up.rowCount === 0) throw new Error("无法移入回收站");
+    await client.query("COMMIT");
+  } catch (e) {
+    await safeRollback(client);
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+export async function restoreTrashedCard(
+  ownerKey,
+  cardId,
+  targetCollectionId,
+  insertAtStart = false
+) {
+  const userId = await resolveUserId(ownerKey === "__single__" ? null : ownerKey);
+  const colCheck = await query(
+    `SELECT id FROM collections WHERE id = $1 AND user_id = $2`,
+    [targetCollectionId, userId]
+  );
+  if (colCheck.rowCount === 0) throw new Error("合集不存在或无权限");
+
+  const cardChk = await query(
+    `SELECT id FROM cards WHERE id = $1 AND user_id = $2 AND trashed_at IS NOT NULL`,
+    [cardId, userId]
+  );
+  if (cardChk.rowCount === 0) throw new Error("回收站中找不到该笔记或无权恢复");
+
+  let sortOrder;
+  if (insertAtStart) {
+    const minRes = await query(
+      `SELECT MIN(sort_order) AS m FROM card_placements WHERE collection_id = $1`,
+      [targetCollectionId]
+    );
+    const m = minRes.rows[0]?.m;
+    sortOrder = m === null || m === undefined ? 0 : m - 1;
+  } else {
+    const orderRes = await query(
+      `SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM card_placements WHERE collection_id = $1`,
+      [targetCollectionId]
+    );
+    sortOrder = orderRes.rows[0].next;
+  }
+
+  const client = await getClient();
+  try {
+    await client.query("BEGIN");
+    const up = await client.query(
+      `UPDATE cards SET trashed_at = NULL, trash_snapshot_json = NULL
+        WHERE id = $1 AND user_id = $2 AND trashed_at IS NOT NULL`,
+      [cardId, userId]
+    );
+    if (up.rowCount === 0) throw new Error("恢复失败");
+    await client.query(
+      `INSERT INTO card_placements (card_id, collection_id, pinned, sort_order)
+       VALUES ($1,$2,false,$3)
+       ON CONFLICT (card_id, collection_id) DO NOTHING`,
+      [cardId, targetCollectionId, sortOrder]
+    );
+    await client.query("COMMIT");
+  } catch (e) {
+    await safeRollback(client);
+    throw e;
+  } finally {
+    client.release();
+  }
+
+  return await readCardForApi(userId, cardId);
+}
+
+export async function deleteTrashedNote(ownerKey, trashId) {
+  const userId = await resolveUserId(ownerKey === "__single__" ? null : ownerKey);
+  const res = await query(
+    `DELETE FROM cards WHERE id = $1 AND user_id = $2 AND trashed_at IS NOT NULL`,
+    [trashId, userId]
+  );
+  if (res.rowCount === 0) throw new Error("回收站记录不存在或无权限");
+}
+
+export async function clearTrashedNotes(ownerKey) {
+  const userId = await resolveUserId(ownerKey === "__single__" ? null : ownerKey);
+  await query(
+    `DELETE FROM cards WHERE user_id = $1 AND trashed_at IS NOT NULL`,
+    [userId]
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Stage C: 图谱查询（card_links 多类型多跳遍历）
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function queryCardGraph(userIdIn, rootCardId, opts = {}) {
+  const userId = await resolveUserId(userIdIn);
+  const maxDepth = Math.min(Math.max(parseInt(String(opts.depth ?? 1), 10) || 1, 1), 4);
+  const linkTypes =
+    Array.isArray(opts.linkTypes) && opts.linkTypes.length > 0
+      ? opts.linkTypes
+      : ["related", "attachment", "creator", "source", "source_url", "contains", "up主"];
+
+  const rootOk = await query(
+    `SELECT c.id, ct.preset_slug FROM cards c
+       JOIN card_types ct ON ct.id = c.card_type_id
+      WHERE c.id = $1 AND c.user_id = $2 AND c.trashed_at IS NULL`,
+    [rootCardId, userId]
+  );
+  if (rootOk.rowCount === 0) throw new Error("卡片不存在或无权限");
+
+  /** @type {Map<string, { id: string, objectKind: string }>} */
+  const nodes = new Map();
+  nodes.set(rootCardId, {
+    id: rootCardId,
+    objectKind: slugToLegacyObjectKind(rootOk.rows[0].preset_slug || "note"),
+  });
+  const edges = [];
+  const seenEdge = new Set();
+  let frontier = [rootCardId];
+  const dist = new Map([[rootCardId, 0]]);
+
+  for (let level = 0; level < maxDepth; level += 1) {
+    if (frontier.length === 0) break;
+    const lr = await query(
+      `SELECT from_card_id, to_card_id, property_key
+         FROM card_links
+        WHERE user_id = $1
+          AND property_key = ANY($2::text[])
+          AND (from_card_id = ANY($3::text[]) OR to_card_id = ANY($3::text[]))`,
+      [userId, linkTypes, frontier]
+    );
+
+    const next = [];
+    for (const r of lr.rows) {
+      const a = r.from_card_id;
+      const b = r.to_card_id;
+      const ek = a < b ? `${a}|${b}|${r.property_key}` : `${b}|${a}|${r.property_key}`;
+      if (!seenEdge.has(ek)) {
+        seenEdge.add(ek);
+        edges.push({ from: a, to: b, linkType: r.property_key });
+      }
+      const other = frontier.includes(a) ? b : a;
+      if (!nodes.has(other)) {
+        const oc = await query(
+          `SELECT c.id, ct.preset_slug FROM cards c
+             JOIN card_types ct ON ct.id = c.card_type_id
+            WHERE c.id = $1 AND c.user_id = $2 AND c.trashed_at IS NULL`,
+          [other, userId]
+        );
+        if (oc.rowCount === 0) continue;
+        nodes.set(other, {
+          id: other,
+          objectKind: slugToLegacyObjectKind(oc.rows[0].preset_slug || "note"),
+        });
+      }
+      if (!dist.has(other)) {
+        dist.set(other, level + 1);
+        next.push(other);
+      }
+    }
+    frontier = next;
+  }
+
+  return { root: rootCardId, maxDepth, linkTypes, nodes: [...nodes.values()], edges };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Stage C: schema 继承解析 + 预设合集查找
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 解析卡片有效 schema：从 cards.card_type_id 出发沿 parent_type_id 走到根，
+ * 自顶向下合并 schema_json（子覆盖父）。
+ */
+export async function getEffectiveSchemaForCard(userIdIn, cardId) {
+  const userId = await resolveUserId(userIdIn);
+  const cur = await query(
+    `SELECT card_type_id FROM cards WHERE id = $1 AND user_id = $2 AND trashed_at IS NULL`,
+    [cardId, userId]
+  );
+  if (cur.rowCount === 0) throw new Error("卡片不存在或无权限");
+  const startTypeId = cur.rows[0].card_type_id;
+
+  // 用 recursive CTE 取整条链
+  const chain = await query(
+    `WITH RECURSIVE up AS (
+       SELECT id, parent_type_id, name, kind, schema_json, 0 AS depth
+         FROM card_types WHERE id = $1
+       UNION ALL
+       SELECT t.id, t.parent_type_id, t.name, t.kind, t.schema_json, up.depth + 1
+         FROM card_types t JOIN up ON t.id = up.parent_type_id
+     )
+     SELECT id, name, kind, schema_json, depth FROM up ORDER BY depth DESC`,
+    [startTypeId]
+  );
+
+  // 合并：父在前、子在后；fields 数组按 id 去重，子覆盖父
+  const fieldsById = new Map();
+  let lastKind = null;
+  for (const row of chain.rows) {
+    lastKind = row.kind;
+    const sj = row.schema_json;
+    if (!sj || typeof sj !== "object") continue;
+    if (Array.isArray(sj.fields)) {
+      for (const f of sj.fields) {
+        if (!f || typeof f !== "object") continue;
+        const key = typeof f.id === "string" ? f.id : typeof f.key === "string" ? f.key : null;
+        if (!key) continue;
+        fieldsById.set(key, f);
+      }
+    }
+  }
+  // 按 order 排序，使前端展示稳定
+  const fields = [...fieldsById.values()].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  return {
+    cardTypeId: startTypeId,
+    kind: lastKind,
+    fields,
+    autoLinkRules: [],
+  };
+}
+
+/**
+ * 旧 API：按 legacy presetTypeId（'person' / 'post_xhs' / ...）查找用户名下的"分类合集"。
+ * 新 schema 下：先映射到 preset_slug → 找用户对应的 card_type → 找 collections.bound_type_id 指向它的合集。
+ */
+export async function getPresetCollectionId(userIdIn, presetTypeIdRaw) {
+  const userId = await resolveUserId(userIdIn);
+  const pid = String(presetTypeIdRaw || "").trim();
+  if (!pid) return null;
+  const r = await query(
+    `SELECT col.id
+       FROM collections col
+       JOIN card_types ct ON ct.id = col.bound_type_id
+      WHERE col.user_id = $1 AND ct.preset_slug = $2
+      ORDER BY col.sort_order ASC LIMIT 1`,
+    [userId, pid]
+  );
+  return r.rows[0]?.id || null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Stage C: 自动链规则引擎
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 卡片创建/更新后调用：依照该卡 card_type 下 enabled 的 card_link_rules，
+ * 按 source_property 抽取候选值（custom_props 的 key、或 tags），
+ * 在用户范围内查找/创建匹配的目标卡，建立 card_links（双向 if 'related'）。
+ *
+ * fire-and-forget 风格：单条规则失败不影响主流程，只打 console 日志。
+ */
+export async function runAutoLinkRulesForCard(userIdIn, cardId) {
+  try {
+    const userId = await resolveUserId(userIdIn);
+    const cardRes = await query(
+      `SELECT c.id, c.user_id, c.card_type_id, c.title, c.body, c.tags, c.custom_props,
+              ct.kind, ct.preset_slug
+         FROM cards c JOIN card_types ct ON ct.id = c.card_type_id
+        WHERE c.id = $1 AND c.user_id = $2 AND c.trashed_at IS NULL`,
+      [cardId, userId]
+    );
+    if (cardRes.rowCount === 0) return;
+    const card = cardRes.rows[0];
+
+    // (1) DB 表里的 card_link_rules（按源卡 card_type 沿祖先链匹配）
+    const rulesRes = await query(
+      `WITH RECURSIVE up AS (
+         SELECT id, parent_type_id FROM card_types WHERE id = $1
+         UNION ALL
+         SELECT t.id, t.parent_type_id FROM card_types t JOIN up ON t.id = up.parent_type_id
+       )
+       SELECT r.* FROM card_link_rules r
+        WHERE r.user_id = $2
+          AND r.enabled = true
+          AND r.source_type_id IN (SELECT id FROM up)
+        ORDER BY r.sort_order ASC, r.id ASC`,
+      [card.card_type_id, userId]
+    );
+
+    const customPropsArr = Array.isArray(card.custom_props) ? card.custom_props : [];
+    const propMap = new Map();
+    for (const p of customPropsArr) {
+      if (!p || typeof p !== "object") continue;
+      if (typeof p.key === "string" && p.key.trim()) {
+        propMap.set(p.key.trim(), p.value);
+      }
+      if (typeof p.id === "string" && p.id.trim()) {
+        propMap.set(p.id.trim(), p.value);
+      }
+    }
+    const tags = Array.isArray(card.tags) ? card.tags : [];
+
+    for (const rule of rulesRes.rows) {
+      try {
+        const candidates = extractRuleCandidates(rule, propMap, tags, card);
+        for (const cand of candidates) {
+          await applyAutoLinkRule(userId, cardId, rule, cand);
+        }
+      } catch (e) {
+        console.warn(`[auto-link] rule ${rule.id} failed:`, e?.message || e);
+      }
+    }
+
+    // (2) users.prefs_json.extraAutoLinkRules —— 用户自定义规则（catalog AutoLinkRule 形态）
+    const prefRes = await query(`SELECT prefs_json FROM users WHERE id = $1`, [userId]);
+    const disabledRuleIds = new Set(
+      Array.isArray(prefRes.rows[0]?.prefs_json?.disabledAutoLinkRuleIds)
+        ? prefRes.rows[0].prefs_json.disabledAutoLinkRuleIds.filter((x) => typeof x === "string")
+        : []
+    );
+    await runBuiltinClipCreatorAutoLink(userId, card, disabledRuleIds);
+    const extraRules = Array.isArray(prefRes.rows[0]?.prefs_json?.extraAutoLinkRules)
+      ? prefRes.rows[0].prefs_json.extraAutoLinkRules
+      : [];
+    for (const rule of extraRules) {
+      try {
+        await applyExtraAutoLinkRule(userId, cardId, rule);
+      } catch (e) {
+        console.warn(`[auto-link] extra rule ${rule?.ruleId} failed:`, e?.message || e);
+      }
+    }
+  } catch (e) {
+    console.warn(`[auto-link] runAutoLinkRulesForCard failed:`, e?.message || e);
+  }
+}
+
+/**
+ * catalog 形态的 AutoLinkRule 执行（用户在笔记设置里"自定义规则"四步表单生成）。
+ * 关键字段：sourceCollectionId / syncSchemaFieldId（源卡 cardLink 字段） /
+ *           targetCollectionId / targetSyncSchemaFieldId（目标卡 cardLink 字段） /
+ *           linkType。
+ *
+ * 行为：
+ *   - 卡保存时检查源卡 syncSchemaFieldId 的 cardLink/cardLinks 值
+ *   - 对每个目标 ref，写双向 card_links；并把源卡引用 append 到目标卡 targetSyncSchemaFieldId
+ */
+async function applyExtraAutoLinkRule(userId, sourceCardId, rule) {
+  if (!rule || typeof rule !== "object") return;
+  const srcColId = String(rule.sourceCollectionId || "").trim();
+  const tgtColId = String(rule.targetCollectionId || "").trim();
+  const srcField = String(rule.syncSchemaFieldId || "").trim();
+  const tgtField = String(rule.targetSyncSchemaFieldId || "").trim();
+  const linkType = String(rule.linkType || "related").trim() || "related";
+  if (!srcColId || !tgtColId || !srcField || !tgtField) return;
+
+  // 源卡必须直接归属 srcColId
+  const inSrc = await query(
+    `SELECT 1 FROM card_placements WHERE card_id = $1 AND collection_id = $2`,
+    [sourceCardId, srcColId]
+  );
+  if (inSrc.rowCount === 0) return;
+
+  // 读源卡 custom_props 找 srcField
+  const cur = await query(
+    `SELECT custom_props FROM cards WHERE id = $1 AND user_id = $2`,
+    [sourceCardId, userId]
+  );
+  const srcProps = Array.isArray(cur.rows[0]?.custom_props) ? cur.rows[0].custom_props : [];
+  const srcVal = srcProps.find((p) => p?.id === srcField)?.value;
+
+  // 解析 cardLink / cardLinks → 目标 ref 列表
+  const targets = [];
+  if (Array.isArray(srcVal)) {
+    for (const v of srcVal) {
+      if (v && typeof v === "object" && typeof v.cardId === "string") targets.push(v);
+    }
+  } else if (srcVal && typeof srcVal === "object" && typeof srcVal.cardId === "string") {
+    targets.push(srcVal);
+  }
+  if (targets.length === 0) return;
+
+  for (const tgt of targets) {
+    const tgtCardId = String(tgt.cardId || "").trim();
+    if (!tgtCardId || tgtCardId === sourceCardId) continue;
+
+    // 目标卡必须直接归属 tgtColId 且属于同用户
+    const tgtOwn = await query(
+      `SELECT c.card_type_id, c.custom_props
+         FROM cards c
+         JOIN card_placements p ON p.card_id = c.id AND p.collection_id = $2
+        WHERE c.id = $1 AND c.user_id = $3 AND c.trashed_at IS NULL`,
+      [tgtCardId, tgtColId, userId]
+    );
+    if (tgtOwn.rowCount === 0) continue;
+    const tgtTypeId = tgtOwn.rows[0].card_type_id;
+    const tgtCp = Array.isArray(tgtOwn.rows[0].custom_props) ? tgtOwn.rows[0].custom_props.slice() : [];
+
+    // 写双向 link
+    const srcType = (await query(`SELECT card_type_id FROM cards WHERE id=$1`, [sourceCardId])).rows[0]?.card_type_id;
+    await query(
+      `INSERT INTO card_links (from_card_id, property_key, to_card_id, target_type_id, user_id, sort_order)
+       VALUES ($1,$2,$3,$4,$5,0)
+       ON CONFLICT DO NOTHING`,
+      [sourceCardId, linkType, tgtCardId, tgtTypeId, userId]
+    );
+    await query(
+      `INSERT INTO card_links (from_card_id, property_key, to_card_id, target_type_id, user_id, sort_order)
+       VALUES ($1,$2,$3,$4,$5,0)
+       ON CONFLICT DO NOTHING`,
+      [tgtCardId, linkType, sourceCardId, srcType || null, userId]
+    );
+
+    // 把源卡引用 append 到目标卡 targetSyncSchemaFieldId
+    const ref = { colId: srcColId, cardId: sourceCardId };
+    const idx = tgtCp.findIndex((p) => p?.id === tgtField);
+    if (idx >= 0) {
+      const prop = tgtCp[idx];
+      if (Array.isArray(prop.value)) {
+        if (!prop.value.some((v) => v?.cardId === sourceCardId)) {
+          prop.value = [...prop.value, ref];
+        }
+      } else if (prop.value && typeof prop.value === "object") {
+        // 单 cardLink：若已指向其他人则不强改；空时设置
+        if (!prop.value.cardId) prop.value = ref;
+      } else {
+        prop.value = ref;
+      }
+    } else {
+      tgtCp.push({ id: tgtField, name: "关联", type: "cardLink", value: ref });
+    }
+    await query(`UPDATE cards SET custom_props = $2::jsonb WHERE id = $1`, [
+      tgtCardId,
+      JSON.stringify(tgtCp),
+    ]);
+  }
+}
+
+const BUILTIN_CLIP_CREATOR_FIELDS = {
+  post_xhs: { fieldId: "sf-xhs-author", ruleId: "xhs-auto-graph" },
+  post_bilibili: { fieldId: "sf-bili-author", ruleId: "bili-auto-graph" },
+};
+
+function personSeedFromProp(prop) {
+  if (!prop || typeof prop !== "object") return "";
+  if (typeof prop.seedTitle === "string" && prop.seedTitle.trim()) {
+    return prop.seedTitle.trim();
+  }
+  if (typeof prop.value === "string" && prop.value.trim()) {
+    return prop.value.trim();
+  }
+  return "";
+}
+
+async function runBuiltinClipCreatorAutoLink(userId, card, disabledRuleIds) {
+  const slug = String(card?.preset_slug || "").trim();
+  const cfg = BUILTIN_CLIP_CREATOR_FIELDS[slug];
+  if (!cfg) return;
+  if (cfg.ruleId && disabledRuleIds.has(cfg.ruleId)) return;
+  const customProps = Array.isArray(card?.custom_props) ? card.custom_props.slice() : [];
+  const propIdx = customProps.findIndex((p) => p?.id === cfg.fieldId);
+  if (propIdx < 0) return;
+  const prop = customProps[propIdx];
+  if (!prop || typeof prop !== "object") return;
+
+  let personCardId =
+    prop.value &&
+    typeof prop.value === "object" &&
+    typeof prop.value.cardId === "string" &&
+    prop.value.cardId.trim()
+      ? prop.value.cardId.trim()
+      : "";
+
+  if (!personCardId) {
+    const seed = personSeedFromProp(prop);
+    if (!seed) return;
+    const personTypeId = await resolvePresetCardTypeId(userId, "person");
+    const hit = await query(
+      `SELECT id FROM cards
+        WHERE user_id = $1 AND card_type_id = $2 AND trashed_at IS NULL AND title = $3
+        ORDER BY created_at ASC LIMIT 1`,
+      [userId, personTypeId, seed]
+    );
+    personCardId = hit.rows[0]?.id || "";
+    if (!personCardId) {
+      personCardId = newCardId("card");
+      await query(
+        `INSERT INTO cards (id, user_id, card_type_id, title, body)
+         VALUES ($1,$2,$3,$4,'')`,
+        [personCardId, userId, personTypeId, seed]
+      );
+      await writeSubtableForKindFromSlug(query, personCardId, "topic");
+      const personCol = await query(
+        `SELECT col.id
+           FROM collections col
+           JOIN card_types ct ON ct.id = col.bound_type_id
+          WHERE col.user_id = $1 AND ct.preset_slug = 'person'
+          ORDER BY col.sort_order ASC
+          LIMIT 1`,
+        [userId]
+      );
+      const personColId = personCol.rows[0]?.id || "";
+      if (personColId) {
+        const ord = (
+          await query(
+            `SELECT COALESCE(MAX(sort_order), -1) + 1 AS next
+               FROM card_placements WHERE collection_id = $1`,
+            [personColId]
+          )
+        ).rows[0]?.next;
+        await query(
+          `INSERT INTO card_placements (card_id, collection_id, pinned, sort_order)
+           VALUES ($1,$2,false,$3)
+           ON CONFLICT (card_id, collection_id) DO NOTHING`,
+          [personCardId, personColId, Number.isFinite(ord) ? ord : 0]
+        );
+      }
+    }
+  }
+
+  if (!personCardId) return;
+
+  const targetType = await query(`SELECT card_type_id FROM cards WHERE id = $1`, [
+    personCardId,
+  ]);
+  await query(
+    `INSERT INTO card_links (from_card_id, property_key, to_card_id, target_type_id, user_id, sort_order)
+     VALUES ($1,'creator',$2,$3,$4,0)
+     ON CONFLICT (from_card_id, property_key, to_card_id) DO NOTHING`,
+    [card.id, personCardId, targetType.rows[0]?.card_type_id || null, userId]
+  );
+
+  let personColId =
+    prop.value &&
+    typeof prop.value === "object" &&
+    typeof prop.value.colId === "string" &&
+    prop.value.colId.trim()
+      ? prop.value.colId.trim()
+      : "";
+  if (!personColId) {
+    const pl = await query(
+      `SELECT collection_id FROM card_placements
+        WHERE card_id = $1
+        ORDER BY sort_order ASC, collection_id ASC
+        LIMIT 1`,
+      [personCardId]
+    );
+    personColId = pl.rows[0]?.collection_id || "";
+  }
+  if (!personColId) {
+    const srcPl = await query(
+      `SELECT collection_id FROM card_placements
+        WHERE card_id = $1
+        ORDER BY sort_order ASC, collection_id ASC
+        LIMIT 1`,
+      [card.id]
+    );
+    personColId = srcPl.rows[0]?.collection_id || "";
+  }
+  const curCardId =
+    prop.value &&
+    typeof prop.value === "object" &&
+    typeof prop.value.cardId === "string"
+      ? prop.value.cardId.trim()
+      : "";
+  const curColId =
+    prop.value &&
+    typeof prop.value === "object" &&
+    typeof prop.value.colId === "string"
+      ? prop.value.colId.trim()
+      : "";
+  if (curCardId !== personCardId || curColId !== personColId) {
+    customProps[propIdx] = {
+      ...prop,
+      type: "cardLink",
+      value: { colId: personColId, cardId: personCardId },
+    };
+    await query(`UPDATE cards SET custom_props = $2::jsonb WHERE id = $1`, [
+      card.id,
+      JSON.stringify(customProps),
+    ]);
+  }
+}
+
+function extractRuleCandidates(rule, propMap, tags, card) {
+  const key = rule.source_property_key;
+  const out = [];
+  // 来自 custom_props
+  if (propMap.has(key)) {
+    const v = propMap.get(key);
+    if (typeof v === "string" && v.trim()) out.push(v.trim());
+    else if (Array.isArray(v)) {
+      for (const x of v) if (typeof x === "string" && x.trim()) out.push(x.trim());
+    }
+  }
+  // 来自 tags（仅当 source_property_key === '__tag__' 或匹配某模式时）
+  if (key === "__tag__" || key === "tags") {
+    for (const t of tags) if (typeof t === "string" && t.trim()) out.push(t.trim());
+  }
+  // 来自标题
+  if (key === "title" && typeof card.title === "string" && card.title.trim()) {
+    out.push(card.title.trim());
+  }
+  return [...new Set(out)];
+}
+
+async function applyAutoLinkRule(userId, fromCardId, rule, candidateText) {
+  if (!rule.target_type_id) return;
+
+  // 找匹配的目标卡
+  const matchSql = (() => {
+    switch (rule.match_strategy) {
+      case "contains_title":
+        return `AND c.title ILIKE '%' || $3 || '%'`;
+      case "alias_tag":
+        return `AND $3 = ANY(c.tags)`;
+      case "exact_title":
+      default:
+        return `AND c.title = $3`;
+    }
+  })();
+
+  let target = await query(
+    `SELECT c.id FROM cards c
+      WHERE c.user_id = $1
+        AND c.card_type_id = $2
+        AND c.trashed_at IS NULL
+        ${matchSql}
+      LIMIT 1`,
+    [userId, rule.target_type_id, candidateText]
+  );
+
+  let targetId = target.rows[0]?.id;
+
+  // 不存在时按 auto_create 决定
+  if (!targetId && rule.auto_create) {
+    targetId = newCardId("card");
+    await query(
+      `INSERT INTO cards (id, user_id, card_type_id, title, body)
+       VALUES ($1,$2,$3,$4,'')`,
+      [targetId, userId, rule.target_type_id, candidateText]
+    );
+    // 写对应子表
+    const tk = await query(`SELECT kind FROM card_types WHERE id = $1`, [rule.target_type_id]);
+    await writeSubtableForKindFromSlug(query, targetId, tk.rows[0]?.kind || "note");
+    // 放入 target_collection_id（若提供）
+    if (rule.target_collection_id) {
+      const ord = (
+        await query(
+          `SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM card_placements WHERE collection_id = $1`,
+          [rule.target_collection_id]
+        )
+      ).rows[0].next;
+      await query(
+        `INSERT INTO card_placements (card_id, collection_id, pinned, sort_order)
+         VALUES ($1,$2,false,$3)
+         ON CONFLICT (card_id, collection_id) DO NOTHING`,
+        [targetId, rule.target_collection_id, ord]
+      );
+    }
+  }
+  if (!targetId || targetId === fromCardId) return;
+
+  await query(
+    `INSERT INTO card_links (from_card_id, property_key, to_card_id, target_type_id, user_id, sort_order)
+     VALUES ($1,$2,$3,$4,$5,0)
+     ON CONFLICT (from_card_id, property_key, to_card_id) DO NOTHING`,
+    [fromCardId, rule.link_property_key, targetId, rule.target_type_id, userId]
+  );
+}
+
+// 一次性迁移函数：v2 不再保留。保留导出以免 import 报错，但调用即报错。
+export const batchMigrateAttachmentsToFileCards = notImplemented(
+  "removed",
+  "batchMigrateAttachmentsToFileCards"
+);
+export const migrateRelatedRefsJsonToCardLinks = notImplemented(
+  "removed",
+  "migrateRelatedRefsJsonToCardLinks"
+);
+export const migrateClipTaggedNotesToPresetCards = notImplemented(
+  "removed",
+  "migrateClipTaggedNotesToPresetCards"
+);

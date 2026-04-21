@@ -1,5 +1,6 @@
 import { Fragment, type ReactNode } from "react";
 import { useAppChrome } from "../i18n/useAppChrome";
+import { toReadableSidebarDotColor } from "../sidebarDotColor";
 import type { Collection } from "../types";
 import {
   countSidebarCollectionCardBadge,
@@ -184,7 +185,7 @@ function PlainSubtypeRows(p: PlainSubtypeRowsProps): ReactNode {
               {!hideCollectionDots ? (
                 <span
                   className="sidebar__dot"
-                  style={{ backgroundColor: c.dotColor }}
+                  style={{ backgroundColor: toReadableSidebarDotColor(c.dotColor) }}
                   aria-hidden
                 />
               ) : null}

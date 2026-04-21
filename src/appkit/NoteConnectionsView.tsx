@@ -660,7 +660,7 @@ function ConnectionsBoardCard({
   const hasGallery = media.length > 0;
 
   return (
-    <div className="card connections-board__node-card">
+    <div className="card card--timeline-fold-body connections-board__node-card">
       <CardRowInner
         hasGallery={hasGallery}
         timelineColumnCount={2}
@@ -774,7 +774,7 @@ function ConnectionsBoardCard({
               </button>
             </div>
           </div>
-          <div className="card__text-editor card__text-editor--readonly card__text-editor--hide-embedded-media">
+          <div className="card__text-editor card__text-editor--readonly card__text-editor--hide-embedded-media card__text-editor--fold-body-3">
             <div
               id={`conn-card-text-${card.id}`}
               className="card__text card__text--readonly ProseMirror"
@@ -841,7 +841,6 @@ export function NoteConnectionsView({
   const linkGestureEnabled = Boolean(canEdit && onLinkCards);
   const [askAi, setAskAi] = useState<CardAskAiContext | null>(null);
   const [activeKindFilter, setActiveKindFilter] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<"board" | "list">("board");
 
   const { nodes, graphEdges, layoutKey } = useMemo(() => {
     const nodeMap = new Map<
@@ -1386,25 +1385,6 @@ export function NoteConnectionsView({
     <div className="connections-page connections-page--board">
       <div className="connections-board__toolbar">
         <p className="connections-board__hint">{c.connectionsBoardHint}</p>
-        <div className="connections-board__toolbar-right">
-          {/* Board / List 切换 */}
-          <div className="connections-board__view-tabs">
-            <button
-              type="button"
-              className={"connections-board__view-tab" + (viewMode === "board" ? " connections-board__view-tab--active" : "")}
-              onClick={() => setViewMode("board")}
-            >
-              图谱
-            </button>
-            <button
-              type="button"
-              className={"connections-board__view-tab" + (viewMode === "list" ? " connections-board__view-tab--active" : "")}
-              onClick={() => setViewMode("list")}
-            >
-              列表
-            </button>
-          </div>
-        </div>
       </div>
 
       {/* 类型过滤 chips（有多种 objectKind 时才显示） */}
@@ -1429,58 +1409,7 @@ export function NoteConnectionsView({
         </div>
       )}
 
-      {/* List 模式：按 objectKind 分组展示 */}
-      {viewMode === "list" ? (
-        <div className="connections-board__list-view">
-          {(() => {
-            const groups = new Map<string, Array<{ col: Collection; card: NoteCard }>>();
-            for (const { col, card } of nodes.values()) {
-              const kind = card.objectKind ?? "note";
-              if (!groups.has(kind)) groups.set(kind, []);
-              groups.get(kind)!.push({ col, card });
-            }
-            return [...groups.entries()].map(([kind, items]) => {
-              const meta = getPresetKindMeta(kind);
-              return (
-                <div key={kind} className="connections-board__list-group">
-                  <div
-                    className="connections-board__list-group-header"
-                    style={{ borderLeftColor: meta?.tint ?? "transparent" }}
-                  >
-                    {meta ? `${meta.emoji} ${lang === "zh" ? meta.nameZh : meta.nameEn}` : kind}
-                    <span className="connections-board__list-group-count">({items.length})</span>
-                  </div>
-                  {items.map(({ col, card }) => {
-                    const headline = cardHeadlinePlain(card).trim();
-                    return (
-                    <button
-                      key={card.id}
-                      type="button"
-                      className="connections-board__list-item"
-                      onClick={() => onOpenTarget(col.id, card.id)}
-                    >
-                      <span className="connections-board__list-item-text">
-                        {headline
-                          ? headline.slice(0, 80)
-                          : card.text
-                            ? card.text.replace(/<[^>]+>/g, "").trim().slice(0, 80)
-                            : (
-                                <span className="connections-board__list-item-empty">
-                                  （空卡片）
-                                </span>
-                              )}
-                      </span>
-                    </button>
-                    );
-                  })}
-                </div>
-              );
-            });
-          })()}
-        </div>
-      ) : null}
-
-      {viewMode === "board" ? <div
+      <div
         ref={viewportRef}
         className={
           "connections-board__viewport" +
@@ -1661,7 +1590,7 @@ export function NoteConnectionsView({
             );
           })}
         </div>
-      </div> : null}
+      </div>
       {NOTE_CONNECTIONS_ASK_AI_ENABLED ? (
         <CardAskAiPanel
           open={askAi !== null}

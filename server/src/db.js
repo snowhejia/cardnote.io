@@ -1,5 +1,9 @@
 import pg from "pg";
 
+// PG DATE (OID 1082) 默认被 node-pg 解析成 JS Date，会因时区漂移；
+// 业务里我们只关心日期字符串（YYYY-MM-DD），让驱动直接透传文本。
+pg.types.setTypeParser(1082, (val) => val);
+
 let pool = null;
 
 /**

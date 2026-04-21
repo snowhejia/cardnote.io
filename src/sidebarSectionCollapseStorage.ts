@@ -9,8 +9,6 @@ export type SidebarSectionCollapseState = {
   topic: boolean;
   /** 侧栏「剪藏」（网页剪藏 / 小红书 / B 站等） */
   clip: boolean;
-  /** 侧栏「网页」预设分区 */
-  web: boolean;
   /** 侧栏「作品」预设分区 */
   work: boolean;
   /** 侧栏「任务」预设分区 */
@@ -32,7 +30,6 @@ export function defaultSidebarSectionCollapseState(): SidebarSectionCollapseStat
     files: false,
     topic: false,
     clip: false,
-    web: false,
     work: false,
     task: false,
     project: false,
@@ -67,7 +64,11 @@ export function readSidebarSectionsCollapsed(
     const raw = localStorage.getItem(key);
     if (!raw) return defaultState();
     const o = JSON.parse(raw) as Partial<
-      SidebarSectionCollapseState & { features?: boolean; tags?: boolean }
+      SidebarSectionCollapseState & {
+        features?: boolean;
+        tags?: boolean;
+        web?: boolean;
+      }
     >;
     const legacy =
       typeof o.features === "boolean" &&
@@ -78,7 +79,6 @@ export function readSidebarSectionsCollapsed(
       files: legacy ? Boolean(o.features) : Boolean(o.files),
       topic: typeof o.topic === "boolean" ? o.topic : false,
       clip: typeof o.clip === "boolean" ? o.clip : false,
-      web: typeof o.web === "boolean" ? o.web : false,
       work: typeof o.work === "boolean" ? o.work : false,
       task: typeof o.task === "boolean" ? o.task : false,
       project: typeof o.project === "boolean" ? o.project : false,

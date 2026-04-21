@@ -125,6 +125,8 @@ export type SchemaField = {
   name: string;
   type: SchemaFieldType;
   required?: boolean;
+  /** 仅展示，不允许编辑（如视频时长 / 分辨率，由媒体自动探测） */
+  readonly?: boolean;
   /** choice 类型的可选项（复用 CardPropertyOption） */
   options?: CardPropertyOption[];
   /** 在 schema 字段列表中的显示顺序 */

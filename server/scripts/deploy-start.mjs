@@ -49,8 +49,16 @@ function runBackfillBestEffort() {
 }
 
 if (process.env.DATABASE_URL?.trim()) {
-  console.log("[deploy-start] 执行增量迁移 pg-migrate-incremental.js …");
-  runNodeScript("scripts/pg-migrate-incremental.js");
+  // v2 greenfield schema.sql 一次性 apply；存量库走 migrate-to-v2.js（单独手动触发）。
+  // 若需在部署流程里自动迁移存量库，设 RUN_V2_MIGRATE_ON_DEPLOY=1。
+  if (process.env.RUN_V2_MIGRATE_ON_DEPLOY === "1") {
+    console.log("[deploy-start] RUN_V2_MIGRATE_ON_DEPLOY=1，执行 migrate-to-v2.js …");
+    runNodeScript("scripts/migrate-to-v2.js");
+  } else {
+    console.log(
+      "[deploy-start] 跳过 DB 迁移（RUN_V2_MIGRATE_ON_DEPLOY 未开启）。"
+    );
+  }
 } else {
   console.log("[deploy-start] 未设置 DATABASE_URL，跳过数据库迁移。");
 }

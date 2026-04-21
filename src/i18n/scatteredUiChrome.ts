@@ -105,19 +105,9 @@ export type ScatteredUiChrome = {
   uiMoveCollectionUnderConfirm: string;
   uiMoveCollectionUnderNoTargets: string;
   errMoveCollectionUnder: string;
-  /** 侧栏合集右键：将合集映射到对象类型目录并写入 card_schema */
-  uiCollectionChangeCategoryMenu: string;
-  uiCollectionCategoryDialogTitle: string;
-  uiCollectionCategoryDialogHint: (collectionName: string) => string;
-  uiCollectionCategoryPickLabel: string;
-  uiCollectionCategoryPlaceholder: string;
-  uiCollectionCategoryOptionNone: string;
-  uiCollectionCategoryCustomHint: (presetTypeId: string) => string;
-  /** 有子类型的预设：下拉中父级选项后缀 */
-  uiCollectionCategoryParentRowSuffix: string;
-  uiCollectionCategoryConfirm: string;
-  errCollectionCategorySync: string;
-  uiCollectionCategoryConflict: (typeLabel: string, existingName: string) => string;
+  /** 侧栏合集右键：打开模板编辑器 */
+  uiCollectionEditTemplateMenu: string;
+  errCollectionTemplateSync: string;
   uiDeleteCollectionDialogTitle: string;
   uiDeleteCollectionWithSubtree: (name: string) => string;
   uiDeleteCollectionLeaf: (name: string) => string;
@@ -272,20 +262,8 @@ const zh: ScatteredUiChrome = {
   uiMoveCollectionUnderConfirm: "移动",
   uiMoveCollectionUnderNoTargets: "没有其他可作为父级的合集。",
   errMoveCollectionUnder: "现在移不过去喔…换个目标或刷新再试？",
-  uiCollectionChangeCategoryMenu: "修改类别 / 字段模板…",
-  uiCollectionCategoryDialogTitle: "合集类别与字段模板",
-  uiCollectionCategoryDialogHint: (collectionName) =>
-    `将「${collectionName}」映射到对象类型目录中的预设，并写入对应的 card_schema（与设置里启用类型时一致）。`,
-  uiCollectionCategoryPickLabel: "对象类型预设",
-  uiCollectionCategoryPlaceholder: "请选择…",
-  uiCollectionCategoryOptionNone: "普通文件夹（清除类别与模板）",
-  uiCollectionCategoryCustomHint: (presetTypeId) =>
-    `当前 preset 为「${presetTypeId}」（自定义或不在目录中）。请从下方选择一项以覆盖为目录预设。`,
-  uiCollectionCategoryParentRowSuffix: "（通用顶层）",
-  uiCollectionCategoryConfirm: "应用",
-  errCollectionCategorySync: "类别或模板没能同步到云端…可检查网络后重试。",
-  uiCollectionCategoryConflict: (typeLabel, existingName) =>
-    `已有合集「${existingName}」使用类型「${typeLabel}」。同一 workspace 下每种预设建议只对应一个合集；请先调整另一合集或换类型。`,
+  uiCollectionEditTemplateMenu: "设置模板…",
+  errCollectionTemplateSync: "模板没能同步到云端…可检查网络后重试。",
   uiDeleteCollectionDialogTitle: "删除合集",
   uiDeleteCollectionWithSubtree: (name) =>
     `要连「${name}」带子文件夹一锅端吗？笔记不会删，仍可在「全部笔记」里看到；只是从这些文件夹里拿掉归类。`,
@@ -450,21 +428,9 @@ const en: ScatteredUiChrome = {
   uiMoveCollectionUnderNoTargets: "No other collection can be a parent.",
   errMoveCollectionUnder:
     "Couldn’t move right now. Try another target or refresh.",
-  uiCollectionChangeCategoryMenu: "Change type / field template…",
-  uiCollectionCategoryDialogTitle: "Collection type & field template",
-  uiCollectionCategoryDialogHint: (collectionName) =>
-    `Map “${collectionName}” to a catalog preset and write the matching card_schema (same as enabling the type in Settings).`,
-  uiCollectionCategoryPickLabel: "Preset object type",
-  uiCollectionCategoryPlaceholder: "Choose…",
-  uiCollectionCategoryOptionNone: "Plain folder (clear type & template)",
-  uiCollectionCategoryCustomHint: (presetTypeId) =>
-    `Current preset is “${presetTypeId}” (custom or not in the catalog). Pick an option below to replace it with a catalog preset.`,
-  uiCollectionCategoryParentRowSuffix: "(top-level)",
-  uiCollectionCategoryConfirm: "Apply",
-  errCollectionCategorySync:
-    "Couldn’t sync the type or template. Check the network and try again.",
-  uiCollectionCategoryConflict: (typeLabel, existingName) =>
-    `Collection “${existingName}” already uses “${typeLabel}”. Each preset should map to one collection; change the other collection or pick a different type.`,
+  uiCollectionEditTemplateMenu: "Edit template…",
+  errCollectionTemplateSync:
+    "Couldn’t sync the template. Check the network and try again.",
   uiDeleteCollectionDialogTitle: "Delete collection",
   uiDeleteCollectionWithSubtree: (name) =>
     `Delete “${name}” and all subfolders? Your notes stay in “All notes”; they’re only removed from these folders.`,
