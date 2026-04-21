@@ -12554,10 +12554,46 @@ body.app--card-page-open .app {
 }
 
 .card-page__prop-checkbox {
-  width: 16px;
-  height: 16px;
+  /* 覆盖原生外观，采用柔灰描边 + 勾选时柔灰填充，比系统默认更粗一些 */
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  border: 2px solid rgba(55, 53, 47, 0.42);
+  border-radius: 4px;
+  background: transparent;
   cursor: pointer;
-  accent-color: rgba(55, 53, 47, 0.85);
+  position: relative;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+
+.card-page__prop-checkbox:hover {
+  border-color: rgba(55, 53, 47, 0.6);
+}
+
+.card-page__prop-checkbox:focus-visible {
+  outline: 2px solid rgba(55, 53, 47, 0.28);
+  outline-offset: 1px;
+}
+
+.card-page__prop-checkbox:checked {
+  background: rgba(55, 53, 47, 0.55);
+  border-color: rgba(55, 53, 47, 0.55);
+}
+
+.card-page__prop-checkbox:checked::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 0px;
+  width: 6px;
+  height: 10px;
+  border-right: 2px solid #ffffff;
+  border-bottom: 2px solid #ffffff;
+  transform: rotate(45deg);
 }
 
 /* 链接/操作按钮 */
