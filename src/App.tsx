@@ -1988,21 +1988,16 @@ export default function App() {
 
   const activeNoteCards = useMemo(() => {
     if (!active) return [];
-    const presetId = (active.presetTypeId ?? "").trim();
-    const baseId =
-      presetCatalogBaseIdForPresetTypeId(presetId) ??
-      (presetId === "post" ? "clip" : null);
-    const isPresetRootView = Boolean(
-      baseId &&
-        (presetId === baseId || (presetId === "post" && baseId === "clip"))
-    );
-    if (!isPresetRootView) {
-      return (active.cards ?? []).filter((c) => !isFileCard(c));
-    }
+    /** 所有合集（含预设根、子类型、用户文件夹）都把整棵子树的卡聚合进来，
+     *  避免「在 任务 / 待办 创建的卡在 任务 / 待办 / 2026 子合集里看不到」之类。 */
     const out: NoteCard[] = [];
+    const seen = new Set<string>();
     const walk = (col: Collection) => {
       for (const card of col.cards ?? []) {
-        if (!isFileCard(card)) out.push(card);
+        if (isFileCard(card)) continue;
+        if (seen.has(card.id)) continue;
+        seen.add(card.id);
+        out.push(card);
       }
       for (const ch of col.children ?? []) walk(ch);
     };
