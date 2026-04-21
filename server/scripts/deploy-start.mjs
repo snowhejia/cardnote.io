@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 /**
- * 生产容器 / 平台启动链：增量 SQL 迁移 → 启动 API。
- * 媒体补全（缩略图 + sizeBytes）默认不在此阻塞，避免长时间补全导致健康检查失败、API 永不监听。
- * 需要随部署跑补全时设置环境变量：RUN_MEDIA_METADATA_BACKFILL_ON_DEPLOY=1（仍建议单副本 + 放宽超时）。
+ * 生产容器 / 平台启动链：默认仅启动 API（不自动跑迁移/补全脚本）。
+ * 若确需在部署时跑脚本，必须显式设置 ALLOW_STARTUP_SCRIPTS_ON_DEPLOY=1。
  *
  * Docker 默认 CMD 指向本脚本；Railway 等也可将 Start Command 设为：
  *   cd server && npm run start:deploy
@@ -14,6 +13,14 @@ import { fileURLToPath } from "url";
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
 const serverDir = join(scriptsDir, "..");
 const node = process.execPath;
+const isProductionDeploy =
+  String(process.env.RAILWAY_ENVIRONMENT_NAME || "")
+    .toLowerCase()
+    .trim() === "production" ||
+  String(process.env.NODE_ENV || "")
+    .toLowerCase()
+    .trim() === "production";
+const allowStartupScripts = process.env.ALLOW_STARTUP_SCRIPTS_ON_DEPLOY === "1";
 
 function runNodeScript(relativeFromServer, extraArgs = []) {
   const scriptPath = join(serverDir, relativeFromServer);
@@ -48,30 +55,39 @@ function runBackfillBestEffort() {
   }
 }
 
-if (process.env.DATABASE_URL?.trim()) {
-  // v2 greenfield schema.sql 一次性 apply；存量库走 migrate-to-v2.js（单独手动触发）。
-  // 若需在部署流程里自动迁移存量库，设 RUN_V2_MIGRATE_ON_DEPLOY=1。
-  if (process.env.RUN_V2_MIGRATE_ON_DEPLOY === "1") {
-    console.log("[deploy-start] RUN_V2_MIGRATE_ON_DEPLOY=1，执行 migrate-to-v2.js …");
-    runNodeScript("scripts/migrate-to-v2.js");
+if (!allowStartupScripts && isProductionDeploy) {
+  console.log(
+    "[deploy-start] 生产环境默认禁用启动脚本（迁移/补全）。如需启用，请设置 ALLOW_STARTUP_SCRIPTS_ON_DEPLOY=1。"
+  );
+} else {
+  if (process.env.DATABASE_URL?.trim()) {
+    // 若需在部署流程里自动迁移存量库，设 RUN_V2_MIGRATE_ON_DEPLOY=1。
+    if (process.env.RUN_V2_MIGRATE_ON_DEPLOY === "1") {
+      console.log(
+        "[deploy-start] RUN_V2_MIGRATE_ON_DEPLOY=1，执行 migrate-to-v2.js …"
+      );
+      runNodeScript("scripts/migrate-to-v2.js");
+    } else {
+      console.log(
+        "[deploy-start] 跳过 DB 迁移（RUN_V2_MIGRATE_ON_DEPLOY 未开启）。"
+      );
+    }
   } else {
     console.log(
-      "[deploy-start] 跳过 DB 迁移（RUN_V2_MIGRATE_ON_DEPLOY 未开启）。"
+      "[deploy-start] 未设置 DATABASE_URL，跳过数据库迁移。"
     );
   }
-} else {
-  console.log("[deploy-start] 未设置 DATABASE_URL，跳过数据库迁移。");
-}
 
-if (process.env.RUN_MEDIA_METADATA_BACKFILL_ON_DEPLOY === "1") {
-  console.log(
-    "[deploy-start] RUN_MEDIA_METADATA_BACKFILL_ON_DEPLOY=1，执行媒体补全（可能较久）…"
-  );
-  runBackfillBestEffort();
-} else {
-  console.log(
-    "[deploy-start] 未设置 RUN_MEDIA_METADATA_BACKFILL_ON_DEPLOY=1，跳过启动时媒体补全（避免阻塞健康检查）。需要时可在平台加该变量或手动 npm run backfill:media-meta。"
-  );
+  if (process.env.RUN_MEDIA_METADATA_BACKFILL_ON_DEPLOY === "1") {
+    console.log(
+      "[deploy-start] RUN_MEDIA_METADATA_BACKFILL_ON_DEPLOY=1，执行媒体补全（可能较久）…"
+    );
+    runBackfillBestEffort();
+  } else {
+    console.log(
+      "[deploy-start] 未设置 RUN_MEDIA_METADATA_BACKFILL_ON_DEPLOY=1，跳过启动时媒体补全（避免阻塞健康检查）。需要时可在平台加该变量或手动 npm run backfill:media-meta。"
+    );
+  }
 }
 
 console.log("[deploy-start] 启动 API …");

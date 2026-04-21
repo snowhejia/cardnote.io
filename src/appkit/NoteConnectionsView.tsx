@@ -637,13 +637,11 @@ function layoutGraph(
 }
 
 function ConnectionsBoardCard({
-  colId,
   card,
   onOpenDetail,
   onLinkRailPointerDown,
   onOpenAskAi,
 }: {
-  colId: string;
   card: NoteCard;
   onOpenDetail: () => void;
   /** 仅在左侧灰条上按下拖动可拉出线；未传则保持只读灰条 */
@@ -1553,7 +1551,6 @@ export function NoteConnectionsView({
                 }}
               >
                 <ConnectionsBoardCard
-                  colId={col.id}
                   card={card}
                   onOpenDetail={() => onOpenTarget(col.id, card.id)}
                   onOpenAskAi={
