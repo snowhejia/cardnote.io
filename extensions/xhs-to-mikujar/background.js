@@ -41,9 +41,11 @@ function buildCardHtml({ title, body, intro }) {
     .filter(Boolean)
     .map((p) => `<p>${escapeHtml(p)}</p>`)
     .join("");
+  const titleTrim = String(title ?? "").trim();
+  const titleBlock = titleTrim ? `<p><strong>${escapeHtml(titleTrim)}</strong></p>` : "";
   const introTrim = String(intro ?? "").trim();
   const introBlock = introTrim ? `<p>${escapeHtml(introTrim)}</p>` : "";
-  return `<p><strong>${escapeHtml(title)}</strong></p>${paras || "<p>（无正文）</p>"}${introBlock}`;
+  return `${titleBlock}${paras || "<p>（无正文）</p>"}${introBlock}`;
 }
 
 /**

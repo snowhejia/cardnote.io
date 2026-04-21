@@ -30,6 +30,7 @@ import {
   migrateClipTaggedNotesApi,
   fetchMeNotePrefs,
   putMeNotePrefs,
+  postCardAutoLinkApi,
 } from "./api/collections";
 import { loadLocalNotePrefs, saveLocalNotePrefs } from "./notePrefsStorage";
 import {
@@ -447,6 +448,8 @@ export function NoteSettingsModal({
     });
   }, [targetColLinkFields]);
   const [customRuleErr, setCustomRuleErr] = useState<string | null>(null);
+  const [customRuleMsg, setCustomRuleMsg] = useState<string | null>(null);
+  const [manualRunRuleId, setManualRunRuleId] = useState<string | null>(null);
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
   const [editingRuleTargetCollectionId, setEditingRuleTargetCollectionId] =
     useState("");
@@ -835,6 +838,7 @@ export function NoteSettingsModal({
 
   useEffect(() => {
     if (settingsPanel === "autoLink") setCustomRuleErr(null);
+    if (settingsPanel === "autoLink") setCustomRuleMsg(null);
   }, [settingsPanel]);
 
   useEffect(() => {
@@ -1085,6 +1089,93 @@ export function NoteSettingsModal({
             <button
               type="button"
               className="note-settings-modal__type-toggle"
+              disabled={manualRunRuleId === rule.ruleId}
+              onClick={() => {
+                const srcColId = String(rule.sourceCollectionId ?? "").trim();
+                const resolvedSourceColId =
+                  srcColId ||
+                  (rule.sourcePresetTypeId
+                    ? String(
+                        enabledByPresetTypeId.get(rule.sourcePresetTypeId)?.id ?? ""
+                      ).trim()
+                    : "");
+                if (!resolvedSourceColId) {
+                  setCustomRuleMsg(null);
+                  setCustomRuleErr(
+                    lang === "en"
+                      ? "Cannot run: source collection is not configured for this rule."
+                      : "无法执行：这条规则未配置可用的源合集。"
+                  );
+                  return;
+                }
+                const srcCol = findCollectionById(collections, resolvedSourceColId);
+                const sourceCards = Array.isArray(srcCol?.cards)
+                  ? srcCol.cards.filter((x) => String(x?.id || "").trim())
+                  : [];
+                if (sourceCards.length === 0) {
+                  setCustomRuleErr(null);
+                  setCustomRuleMsg(
+                    lang === "en"
+                      ? "No existing cards in source collection."
+                      : "源合集暂无可执行的已有卡片。"
+                  );
+                  return;
+                }
+                const sourceLabel =
+                  collectionPickerOptions.find((x) => x.id === resolvedSourceColId)
+                    ?.label ?? srcCol?.name ?? resolvedSourceColId;
+                const okToRun = window.confirm(
+                  lang === "en"
+                    ? `Run auto-link for ${sourceCards.length} existing card(s) in "${sourceLabel}"?`
+                    : `要对「${sourceLabel}」中的 ${sourceCards.length} 张已有卡片补跑一次自动建卡吗？`
+                );
+                if (!okToRun) return;
+                setCustomRuleErr(null);
+                setCustomRuleMsg(
+                  lang === "en"
+                    ? "Running auto-link for existing cards..."
+                    : "正在为已有卡片补跑自动建卡..."
+                );
+                setManualRunRuleId(rule.ruleId);
+                void (async () => {
+                  let ok = 0;
+                  let failed = 0;
+                  for (const card of sourceCards) {
+                    const ret = await postCardAutoLinkApi(card.id);
+                    if (ret.ok) ok += 1;
+                    else failed += 1;
+                  }
+                  await onCollectionsChange?.();
+                  setCustomRuleErr(
+                    failed > 0
+                      ? lang === "en"
+                        ? `Done with partial failures: ${ok} succeeded, ${failed} failed.`
+                        : `执行完成：成功 ${ok}，失败 ${failed}。`
+                      : null
+                  );
+                  setCustomRuleMsg(
+                    failed === 0
+                      ? lang === "en"
+                        ? `Done: ${ok} card(s) processed.`
+                        : `执行完成：已处理 ${ok} 张卡片。`
+                      : null
+                  );
+                  setManualRunRuleId(null);
+                })();
+              }}
+            >
+              {manualRunRuleId === rule.ruleId
+                ? lang === "en"
+                  ? "Running..."
+                  : "执行中..."
+                : lang === "en"
+                  ? "Run existing"
+                  : "补跑"}
+            </button>
+            <button
+              type="button"
+              className="note-settings-modal__type-toggle"
+              disabled={manualRunRuleId === rule.ruleId}
               onClick={() => {
                 setEditingRuleId(rule.ruleId);
                 setEditingRuleTargetCollectionId(
@@ -1097,6 +1188,7 @@ export function NoteSettingsModal({
             <button
               type="button"
               className="note-settings-modal__type-toggle"
+              disabled={manualRunRuleId === rule.ruleId}
               onClick={() => {
                 const extras = (notePrefs.extraAutoLinkRules ?? []).filter(
                   (r) => r.ruleId !== rule.ruleId
@@ -1196,6 +1288,9 @@ export function NoteSettingsModal({
         <p className="note-settings-modal__auto-link-hint note-settings-modal__auto-link-hint--warn">
           {customRuleErr}
         </p>
+      ) : null}
+      {customRuleMsg ? (
+        <p className="note-settings-modal__auto-link-hint">{customRuleMsg}</p>
       ) : null}
 
       <div className="note-settings-modal__auto-link-form">
