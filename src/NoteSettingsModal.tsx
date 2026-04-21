@@ -144,14 +144,14 @@ function flattenCollectionsForPicker(
   return out;
 }
 
-/** 沿父链合并 card_schema，只取「关联卡片」类型字段 */
+/** 沿父链合并 card_schema，只取「关联卡片」类型字段（单卡/多卡） */
 function mergedCardLinkFieldsForCollection(
   colId: string,
   roots: Collection[] | undefined
 ): SchemaField[] {
   if (!colId.trim() || !roots?.length) return [];
   return mergedTemplateSchemaFieldsForCollection(roots, colId)
-    .filter((f) => f.type === "cardLink")
+    .filter((f) => f.type === "cardLink" || f.type === "cardLinks")
     .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 }
 
@@ -244,6 +244,36 @@ function summarizeClipPresetCustomRule(
   return lang === "en"
     ? `${srcCol} · ${srcProp} ↔ ${targetLabel} · ${targetProp}`
     : `${srcCol}·${srcProp} ↔ ${targetLabel}·${targetProp}`;
+}
+
+function summarizeCompactCustomRule(
+  rule: AutoLinkRule,
+  collections: Collection[] | undefined,
+  collectionPickerOptions: { id: string; label: string }[],
+  lang: "zh" | "en"
+): string {
+  const srcColId = String(rule.sourceCollectionId ?? "").trim();
+  const tgtColId = String(rule.targetCollectionId ?? "").trim();
+  const srcFieldId = String(rule.syncSchemaFieldId ?? "").trim();
+  const tgtFieldId = String(rule.targetSyncSchemaFieldId ?? "").trim();
+  if (!srcColId || !tgtColId || !srcFieldId || !tgtFieldId) {
+    return summarizeCustomAutoLinkRule(rule, lang);
+  }
+  const byId = new Map(collectionPickerOptions.map((x) => [x.id, x.label]));
+  const srcColLabel = byId.get(srcColId) ?? srcColId;
+  const tgtColLabel = byId.get(tgtColId) ?? tgtColId;
+  const roots = collections ?? [];
+  const srcFieldName =
+    mergedTemplateSchemaFieldsForCollection(roots, srcColId).find(
+      (f) => f.id === srcFieldId
+    )?.name ?? srcFieldId;
+  const tgtFieldName =
+    mergedTemplateSchemaFieldsForCollection(roots, tgtColId).find(
+      (f) => f.id === tgtFieldId
+    )?.name ?? tgtFieldId;
+  return lang === "en"
+    ? `${srcColLabel} · ${srcFieldName} ↔ ${tgtColLabel} · ${tgtFieldName}`
+    : `${srcColLabel}·${srcFieldName} ↔ ${tgtColLabel}·${tgtFieldName}`;
 }
 
 type NoteSettingsModalProps = {
@@ -417,6 +447,9 @@ export function NoteSettingsModal({
     });
   }, [targetColLinkFields]);
   const [customRuleErr, setCustomRuleErr] = useState<string | null>(null);
+  const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
+  const [editingRuleTargetCollectionId, setEditingRuleTargetCollectionId] =
+    useState("");
   const customRulesForDisplay = useMemo(() => {
     const extras = Array.isArray(notePrefs.extraAutoLinkRules)
       ? notePrefs.extraAutoLinkRules
@@ -1041,32 +1074,116 @@ export function NoteSettingsModal({
                   enabledByPresetTypeId,
                   lang === "en" ? "en" : "zh"
                 )
-              : rule.labelZh || rule.labelEn
-                ? lang === "en"
-                  ? rule.labelEn ?? rule.labelZh ?? rule.ruleId
-                  : rule.labelZh ?? rule.labelEn ?? rule.ruleId
-                : summarizeCustomAutoLinkRule(rule, lang === "en" ? "en" : "zh")}
+              : summarizeCompactCustomRule(
+                  rule,
+                  collections,
+                  collectionPickerOptions,
+                  lang === "en" ? "en" : "zh"
+                )}
           </span>
-          <button
-            type="button"
-            className="note-settings-modal__type-toggle"
-            onClick={() => {
-              const extras = (notePrefs.extraAutoLinkRules ?? []).filter(
-                (r) => r.ruleId !== rule.ruleId
-              );
-              const nextDisabled = new Set(notePrefs.disabledAutoLinkRuleIds);
-              if (CLIP_PRESET_CUSTOM_RULE_IDS.has(rule.ruleId)) {
-                nextDisabled.add(rule.ruleId);
-              }
-              void persistNotePrefs({
-                ...notePrefs,
-                extraAutoLinkRules: extras,
-                disabledAutoLinkRuleIds: [...nextDisabled],
-              });
-            }}
-          >
-            {c.noteSettingsAutoLinkDelete}
-          </button>
+          <div className="note-settings-modal__auto-link-row-actions">
+            <button
+              type="button"
+              className="note-settings-modal__type-toggle"
+              onClick={() => {
+                setEditingRuleId(rule.ruleId);
+                setEditingRuleTargetCollectionId(
+                  String(rule.targetCollectionId || "").trim()
+                );
+              }}
+            >
+              {lang === "en" ? "Edit" : "修改"}
+            </button>
+            <button
+              type="button"
+              className="note-settings-modal__type-toggle"
+              onClick={() => {
+                const extras = (notePrefs.extraAutoLinkRules ?? []).filter(
+                  (r) => r.ruleId !== rule.ruleId
+                );
+                const nextDisabled = new Set(notePrefs.disabledAutoLinkRuleIds);
+                if (CLIP_PRESET_CUSTOM_RULE_IDS.has(rule.ruleId)) {
+                  nextDisabled.add(rule.ruleId);
+                }
+                void persistNotePrefs({
+                  ...notePrefs,
+                  extraAutoLinkRules: extras,
+                  disabledAutoLinkRuleIds: [...nextDisabled],
+                });
+              }}
+            >
+              {c.noteSettingsAutoLinkDelete}
+            </button>
+          </div>
+          {editingRuleId === rule.ruleId ? (
+            <div
+              className="note-settings-modal__auto-link-form"
+              style={{ marginTop: 8, width: "100%" }}
+            >
+              <label
+                className="note-settings-modal__label"
+                htmlFor={`edit-target-col-${rule.ruleId}`}
+              >
+                {lang === "en" ? "Target collection" : "目标合集"}
+              </label>
+              <select
+                id={`edit-target-col-${rule.ruleId}`}
+                className="auth-modal__input"
+                value={editingRuleTargetCollectionId}
+                onChange={(e) =>
+                  setEditingRuleTargetCollectionId(e.target.value.trim())
+                }
+              >
+                <option value="">
+                  {lang === "en" ? "Default target" : "默认目标合集"}
+                </option>
+                {collectionPickerOptions.map((row) => (
+                  <option key={`edit-target-${rule.ruleId}-${row.id}`} value={row.id}>
+                    {row.label}
+                  </option>
+                ))}
+              </select>
+              <div
+                className="note-settings-modal__choice-row"
+                style={{ marginTop: 8 }}
+              >
+                <button
+                  type="button"
+                  className="auth-modal__btn auth-modal__btn--primary"
+                  onClick={() => {
+                    const extrasWithoutCurrent = (
+                      notePrefs.extraAutoLinkRules ?? []
+                    ).filter((r) => r.ruleId !== rule.ruleId);
+                    const { targetCollectionId: _oldTarget, ...baseRule } = rule;
+                    const nextRule: AutoLinkRule = {
+                      ...baseRule,
+                      ...(editingRuleTargetCollectionId
+                        ? { targetCollectionId: editingRuleTargetCollectionId }
+                        : {}),
+                    };
+                    void persistNotePrefs({
+                      ...notePrefs,
+                      extraAutoLinkRules: [...extrasWithoutCurrent, nextRule],
+                    });
+                    setEditingRuleId(null);
+                    setEditingRuleTargetCollectionId("");
+                  }}
+                >
+                  {lang === "en" ? "Save" : "保存"}
+                </button>
+                <button
+                  type="button"
+                  className="auth-modal__btn"
+                  onClick={() => {
+                    setEditingRuleId(null);
+                    setEditingRuleTargetCollectionId("");
+                  }}
+                >
+                  {lang === "en" ? "Cancel" : "取消"}
+                </button>
+              </div>
+            </div>
+          ) : null}
         </div>
       ))}
 

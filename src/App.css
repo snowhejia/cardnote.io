@@ -8393,7 +8393,15 @@ div.card__text--readonly:not(.card__text--preview) {
 }
 
 .note-settings-modal__auto-link-row--custom {
+  flex-wrap: wrap;
   margin-bottom: 4px;
+}
+
+.note-settings-modal__auto-link-row-actions {
+  display: inline-flex;
+  gap: 8px;
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
 .note-settings-modal__auto-link-form {
