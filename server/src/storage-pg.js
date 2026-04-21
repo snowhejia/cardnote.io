@@ -2181,21 +2181,112 @@ export async function restoreTrashedCard(
   return await readCardForApi(userId, cardId);
 }
 
-export async function deleteTrashedNote(ownerKey, trashId) {
-  const userId = await resolveUserId(ownerKey === "__single__" ? null : ownerKey);
-  const res = await query(
-    `DELETE FROM cards WHERE id = $1 AND user_id = $2 AND trashed_at IS NOT NULL`,
-    [trashId, userId]
+async function listExclusiveAttachmentFileCardIds(client, userId, noteCardIds) {
+  if (!Array.isArray(noteCardIds) || noteCardIds.length === 0) return [];
+  const r = await client.query(
+    `SELECT DISTINCT l.to_card_id AS file_card_id
+       FROM card_links l
+       JOIN cards fc ON fc.id = l.to_card_id AND fc.user_id = $1
+       JOIN card_types fct ON fct.id = fc.card_type_id AND fct.kind = 'file'
+      WHERE l.property_key = 'attachment'
+        AND l.from_card_id = ANY($2::text[])
+        AND NOT EXISTS (
+          SELECT 1
+            FROM card_links l2
+            JOIN cards src2 ON src2.id = l2.from_card_id
+           WHERE l2.property_key = 'attachment'
+             AND l2.to_card_id = l.to_card_id
+             AND src2.user_id = $1
+             AND l2.from_card_id <> ALL($2::text[])
+        )`,
+    [userId, noteCardIds]
   );
-  if (res.rowCount === 0) throw new Error("回收站记录不存在或无权限");
+  return r.rows
+    .map((x) => (typeof x.file_card_id === "string" ? x.file_card_id : ""))
+    .filter(Boolean);
 }
 
-export async function clearTrashedNotes(ownerKey) {
+export async function deleteTrashedNote(ownerKey, trashId, opts = {}) {
   const userId = await resolveUserId(ownerKey === "__single__" ? null : ownerKey);
-  await query(
-    `DELETE FROM cards WHERE user_id = $1 AND trashed_at IS NOT NULL`,
-    [userId]
-  );
+  const deleteRelatedFiles = opts?.deleteRelatedFiles === true;
+  const client = await getClient();
+  try {
+    await client.query("BEGIN");
+    const chk = await client.query(
+      `SELECT id FROM cards WHERE id = $1 AND user_id = $2 AND trashed_at IS NOT NULL`,
+      [trashId, userId]
+    );
+    if (chk.rowCount === 0) throw new Error("回收站记录不存在或无权限");
+
+    const fileCardIds = deleteRelatedFiles
+      ? await listExclusiveAttachmentFileCardIds(client, userId, [trashId])
+      : [];
+
+    await client.query(
+      `DELETE FROM cards WHERE id = $1 AND user_id = $2 AND trashed_at IS NOT NULL`,
+      [trashId, userId]
+    );
+    if (fileCardIds.length > 0) {
+      await client.query(
+        `DELETE FROM cards
+          WHERE user_id = $1
+            AND id = ANY($2::text[])`,
+        [userId, fileCardIds]
+      );
+    }
+    await client.query("COMMIT");
+  } catch (e) {
+    await safeRollback(client);
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+export async function clearTrashedNotes(ownerKey, opts = {}) {
+  const userId = await resolveUserId(ownerKey === "__single__" ? null : ownerKey);
+  const deleteRelatedFiles = opts?.deleteRelatedFiles === true;
+  if (!deleteRelatedFiles) {
+    await query(
+      `DELETE FROM cards WHERE user_id = $1 AND trashed_at IS NOT NULL`,
+      [userId]
+    );
+    return;
+  }
+  const client = await getClient();
+  try {
+    await client.query("BEGIN");
+    const trashed = await client.query(
+      `SELECT id FROM cards WHERE user_id = $1 AND trashed_at IS NOT NULL`,
+      [userId]
+    );
+    const noteIds = trashed.rows
+      .map((r) => (typeof r.id === "string" ? r.id : ""))
+      .filter(Boolean);
+    const fileCardIds = await listExclusiveAttachmentFileCardIds(
+      client,
+      userId,
+      noteIds
+    );
+    await client.query(
+      `DELETE FROM cards WHERE user_id = $1 AND trashed_at IS NOT NULL`,
+      [userId]
+    );
+    if (fileCardIds.length > 0) {
+      await client.query(
+        `DELETE FROM cards
+          WHERE user_id = $1
+            AND id = ANY($2::text[])`,
+        [userId, fileCardIds]
+      );
+    }
+    await client.query("COMMIT");
+  } catch (e) {
+    await safeRollback(client);
+    throw e;
+  } finally {
+    client.release();
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

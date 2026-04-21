@@ -210,7 +210,16 @@ export async function postMeTrashRestore(args: {
   }
 }
 
-export async function postMeTrashEntry(entry: TrashedNoteEntry): Promise<boolean> {
+export async function postMeTrashEntry(
+  entry:
+    | TrashedNoteEntry
+    | {
+        colId: string;
+        colPathLabel?: string;
+        cardId: string;
+        deletedAt?: string;
+      }
+): Promise<boolean> {
   const base = apiBase();
   try {
     const r = await fetch(
@@ -227,11 +236,20 @@ export async function postMeTrashEntry(entry: TrashedNoteEntry): Promise<boolean
   }
 }
 
-export async function deleteMeTrashEntry(trashId: string): Promise<boolean> {
+export async function deleteMeTrashEntry(
+  trashId: string,
+  opts?: { deleteRelatedFiles?: boolean }
+): Promise<boolean> {
   const base = apiBase();
   try {
+    const u = new URL(
+      `${base}/api/me/trash/${encodeURIComponent(trashId)}`
+    );
+    if (opts?.deleteRelatedFiles) {
+      u.searchParams.set("deleteRelatedFiles", "1");
+    }
     const r = await fetch(
-      `${base}/api/me/trash/${encodeURIComponent(trashId)}`,
+      u.toString(),
       apiFetchInit({ method: "DELETE", headers: buildHeadersPut() })
     );
     return r.ok;
@@ -240,11 +258,17 @@ export async function deleteMeTrashEntry(trashId: string): Promise<boolean> {
   }
 }
 
-export async function clearMeTrash(): Promise<boolean> {
+export async function clearMeTrash(opts?: {
+  deleteRelatedFiles?: boolean;
+}): Promise<boolean> {
   const base = apiBase();
   try {
+    const u = new URL(`${base}/api/me/trash`);
+    if (opts?.deleteRelatedFiles) {
+      u.searchParams.set("deleteRelatedFiles", "1");
+    }
     const r = await fetch(
-      `${base}/api/me/trash`,
+      u.toString(),
       apiFetchInit({ method: "DELETE", headers: buildHeadersPut() })
     );
     return r.ok;

@@ -1528,11 +1528,14 @@ app.post("/api/me/trash", preferencesWriterMw, async (req, res) => {
     const colPathLabel = typeof b.colPathLabel === "string" ? b.colPathLabel : "";
     const card = b.card;
     const deletedAt = typeof b.deletedAt === "string" ? b.deletedAt : undefined;
-    const cardId =
+    const cardIdFromBody =
+      typeof b.cardId === "string" ? b.cardId.trim() : "";
+    const cardIdFromCard =
       card && typeof card === "object" && typeof card.id === "string"
         ? card.id.trim()
         : "";
-    if (!colId || !cardId || !card || typeof card !== "object") {
+    const cardId = cardIdFromBody || cardIdFromCard;
+    if (!colId || !cardId) {
       return res.status(400).json({ error: "无效的回收站条目" });
     }
     const key = preferencesOwnerKey(req);
@@ -1590,7 +1593,9 @@ app.delete("/api/me/trash", preferencesWriterMw, async (req, res) => {
     if (adminGateEnabled && !key) {
       return res.status(401).json({ error: "未授权", code: "PUT_AUTH" });
     }
-    await clearTrashedNotes(key);
+    const deleteRelatedFiles =
+      String(req.query?.deleteRelatedFiles || "").trim() === "1";
+    await clearTrashedNotes(key, { deleteRelatedFiles });
     notifyCollectionsSync(req);
     res.json({ ok: true });
   } catch (e) {
@@ -1607,7 +1612,9 @@ app.delete("/api/me/trash/:trashId", preferencesWriterMw, async (req, res) => {
     if (adminGateEnabled && !key) {
       return res.status(401).json({ error: "未授权", code: "PUT_AUTH" });
     }
-    await deleteTrashedNote(key, trashId);
+    const deleteRelatedFiles =
+      String(req.query?.deleteRelatedFiles || "").trim() === "1";
+    await deleteTrashedNote(key, trashId, { deleteRelatedFiles });
     notifyCollectionsSync(req);
     res.json({ ok: true });
   } catch (e) {

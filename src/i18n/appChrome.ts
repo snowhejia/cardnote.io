@@ -14,6 +14,8 @@ export type AppChrome = {
   errTrashRestore: string;
   errTrashRestoreTag: string;
   confirmTrashDelete: string;
+  /** 彻底删除时，是否一并删除该笔记相关文件卡 */
+  confirmDeleteRelatedFiles: (n: number) => string;
   errTrashDeleteOne: string;
   errTrashEmpty: string;
   confirmEmptyTrash: (n: number) => string;
@@ -341,6 +343,8 @@ const zh: AppChrome = {
     "笔记已经回家啦，但回收站标签可能还没撕干净…刷新一下就好～",
   confirmTrashDelete:
     "真的要永久删掉这条小笔记吗？（回收站记录也会一起消失，回不去那种）",
+  confirmDeleteRelatedFiles: (n: number) =>
+    `这条笔记关联了 ${n} 个文件，是否同时删除这些相关文件？`,
   errTrashDeleteOne: "这条从回收站删不掉耶…等等再试？",
   errTrashEmpty: "垃圾桶倒不干净…等等再清空一次？",
   confirmEmptyTrash: (n: number) =>
@@ -657,6 +661,8 @@ const en: AppChrome = {
     "Note restored, but trash labels may be stale — refresh if needed.",
   confirmTrashDelete:
     "Permanently delete this note? Trash history will be removed too.",
+  confirmDeleteRelatedFiles: (n: number) =>
+    `This note has ${n} related file attachment(s). Delete those files too?`,
   errTrashDeleteOne: "Couldn’t delete from trash. Try again?",
   errTrashEmpty: "Couldn’t empty trash. Try again?",
   confirmEmptyTrash: (n: number) =>

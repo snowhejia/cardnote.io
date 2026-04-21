@@ -3240,7 +3240,12 @@ export default function App() {
           deletedAt: new Date().toISOString(),
         };
         if (dataMode !== "local") {
-          const ok = await postMeTrashEntry(entry);
+          const ok = await postMeTrashEntry({
+            colId: entry.colId,
+            colPathLabel: entry.colPathLabel,
+            cardId: entry.card.id,
+            deletedAt: entry.deletedAt,
+          });
           if (!ok) {
             window.alert(c.errTrashMove);
             return;
@@ -3556,13 +3561,23 @@ export default function App() {
   const purgeTrashedEntry = useCallback(
     async (trashId: string) => {
       if (!canEdit) return;
+      const victim = trashEntries.find((t) => t.trashId === trashId);
       if (
         !window.confirm(c.confirmTrashDelete)
       ) {
         return;
       }
+      let deleteRelatedFiles = false;
+      const relatedFileCount = victim?.card.media?.length ?? 0;
+      if (dataMode !== "local" && relatedFileCount > 0) {
+        deleteRelatedFiles = window.confirm(
+          c.confirmDeleteRelatedFiles(relatedFileCount)
+        );
+      }
       if (dataMode !== "local") {
-        const ok = await deleteMeTrashEntry(trashId);
+        const ok = await deleteMeTrashEntry(trashId, {
+          deleteRelatedFiles,
+        });
         if (!ok) {
           window.alert(c.errTrashDeleteOne);
           return;
@@ -3582,7 +3597,15 @@ export default function App() {
         return next;
       });
     },
-    [canEdit, trashStorageKey, dataMode, c.confirmTrashDelete, c.errTrashDeleteOne]
+    [
+      canEdit,
+      trashEntries,
+      trashStorageKey,
+      dataMode,
+      c.confirmTrashDelete,
+      c.confirmDeleteRelatedFiles,
+      c.errTrashDeleteOne,
+    ]
   );
 
   const emptyTrash = useCallback(async () => {
@@ -3592,8 +3615,18 @@ export default function App() {
     ) {
       return;
     }
+    let deleteRelatedFiles = false;
+    const relatedFileCount = trashEntries.reduce(
+      (sum, e) => sum + (e.card.media?.length ?? 0),
+      0
+    );
+    if (dataMode !== "local" && relatedFileCount > 0) {
+      deleteRelatedFiles = window.confirm(
+        c.confirmDeleteRelatedFiles(relatedFileCount)
+      );
+    }
     if (dataMode !== "local") {
-      const ok = await clearMeTrash();
+      const ok = await clearMeTrash({ deleteRelatedFiles });
       if (!ok) {
         window.alert(c.errTrashEmpty);
         return;
@@ -3614,6 +3647,7 @@ export default function App() {
     trashStorageKey,
     dataMode,
     c.confirmEmptyTrash,
+    c.confirmDeleteRelatedFiles,
     c.errTrashEmpty,
   ]);
 
