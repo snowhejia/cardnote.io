@@ -2462,7 +2462,8 @@ export default function App() {
     const r = collectConnectionEdges(collections, connectionsEdgeLimit);
     return { connectionEdges: r.edges, connectionEdgesTruncated: r.truncated };
   }, [collections, connectionsPrimed, connectionsEdgeLimit]);
-  const connectedCardsCount = useMemo(() => {
+  /** 卡片探索徽章数（当前入口已隐藏；保留计算以便再开时零改动） */
+  const _connectedCardsCount = useMemo(() => {
     let count = 0;
     walkCollections(collections, (col) => {
       for (const card of col.cards) {
@@ -2471,6 +2472,7 @@ export default function App() {
     });
     return count;
   }, [collections]);
+  void _connectedCardsCount;
 
   const allNotesSorted = useMemo(() => {
     const entries: { col: Collection; card: NoteCard }[] = [];
@@ -5829,35 +5831,7 @@ export default function App() {
           ) : null}
         </div>
 
-        <div className="sidebar__features-section">
-          <div className="sidebar__all-notes">
-            <button
-              type="button"
-              className={
-                "sidebar__all-notes-hit" +
-                (connectionsViewActive && !searchActive ? " is-active" : "")
-              }
-              onClick={() => {
-                closeCardFullPage();
-                setTrashViewActive(false);
-                setCalendarDay(null);
-                setSearchQuery("");
-                setSearchBarOpen(false);
-                setAllNotesViewActive(false);
-                setAttachmentsViewActive(false);
-                setRemindersViewActive(false);
-                setConnectionsViewActive(true);
-                setConnectionsPrimed(true);
-                setConnectionsEdgeLimit(CONNECTIONS_EDGE_BATCH);
-                setMobileNavOpen(false);
-              }}
-              aria-label={`卡片探索（关联卡片 ${connectedCardsCount}）`}
-            >
-              <span className="sidebar__all-notes-label">卡片探索</span>
-              <span className="sidebar__all-notes-count">{connectedCardsCount}</span>
-            </button>
-          </div>
-        </div>
+        {/* 「卡片探索」模块暂时隐藏；保留事件与状态不删，方便后续再开 */}
 
         <div
           className={
