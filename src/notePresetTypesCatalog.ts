@@ -317,6 +317,9 @@ export const PRESET_OBJECT_TYPES_GROUPS: PresetTypeGroup[] = [
     baseLabelEn: "Work",
     baseEmoji: "📚",
     baseTint: "rgba(139, 92, 246, 0.14)",
+    schemaFields: [
+      { id: "sf-work-title", name: "标题", type: "text", order: -1 },
+    ],
     children: [
       {
         id: "work_book",
