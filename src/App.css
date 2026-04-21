@@ -11948,6 +11948,14 @@ body.app--card-page-open .app {
   box-sizing: border-box;
 }
 
+/* 复选框属性：沿用 single-hit 宽度但别在 focus-within 时画满整行的外框 */
+.card-page__tags-panel--checkbox,
+.card-page__tags-panel--checkbox:focus-within {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
 .card-page__tags-panel--single-hit > .card-page__tags-add-input--prop-field {
   flex: 1 1 auto;
   width: 100%;
@@ -12554,45 +12562,44 @@ body.app--card-page-open .app {
 }
 
 .card-page__prop-checkbox {
-  /* 覆盖原生外观，采用柔灰描边 + 勾选时柔灰填充，比系统默认更粗一些 */
+  /* 极简复选框：仅柔灰描边；勾选时描边内画一个同色钩，不填充方块 */
   -webkit-appearance: none;
   appearance: none;
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   margin: 0;
   padding: 0;
   box-sizing: border-box;
-  border: 2px solid rgba(55, 53, 47, 0.42);
+  border: 1.6px solid rgba(55, 53, 47, 0.38);
   border-radius: 4px;
   background: transparent;
   cursor: pointer;
   position: relative;
-  transition: border-color 0.12s ease, background 0.12s ease;
+  transition: border-color 0.12s ease;
 }
 
 .card-page__prop-checkbox:hover {
-  border-color: rgba(55, 53, 47, 0.6);
+  border-color: rgba(55, 53, 47, 0.62);
 }
 
 .card-page__prop-checkbox:focus-visible {
-  outline: 2px solid rgba(55, 53, 47, 0.28);
+  outline: 2px solid rgba(55, 53, 47, 0.22);
   outline-offset: 1px;
 }
 
 .card-page__prop-checkbox:checked {
-  background: rgba(55, 53, 47, 0.55);
-  border-color: rgba(55, 53, 47, 0.55);
+  border-color: rgba(55, 53, 47, 0.62);
 }
 
 .card-page__prop-checkbox:checked::after {
   content: "";
   position: absolute;
-  left: 3px;
+  left: 3.2px;
   top: 0px;
-  width: 6px;
-  height: 10px;
-  border-right: 2px solid #ffffff;
-  border-bottom: 2px solid #ffffff;
+  width: 5px;
+  height: 9px;
+  border-right: 1.8px solid rgba(55, 53, 47, 0.72);
+  border-bottom: 1.8px solid rgba(55, 53, 47, 0.72);
   transform: rotate(45deg);
 }
 

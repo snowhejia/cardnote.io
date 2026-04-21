@@ -816,7 +816,7 @@ function PropValueEditor({
 
   if (prop.type === "checkbox") {
     return (
-      <div className="card-page__tags-panel card-page__tags-panel--single-hit">
+      <div className="card-page__tags-panel card-page__tags-panel--single-hit card-page__tags-panel--checkbox">
         <div className="card-page__prop-checkbox-cell">
           <input
             type="checkbox"
