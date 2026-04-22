@@ -4,6 +4,7 @@ import {
   PERSISTED_WORKSPACE_ALL_ATTACHMENTS,
   PERSISTED_WORKSPACE_ALL_NOTES,
   PERSISTED_WORKSPACE_CONNECTIONS,
+  PERSISTED_WORKSPACE_OVERVIEW,
   PERSISTED_WORKSPACE_REMINDERS,
 } from "./workspaceStorage";
 
@@ -351,6 +352,7 @@ export function resolveActiveCollectionId(
   cols: Collection[],
   savedId: string | null
 ): string {
+  if (savedId === PERSISTED_WORKSPACE_OVERVIEW) return "";
   if (
     savedId === PERSISTED_WORKSPACE_ALL_NOTES ||
     savedId === PERSISTED_WORKSPACE_REMINDERS ||

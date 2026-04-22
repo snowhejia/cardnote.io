@@ -10,7 +10,6 @@ export type RailKey =
   | "files"
   | "topic"
   | "clip"
-  | "work"
   | "task"
   | "project"
   | "expense"
@@ -27,7 +26,6 @@ export type RailAvailability = {
   files: boolean;
   topic: boolean;
   clip: boolean;
-  work: boolean;
   task: boolean;
   project: boolean;
   expense: boolean;
@@ -48,7 +46,6 @@ type RailItemDef = {
     | "railFiles"
     | "railTopic"
     | "railClip"
-    | "railWork"
     | "railTask"
     | "railProject"
     | "railExpense"
@@ -107,14 +104,6 @@ export const RAIL_ITEMS: RailItemDef[] = [
     labelKey: "railClip",
     availabilityKey: "clip",
     color: "#E6A82A", // 黄橙 · mustard
-    group: "content",
-  },
-  {
-    key: "work",
-    icon: "hourglass",
-    labelKey: "railWork",
-    availabilityKey: "work",
-    color: "#E5C263", // 黄 · gold
     group: "content",
   },
   {

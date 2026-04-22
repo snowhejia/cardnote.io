@@ -35,7 +35,6 @@ function PlainSubtypeRows(p: PlainSubtypeRowsProps): ReactNode {
     editingCollectionId,
     mobileCollectionDragByHandle,
     hideCollectionDots = false,
-    hideAddsInMobileBrowse,
     draftCollectionName,
     collectionNameInputRef,
     skipCollectionBlurCommitRef,
@@ -60,7 +59,6 @@ function PlainSubtypeRows(p: PlainSubtypeRowsProps): ReactNode {
     setDraftCollectionName,
     setEditingCollectionId,
     onCollectionNameBlur,
-    addSubCollection,
   } = p;
 
   const visible = items.filter((c) => c.id !== LOOSE_NOTES_COLLECTION_ID);
@@ -239,49 +237,25 @@ function PlainSubtypeRows(p: PlainSubtypeRowsProps): ReactNode {
               </span>
             </span>
           </button>
-          {canEdit ? (
+          {canEdit && mobileCollectionDragByHandle ? (
             <div className="sidebar__tree-row__tail">
-              {!hideAddsInMobileBrowse ? (
-                <button
-                  type="button"
-                  draggable={false}
-                  className="sidebar__add-sub"
-                  aria-label={ui.uiAddSubcollectionAria}
-                  title={ui.uiAddSubcollectionTitle}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    addSubCollection(c.id);
-                  }}
+              {editingCollectionId !== c.id ? (
+                <div
+                  className="sidebar__tree-drag-handle"
+                  draggable
+                  onDragStart={(e) => onCollectionRowDragStart(c.id, e)}
+                  onDragEnd={onCollectionRowDragEnd}
+                  aria-label={ui.uiDragCollectionAria}
+                  title={ui.uiDragCollectionTitle}
                 >
-                  +
-                </button>
+                  <CollectionDragGripIcon className="sidebar__tree-drag-handle__svg" />
+                </div>
               ) : (
                 <span
-                  className="sidebar__add-sub-spacer"
+                  className="sidebar__tree-drag-handle-spacer"
                   aria-hidden
                 />
               )}
-              {mobileCollectionDragByHandle ? (
-                editingCollectionId !== c.id ? (
-                  <div
-                    className="sidebar__tree-drag-handle"
-                    draggable
-                    onDragStart={(e) =>
-                      onCollectionRowDragStart(c.id, e)
-                    }
-                    onDragEnd={onCollectionRowDragEnd}
-                    aria-label={ui.uiDragCollectionAria}
-                    title={ui.uiDragCollectionTitle}
-                  >
-                    <CollectionDragGripIcon className="sidebar__tree-drag-handle__svg" />
-                  </div>
-                ) : (
-                  <span
-                    className="sidebar__tree-drag-handle-spacer"
-                    aria-hidden
-                  />
-                )
-              ) : null}
             </div>
           ) : null}
         </div>

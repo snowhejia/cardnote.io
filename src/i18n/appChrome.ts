@@ -332,7 +332,6 @@ export type AppChrome = {
   railFiles: string;
   railTopic: string;
   railClip: string;
-  railWork: string;
   railTask: string;
   railProject: string;
   railExpense: string;
@@ -346,13 +345,7 @@ export type AppChrome = {
   /** rail 右侧分割线上的展开/收起切换按钮 */
   railExpand: string;
   railCollapse: string;
-  overviewQuickLinksHeading: string;
   overviewRecentCollectionsHeading: string;
-  overviewStatsHeading: string;
-  overviewStatCards: string;
-  overviewStatFiles: string;
-  overviewStatCollections: string;
-  overviewStatReminders: string;
 };
 
 const zh: AppChrome = {
@@ -676,7 +669,6 @@ const zh: AppChrome = {
   railFiles: "文件",
   railTopic: "主题",
   railClip: "剪藏",
-  railWork: "作品",
   railTask: "任务",
   railProject: "项目",
   railExpense: "开支",
@@ -689,13 +681,7 @@ const zh: AppChrome = {
   railAriaNav: "主导航",
   railExpand: "展开主导航",
   railCollapse: "收起主导航",
-  overviewQuickLinksHeading: "快速入口",
   overviewRecentCollectionsHeading: "最近合集",
-  overviewStatsHeading: "数据统计",
-  overviewStatCards: "卡片",
-  overviewStatFiles: "文件",
-  overviewStatCollections: "合集",
-  overviewStatReminders: "待办",
 };
 
 const en: AppChrome = {
@@ -1029,7 +1015,6 @@ const en: AppChrome = {
   railFiles: "Files",
   railTopic: "Topics",
   railClip: "Clips",
-  railWork: "Work",
   railTask: "Task",
   railProject: "Project",
   railExpense: "Expense",
@@ -1042,13 +1027,7 @@ const en: AppChrome = {
   railAriaNav: "Primary nav",
   railExpand: "Expand primary nav",
   railCollapse: "Collapse primary nav",
-  overviewQuickLinksHeading: "Quick links",
   overviewRecentCollectionsHeading: "Recent collections",
-  overviewStatsHeading: "At a glance",
-  overviewStatCards: "Cards",
-  overviewStatFiles: "Files",
-  overviewStatCollections: "Collections",
-  overviewStatReminders: "To-dos",
 };
 
 export function getAppChrome(lang: LoginUiLang): AppChrome {

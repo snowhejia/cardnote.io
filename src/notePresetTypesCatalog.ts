@@ -309,18 +309,6 @@ export const PRESET_OBJECT_TYPES_GROUPS: PresetTypeGroup[] = [
           { id: "sf-concept-ref-url", name: "参考链接", type: "url", order: 1 },
         ],
       },
-    ],
-  },
-  {
-    baseId: "work",
-    baseLabelZh: "作品",
-    baseLabelEn: "Work",
-    baseEmoji: "📚",
-    baseTint: "rgba(139, 92, 246, 0.14)",
-    schemaFields: [
-      { id: "sf-work-title", name: "标题", type: "text", order: -1 },
-    ],
-    children: [
       {
         id: "work_book",
         nameZh: "书籍",

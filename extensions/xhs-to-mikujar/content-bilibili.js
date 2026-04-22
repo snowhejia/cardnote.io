@@ -866,8 +866,6 @@ async function scrapeBilibiliVideoPageAsync(mainWorldPlay) {
     clipCid,
     pageUrl,
     authorNickname: author,
-    /** 写入「简介」自定义属性（与正文一致） */
-    intro: descClean.trim() || null,
     /** 与剪藏预设 sf-bili-date / sf-bili-duration 一致 */
     publishDateYmd,
     durationSec,

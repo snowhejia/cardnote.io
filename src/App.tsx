@@ -190,6 +190,8 @@ import {
   datesWithNoteAddedOn,
   datesWithReminderOn,
   favoriteCollectionsStorageKey,
+  recentCollectionsStorageKey,
+  RECENT_COLLECTIONS_LIMIT,
   findCardInTree,
   findCollectionById,
   readCollapsedFolderIdsFromStorage,
@@ -199,12 +201,14 @@ import {
   PERSISTED_WORKSPACE_ALL_NOTES,
   PERSISTED_WORKSPACE_ALL_ATTACHMENTS,
   PERSISTED_WORKSPACE_CONNECTIONS,
+  PERSISTED_WORKSPACE_OVERVIEW,
   PERSISTED_WORKSPACE_REMINDERS,
   formatCalendarDayTitle,
   initTimelineColumnPreferenceIfNeeded,
   insertChildCollection,
   INITIAL_WORKSPACE,
   loadFavoriteCollectionIds,
+  loadRecentCollectionIds,
   loadTrashedNoteEntries,
   localDateString,
   LOOSE_NOTES_COLLECTION_ID,
@@ -240,6 +244,7 @@ import {
   removeBidirectionalRelated,
   removeCollectionFromTree,
   saveFavoriteCollectionIds,
+  saveRecentCollectionIds,
   saveTrashedNoteEntries,
   SidebarWorkspaceIdentity,
   splitPinnedCards,
@@ -346,7 +351,6 @@ function sidebarFilesSectionHasChildCollections(
 
 /** 侧栏中单独分区的 catalog 顶层 id（启用对应预设时显示；未启用则整块隐藏） */
 const SIDEBAR_COLLAPSIBLE_PRESET_BASE_IDS = [
-  "work",
   "task",
   "project",
   "expense",
@@ -565,6 +569,11 @@ export default function App() {
     [currentUser?.id]
   );
 
+  const recentCollectionsKey = useMemo(
+    () => recentCollectionsStorageKey(currentUser?.id ?? null),
+    [currentUser?.id]
+  );
+
   const trashStorageKey = useMemo(
     () => trashCardsStorageKey(dataMode, currentUser?.id ?? null),
     [dataMode, currentUser?.id]
@@ -645,10 +654,12 @@ export default function App() {
   const mainHeaderRef = useRef<HTMLElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
   const allNotesLoadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
+  const overviewLoadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
   const collectionRestSentinelRef = useRef<HTMLDivElement | null>(null);
   const calendarRestSentinelRef = useRef<HTMLDivElement | null>(null);
   const searchNotesSentinelRef = useRef<HTMLDivElement | null>(null);
   const allNotesViewSessionRef = useRef(false);
+  const overviewViewSessionRef = useRef(false);
   const collectionTimelineSessionRef = useRef<string | undefined>(undefined);
   const calendarDayRestSessionRef = useRef<string | null>(null);
   const searchTimelineSessionRef = useRef("");
@@ -734,6 +745,9 @@ export default function App() {
   const [favoriteCollectionIds, setFavoriteCollectionIds] = useState<
     Set<string>
   >(() => new Set());
+  const [recentCollectionIds, setRecentCollectionIds] = useState<string[]>(
+    () => []
+  );
   const [trashEntries, setTrashEntries] = useState<TrashedNoteEntry[]>([]);
   const [trashViewActive, setTrashViewActive] = useState(false);
   const [allNotesViewActive, setAllNotesViewActive] = useState(() => {
@@ -750,6 +764,9 @@ export default function App() {
     return false;
   });
   const [allNotesVisibleCount, setAllNotesVisibleCount] = useState(
+    TIMELINE_VIRTUAL_BATCH
+  );
+  const [overviewVisibleCount, setOverviewVisibleCount] = useState(
     TIMELINE_VIRTUAL_BATCH
   );
   const [collectionRestVisibleCount, setCollectionRestVisibleCount] = useState(
@@ -1367,7 +1384,6 @@ export default function App() {
           if (base === "file") n.files = false;
           if (base === "clip") n.clip = false;
           if (base === "topic") n.topic = false;
-          if (base === "work") n.work = false;
           if (base === "task") n.task = false;
           if (base === "project") n.project = false;
           if (base === "expense") n.expense = false;
@@ -1545,6 +1561,10 @@ export default function App() {
     showRemoteLoading,
     blockMainEdgeSwipe,
   });
+
+  useEffect(() => {
+    setRecentCollectionIds(loadRecentCollectionIds(recentCollectionsKey));
+  }, [recentCollectionsKey]);
 
   useEffect(() => {
     if (!authReady) return;
@@ -1733,10 +1753,13 @@ export default function App() {
     ) {
       return null;
     }
+    // 概览模式：activeId 为空时 active 会兜底到第一张合集，这里不应给 active 建面包屑
+    if (!activeId) return null;
     if (!active?.id) return null;
     return findCollectionPathFromRoot(collections, active.id);
   }, [
     collections,
+    activeId,
     active?.id,
     searchQuery,
     trashViewActive,
@@ -1822,7 +1845,13 @@ export default function App() {
       const savedAttachmentFilter =
         readPersistedAttachmentsFilterKey(attachmentFilterStoreKey);
 
-      if (raw === PERSISTED_WORKSPACE_ALL_NOTES) {
+      if (raw === PERSISTED_WORKSPACE_OVERVIEW) {
+        setAllNotesViewActive(false);
+        setRemindersViewActive(false);
+        setConnectionsViewActive(false);
+        setAttachmentsViewActive(false);
+        setActiveId("");
+      } else if (raw === PERSISTED_WORKSPACE_ALL_NOTES) {
         setAllNotesViewActive(true);
         setRemindersViewActive(false);
         setConnectionsViewActive(false);
@@ -1893,6 +1922,11 @@ export default function App() {
         );
       } else if (aid) {
         localStorage.setItem(activeCollectionKey, aid);
+      } else {
+        localStorage.setItem(
+          activeCollectionKey,
+          PERSISTED_WORKSPACE_OVERVIEW
+        );
       }
     } catch {
       /* ignore */
@@ -4157,14 +4191,15 @@ export default function App() {
       if (calendarDay !== null) return null;
       if (searchQuery.trim().length > 0) return null;
       const preferTop = readNewNotePlacement() === "top";
-      /** 全部笔记 / 提醒：直接落到「笔记」preset 合集根本身（其子合集如「已归档」不作为默认）；缺失时回退未归类 */
+      /** 全部笔记 / 提醒 / 概览：直接落到「笔记」preset 合集根本身（其子合集如「已归档」不作为默认）；缺失时回退未归类 */
       const resolveDefaultNoteTargetColId = (): string => {
         const noteRoot = findCollectionByPresetType(collections, "note");
         return noteRoot?.id ?? LOOSE_NOTES_COLLECTION_ID;
       };
+      const trimmedActiveId = activeId.trim();
       let targetColId =
         targetColIdOverride?.trim() ||
-        (allNotesViewActive || remindersViewActive
+        (allNotesViewActive || remindersViewActive || !trimmedActiveId
           ? resolveDefaultNoteTargetColId()
           : active?.id?.trim() ?? "");
       /** 无选中用户合集时写入未归类（不在 UI 中展示该虚拟合集名） */
@@ -4285,6 +4320,7 @@ export default function App() {
       remindersViewActive,
       calendarDay,
       active?.id,
+      activeId,
       searchQuery,
       dataMode,
       allNotesViewActive,
@@ -4678,10 +4714,15 @@ export default function App() {
         afterLocalInsert: afterLocal,
       });
       if (!cardId) return;
+      const trimmedActiveId = activeId.trim();
+      const noteRootId =
+        findCollectionByPresetType(collections, "note")?.id ?? "";
       const targetColId =
         allNotesViewActive || remindersViewActive
           ? LOOSE_NOTES_COLLECTION_ID
-          : active?.id?.trim() || LOOSE_NOTES_COLLECTION_ID;
+          : trimmedActiveId
+            ? active?.id?.trim() || LOOSE_NOTES_COLLECTION_ID
+            : noteRootId || LOOSE_NOTES_COLLECTION_ID;
       setMobileNavOpen(false);
       queueMicrotask(() => {
         setCardPageCard({ colId: targetColId, cardId });
@@ -4689,8 +4730,10 @@ export default function App() {
     })();
   }, [
     active?.id,
+    activeId,
     allNotesViewActive,
     appendNoteCardWithHtml,
+    collections,
     newNotePlacement,
     remindersViewActive,
     scrollTimelineToBottom,
@@ -5357,7 +5400,6 @@ export default function App() {
       files: Boolean(findCollectionByPresetType(collections, "file")),
       topic: Boolean(topicNavRootCol),
       clip: Boolean(clipParentCol),
-      work: Boolean(presetCatalogRootIds.work),
       task: Boolean(presetCatalogRootIds.task),
       project: Boolean(presetCatalogRootIds.project),
       expense: Boolean(presetCatalogRootIds.expense),
@@ -5425,7 +5467,6 @@ export default function App() {
         return;
       }
       if (
-        key === "work" ||
         key === "task" ||
         key === "project" ||
         key === "expense" ||
@@ -5492,39 +5533,123 @@ export default function App() {
     ]
   );
 
-  /** 概览主侧栏用：顶层合集前几个做「最近合集」占位（暂无 LRU） */
-  const recentCollectionsForOverview = useMemo(() => {
-    return collections.slice(0, 5);
+  /** 合集 id → 合集对象，供 LRU / 收藏按 id 查找 */
+  const collectionsById = useMemo(() => {
+    const m = new Map<string, Collection>();
+    walkCollections(collections, (c) => {
+      if (c.id !== LOOSE_NOTES_COLLECTION_ID) m.set(c.id, c);
+    });
+    return m;
   }, [collections]);
 
   /**
-   * 概览面板数据统计：仅顶层四个数字，快速看出库里堆了多少东西。
-   * - cards: 整棵树里所有卡片（note/file/task/… 全算上）
-   * - files: 整棵树里 isFileCard 的卡片
-   * - collections: 整棵树里合集节点数（排除虚拟未归类）
-   * - reminders: 当前所有待办条目（含未完成的）
+   * 当 activeId 指向一个真实合集时，把它 MRU 提到「最近合集」队首。
+   * 跳过 "" / 未归类 / 已不在树上的 id。
    */
-  const overviewStats = useMemo(() => {
-    let cards = 0;
-    let files = 0;
-    let cols = 0;
-    const seenCardIds = new Set<string>();
+  useEffect(() => {
+    const id = activeId;
+    if (!id) return;
+    if (!collectionsById.has(id)) return;
+    setRecentCollectionIds((prev) => {
+      if (prev[0] === id) return prev;
+      const next = [id, ...prev.filter((x) => x !== id)].slice(
+        0,
+        RECENT_COLLECTIONS_LIMIT
+      );
+      saveRecentCollectionIds(recentCollectionsKey, next);
+      return next;
+    });
+  }, [activeId, collectionsById, recentCollectionsKey]);
+
+  /** 概览主侧栏「最近合集」：按 MRU 顺序列出仍存在的合集 */
+  const recentCollectionsForOverview = useMemo(() => {
+    const out: Collection[] = [];
+    for (const id of recentCollectionIds) {
+      const col = collectionsById.get(id);
+      if (col) out.push(col);
+    }
+    return out;
+  }, [recentCollectionIds, collectionsById]);
+
+  /** 概览主侧栏「收藏」：按稳定顺序（遍历树）列出被标星的合集 */
+  const favoriteCollectionsForOverview = useMemo(() => {
+    if (favoriteCollectionIds.size === 0) return [];
+    const out: Collection[] = [];
+    walkCollections(collections, (c) => {
+      if (favoriteCollectionIds.has(c.id)) out.push(c);
+    });
+    return out;
+  }, [favoriteCollectionIds, collections]);
+
+  /**
+   * 概览主区「所有卡片」：不限形态（含 note / file / task / person …），
+   * 按 card.id 去重；一张卡在多合集出现时仅按第一次遇到的 placement 展示。
+   * 按 addedOn desc + minutesOfDay desc 排序，与「全部笔记」一致。
+   */
+  const overviewAllCards = useMemo(() => {
+    const entries: { col: Collection; card: NoteCard }[] = [];
+    const seen = new Set<string>();
     walkCollections(collections, (col) => {
-      if (col.id !== LOOSE_NOTES_COLLECTION_ID) cols += 1;
       for (const card of col.cards) {
-        if (seenCardIds.has(card.id)) continue;
-        seenCardIds.add(card.id);
-        cards += 1;
-        if (isFileCard(card)) files += 1;
+        if (seen.has(card.id)) continue;
+        seen.add(card.id);
+        entries.push({ col, card });
       }
     });
-    return {
-      cards,
-      files,
-      collections: cols,
-      reminders: allReminderEntries.length,
-    };
-  }, [collections, allReminderEntries.length]);
+    entries.sort((a, b) => {
+      const dateA = a.card.addedOn ?? "";
+      const dateB = b.card.addedOn ?? "";
+      if (dateB !== dateA) return dateB.localeCompare(dateA);
+      return (b.card.minutesOfDay ?? 0) - (a.card.minutesOfDay ?? 0);
+    });
+    return entries;
+  }, [collections]);
+
+  const overviewDisplayed = useMemo(
+    () => overviewAllCards.slice(0, overviewVisibleCount),
+    [overviewAllCards, overviewVisibleCount]
+  );
+
+  /** 进入概览时把 visibleCount 校准到当前总数的首批 */
+  useEffect(() => {
+    if (railKey !== "overview") {
+      overviewViewSessionRef.current = false;
+      return;
+    }
+    const cap = overviewAllCards.length;
+    const justEntered = !overviewViewSessionRef.current;
+    overviewViewSessionRef.current = true;
+    setOverviewVisibleCount((prev) => {
+      if (cap === 0) return 0;
+      if (justEntered) return Math.min(TIMELINE_VIRTUAL_BATCH, cap);
+      if (prev === 0) return Math.min(TIMELINE_VIRTUAL_BATCH, cap);
+      return Math.min(prev, cap);
+    });
+  }, [railKey, overviewAllCards.length]);
+
+  /** 概览滚动接近底部时增批 */
+  useEffect(() => {
+    if (railKey !== "overview") return;
+    const root = timelineRef.current;
+    const target = overviewLoadMoreSentinelRef.current;
+    if (!root || !target) return;
+    if (overviewVisibleCount >= overviewAllCards.length) return;
+
+    const io = new IntersectionObserver(
+      (entries) => {
+        const hit = entries[0];
+        if (!hit?.isIntersecting) return;
+        setOverviewVisibleCount((n) => {
+          const total = overviewAllCards.length;
+          if (n >= total) return n;
+          return Math.min(n + TIMELINE_VIRTUAL_BATCH, total);
+        });
+      },
+      { root, rootMargin: "520px 0px", threshold: 0 }
+    );
+    io.observe(target);
+    return () => io.disconnect();
+  }, [railKey, overviewVisibleCount, overviewAllCards.length]);
 
   /** rail 是否展开显示文字；持久化到 localStorage */
   const RAIL_EXPANDED_KEY = "ui:rail-expanded";
@@ -6157,12 +6282,8 @@ export default function App() {
         {railKey === "overview" ? (
           <SidebarOverviewPanel
             onPick={handleRailPick}
+            favoriteCollections={favoriteCollectionsForOverview}
             recentCollections={recentCollectionsForOverview}
-            availability={{
-              files: railAvailability.files,
-              archived: railAvailability.archived,
-            }}
-            stats={overviewStats}
           />
         ) : null}
 
@@ -6741,8 +6862,6 @@ export default function App() {
           </div>
         ) : null}
 
-        {railKey === "work" ? renderPresetCatalogSidebarSection("work") : null}
-
         {railKey === "clip" && clipParentCol ? (
           <div
             className={
@@ -7187,6 +7306,8 @@ export default function App() {
                           ? c.titleReminders
                           : calendarDay
                             ? formatCalendarDayTitle(calendarDay, appUiLang)
+                            : railKey === "overview"
+                              ? c.railOverview
                             : mainHeadingCollectionPath &&
                                 mainHeadingCollectionPath.length > 1
                               ? (
@@ -8052,6 +8173,25 @@ export default function App() {
                 {calendarRestFlatVisibleCount < calendarRestFlat.length ? (
                   <div
                     ref={calendarRestSentinelRef}
+                    className="timeline__all-notes-sentinel"
+                    aria-hidden
+                  />
+                ) : null}
+              </>
+            )
+          ) : railKey === "overview" ? (
+            overviewAllCards.length === 0 ? (
+              <div className="timeline__empty">{c.emptyGlobal}</div>
+            ) : (
+              <>
+                <MasonryShortestColumns columnCount={timelineColumnCount}>
+                  {overviewDisplayed.map(({ col, card }) =>
+                    renderNoteTimelineCard(card, col.id)
+                  )}
+                </MasonryShortestColumns>
+                {overviewVisibleCount < overviewAllCards.length ? (
+                  <div
+                    ref={overviewLoadMoreSentinelRef}
                     className="timeline__all-notes-sentinel"
                     aria-hidden
                   />

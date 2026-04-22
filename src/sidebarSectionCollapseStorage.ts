@@ -9,8 +9,6 @@ export type SidebarSectionCollapseState = {
   topic: boolean;
   /** 侧栏「剪藏」（网页剪藏 / 小红书 / B 站等） */
   clip: boolean;
-  /** 侧栏「作品」预设分区 */
-  work: boolean;
   /** 侧栏「任务」预设分区 */
   task: boolean;
   /** 侧栏「项目」预设分区 */
@@ -30,7 +28,6 @@ export function defaultSidebarSectionCollapseState(): SidebarSectionCollapseStat
     files: false,
     topic: false,
     clip: false,
-    work: false,
     task: false,
     project: false,
     expense: false,
@@ -79,7 +76,6 @@ export function readSidebarSectionsCollapsed(
       files: legacy ? Boolean(o.features) : Boolean(o.files),
       topic: typeof o.topic === "boolean" ? o.topic : false,
       clip: typeof o.clip === "boolean" ? o.clip : false,
-      work: typeof o.work === "boolean" ? o.work : false,
       task: typeof o.task === "boolean" ? o.task : false,
       project: typeof o.project === "boolean" ? o.project : false,
       expense: typeof o.expense === "boolean" ? o.expense : false,

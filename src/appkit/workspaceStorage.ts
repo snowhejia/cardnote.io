@@ -10,6 +10,9 @@ export const ACTIVE_COLLECTION_STORAGE_PREFIX = "mikujar-active-collection:";
 /** 存在 active 键上时表示主区为「全部笔记」，而非某个合集 id */
 export const PERSISTED_WORKSPACE_ALL_NOTES = "__mikujar_workspace_all_notes__";
 
+/** 主区为「概览」（默认落地页） */
+export const PERSISTED_WORKSPACE_OVERVIEW = "__mikujar_workspace_overview__";
+
 /** 主区为「我的待办」 */
 export const PERSISTED_WORKSPACE_REMINDERS = "__mikujar_workspace_reminders__";
 
@@ -135,6 +138,40 @@ export function loadFavoriteCollectionIds(key: string): Set<string> {
 export function saveFavoriteCollectionIds(key: string, ids: Set<string>): void {
   try {
     localStorage.setItem(key, JSON.stringify([...ids]));
+  } catch {
+    /* quota / 隐私模式 */
+  }
+}
+
+export const RECENT_COLLECTIONS_STORAGE_PREFIX = "mikujar-recent-collections:";
+
+/** 概览侧栏「最近合集」上限：MRU 队列最大长度 */
+export const RECENT_COLLECTIONS_LIMIT = 8;
+
+export function recentCollectionsStorageKey(userId: string | null): string {
+  return `${RECENT_COLLECTIONS_STORAGE_PREFIX}${userId ?? "guest"}`;
+}
+
+export function loadRecentCollectionIds(key: string): string[] {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((x): x is string => typeof x === "string" && x.length > 0)
+      .slice(0, RECENT_COLLECTIONS_LIMIT);
+  } catch {
+    return [];
+  }
+}
+
+export function saveRecentCollectionIds(key: string, ids: string[]): void {
+  try {
+    localStorage.setItem(
+      key,
+      JSON.stringify(ids.slice(0, RECENT_COLLECTIONS_LIMIT))
+    );
   } catch {
     /* quota / 隐私模式 */
   }

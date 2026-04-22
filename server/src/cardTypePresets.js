@@ -223,16 +223,6 @@ export const PRESET_TREE = [
           ],
         },
       },
-    ],
-  },
-  {
-    slug: "work",
-    kind: "work",
-    name: "作品",
-    schema: {
-      fields: [{ id: "sf-work-title", name: "标题", type: "text", order: -1 }],
-    },
-    children: [
       {
         slug: "work_book",
         name: "书籍",
