@@ -188,7 +188,7 @@ export function CollectionTemplateModal({
                   <CollectionIconGlyph
                     shape={opt.value}
                     color={dotColor}
-                    size={14}
+                    size={22}
                   />
                 </button>
               );

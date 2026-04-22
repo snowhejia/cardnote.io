@@ -245,7 +245,24 @@ export type CollectionIconShape =
   | "diamond"
   | "star"
   | "cross"
-  | "check";
+  | "check"
+  | "heart"
+  | "moon"
+  | "lightning"
+  | "clover"
+  | "flower"
+  | "plus"
+  | "bell"
+  | "bookmark"
+  | "fish"
+  | "paw"
+  | "rocket"
+  | "sword"
+  | "crown"
+  | "music"
+  | "cloud"
+  | "skull"
+  | "fire";
 
 export type Collection = {
   id: string;

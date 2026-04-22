@@ -8705,21 +8705,28 @@ div.card__text--readonly:not(.card__text--preview) {
 }
 
 .collection-template-modal__shape-row {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
   gap: 8px;
+  max-width: 360px;
+}
+
+@media (max-width: 560px) {
+  .collection-template-modal__shape-row {
+    grid-template-columns: repeat(6, 1fr);
+  }
 }
 
 .collection-template-modal__shape-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
+  aspect-ratio: 1 / 1;
+  width: 100%;
   padding: 0;
-  border-radius: 8px;
-  border: 1px solid rgba(55, 53, 47, 0.12);
-  background: #ffffff;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: rgba(247, 244, 239, 0.9);
   cursor: pointer;
   transition:
     border-color 0.12s ease,
@@ -8728,14 +8735,13 @@ div.card__text--readonly:not(.card__text--preview) {
 }
 
 .collection-template-modal__shape-btn:hover {
-  border-color: rgba(55, 53, 47, 0.3);
-  background: rgba(55, 53, 47, 0.04);
+  background: rgba(240, 234, 225, 1);
 }
 
 .collection-template-modal__shape-btn.is-active {
-  border-color: rgba(35, 131, 226, 0.9);
-  background: rgba(35, 131, 226, 0.08);
-  box-shadow: 0 0 0 2px rgba(35, 131, 226, 0.12);
+  border-color: rgba(55, 53, 47, 0.7);
+  background: rgba(247, 244, 239, 0.6);
+  box-shadow: 0 0 0 1px rgba(55, 53, 47, 0.1);
 }
 
 .collection-template-modal__color-row {
