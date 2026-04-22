@@ -69,6 +69,7 @@ function migrateOneCollection(c: LegacyCollection): Collection {
     isCategory?: boolean;
     cardSchema?: CollectionCardSchema;
     presetTypeId?: string;
+    iconShape?: string;
   };
   return {
     id: c.id,
@@ -83,6 +84,9 @@ function migrateOneCollection(c: LegacyCollection): Collection {
       : {}),
     ...(typeof raw.presetTypeId === "string" && raw.presetTypeId.trim()
       ? { presetTypeId: raw.presetTypeId.trim() }
+      : {}),
+    ...(typeof raw.iconShape === "string" && raw.iconShape.trim()
+      ? { iconShape: raw.iconShape.trim() as Collection["iconShape"] }
       : {}),
     cards,
     children: children.length > 0 ? children : undefined,

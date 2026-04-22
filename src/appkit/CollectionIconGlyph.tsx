@@ -17,12 +17,13 @@ const ICON_LIBRARY = {
   dot: {
     labelZh: "圆点",
     labelEn: "Dot",
-    body: <circle cx="12" cy="12" r="6" />,
+    /** 半径与旧版 .sidebar__dot 8×8 填充圆点视觉等价（viewBox 24 → r=10.5 ≈ 87%） */
+    body: <circle cx="12" cy="12" r="10.5" />,
   },
   square: {
     labelZh: "方块",
     labelEn: "Square",
-    body: <rect x="5" y="5" width="14" height="14" rx="2" />,
+    body: <rect x="3" y="3" width="18" height="18" rx="2.5" />,
   },
   triangle: {
     labelZh: "三角",
