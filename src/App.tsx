@@ -5503,6 +5503,27 @@ export default function App() {
     return collections.slice(0, 5);
   }, [collections]);
 
+  /** rail 是否展开显示文字；持久化到 localStorage */
+  const RAIL_EXPANDED_KEY = "ui:rail-expanded";
+  const [railExpanded, setRailExpanded] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(RAIL_EXPANDED_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const handleToggleRailExpanded = useCallback(() => {
+    setRailExpanded((v) => {
+      const next = !v;
+      try {
+        localStorage.setItem(RAIL_EXPANDED_KEY, next ? "1" : "0");
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  }, []);
+
   const {
     onCollectionRowDragStart,
     onCollectionRowDragEnd,
@@ -5930,7 +5951,8 @@ export default function App() {
         (showMobileSidebarBrowseChrome ? " app--mobile-nav-open" : "") +
         (tabletSplitNav ? " app--tablet-split-nav" : "") +
         (timelineColumnCount > 1 ? " app--masonry" : "") +
-        (connectionsViewActive ? " app--connections-board" : "")
+        (connectionsViewActive ? " app--connections-board" : "") +
+        (railExpanded ? " app--rail-expanded" : "")
       }
     >
       {showRemoteLoading ? (
@@ -5963,6 +5985,8 @@ export default function App() {
         activeKey={railKey}
         onPick={handleRailPick}
         availability={railAvailability}
+        expanded={railExpanded}
+        onToggleExpanded={handleToggleRailExpanded}
       />
       <aside
         className="sidebar"

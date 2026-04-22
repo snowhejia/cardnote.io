@@ -201,14 +201,17 @@ export type SidebarRailProps = {
   activeKey: RailKey;
   onPick: (key: RailKey) => void;
   availability: RailAvailability;
+  expanded: boolean;
+  onToggleExpanded: () => void;
 };
 
 /**
  * 窄导航条：所有顶层入口（大类型 + 工具/系统视图）集中在这里。
- * 纯图标 56px 宽，hover/focus 弹 tooltip；点击通过 onPick 委托给 App.tsx。
+ * 默认 56px 纯图标 + tooltip；点击右侧分割线可展开到更宽，显示文字。
+ * 点击通过 onPick 委托给 App.tsx。
  */
 export function SidebarRail(props: SidebarRailProps): ReactNode {
-  const { activeKey, onPick, availability } = props;
+  const { activeKey, onPick, availability, expanded, onToggleExpanded } = props;
   const ui = useAppChrome();
   const contentItems = filterItems(
     RAIL_ITEMS.filter((it) => it.group === "content"),
@@ -229,7 +232,7 @@ export function SidebarRail(props: SidebarRailProps): ReactNode {
         className={"rail__item" + (isActive ? " is-active" : "")}
         aria-label={label}
         aria-current={isActive ? "page" : undefined}
-        title={label}
+        title={expanded ? undefined : label}
         onClick={() => onPick(it.key)}
       >
         <RailIcon
@@ -238,16 +241,31 @@ export function SidebarRail(props: SidebarRailProps): ReactNode {
           size={22}
           className="rail__icon"
         />
-        <span className="rail__tip">{label}</span>
+        {expanded ? (
+          <span className="rail__label">{label}</span>
+        ) : (
+          <span className="rail__tip">{label}</span>
+        )}
       </button>
     );
   };
 
   return (
-    <nav className="rail" aria-label={ui.railAriaNav}>
+    <nav
+      className={"rail" + (expanded ? " rail--expanded" : "")}
+      aria-label={ui.railAriaNav}
+    >
       <div className="rail__group">{contentItems.map(renderItem)}</div>
       <hr className="rail__rule" />
       <div className="rail__group">{systemItems.map(renderItem)}</div>
+      <button
+        type="button"
+        className="rail__divider-toggle"
+        aria-label={expanded ? ui.railCollapse : ui.railExpand}
+        aria-expanded={expanded}
+        title={expanded ? ui.railCollapse : ui.railExpand}
+        onClick={onToggleExpanded}
+      />
     </nav>
   );
 }

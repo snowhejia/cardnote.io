@@ -343,6 +343,9 @@ export type AppChrome = {
   railArchived: string;
   railTrash: string;
   railAriaNav: string;
+  /** rail 右侧分割线上的展开/收起切换按钮 */
+  railExpand: string;
+  railCollapse: string;
   overviewQuickLinksHeading: string;
   overviewRecentCollectionsHeading: string;
 };
@@ -679,6 +682,8 @@ const zh: AppChrome = {
   railArchived: "已归档",
   railTrash: "回收站",
   railAriaNav: "主导航",
+  railExpand: "展开主导航",
+  railCollapse: "收起主导航",
   overviewQuickLinksHeading: "快速入口",
   overviewRecentCollectionsHeading: "最近合集",
 };
@@ -1025,6 +1030,8 @@ const en: AppChrome = {
   railArchived: "Archived",
   railTrash: "Trash",
   railAriaNav: "Primary nav",
+  railExpand: "Expand primary nav",
+  railCollapse: "Collapse primary nav",
   overviewQuickLinksHeading: "Quick links",
   overviewRecentCollectionsHeading: "Recent collections",
 };

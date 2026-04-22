@@ -14,8 +14,10 @@
 
 .app {
   display: grid;
-  /* 左侧窄 rail（56px） + 主侧栏（260px） + 主内容 */
-  grid-template-columns: 56px 260px 1fr;
+  /* 左侧窄 rail（可展开显示文字） + 主侧栏（260px） + 主内容 */
+  --rail-width: 56px;
+  grid-template-columns: var(--rail-width) 260px 1fr;
+  transition: grid-template-columns 0.16s ease;
   /* 单行占满视口高度，避免右侧笔记撑高整行导致侧栏被拉长 */
   grid-template-rows: minmax(0, 1fr);
   height: 100%;
@@ -1467,7 +1469,10 @@
   cursor: grabbing;
 }
 
-/* —— 左侧 rail（纯图标主导航） —— */
+/* —— 左侧 rail（纯图标主导航；可点分割线展开到文字版） —— */
+.app--rail-expanded {
+  --rail-width: 168px;
+}
 .rail {
   position: relative;
   z-index: 2;
@@ -1488,23 +1493,27 @@
 .rail__group {
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: stretch;
   gap: 4px;
   width: 100%;
+  padding: 0 8px;
+  box-sizing: border-box;
 }
 .rail__rule {
-  width: 28px;
+  width: calc(100% - 24px);
   border: none;
   border-top: 1px solid rgba(55, 53, 47, 0.1);
-  margin: 6px 0;
+  margin: 6px auto;
 }
 .rail__item {
   position: relative;
-  width: 40px;
-  height: 40px;
-  display: grid;
-  place-items: center;
-  padding: 0;
+  width: 100%;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 0 6px;
   border: none;
   border-radius: 9px;
   background: transparent;
@@ -1513,6 +1522,7 @@
   transition:
     background 0.12s ease,
     color 0.12s ease;
+  text-align: left;
 }
 .rail__item:hover {
   background: rgba(55, 53, 47, 0.06);
@@ -1538,6 +1548,26 @@
 }
 .rail__icon {
   display: block;
+  flex: 0 0 auto;
+}
+/* 展开态：左对齐 + 文字标签，隐藏 tooltip */
+.rail--expanded .rail__item {
+  justify-content: flex-start;
+  padding: 0 10px;
+}
+.rail__label {
+  font-size: 0.88rem;
+  line-height: 1.2;
+  color: rgba(55, 53, 47, 0.82);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.rail__item.is-active .rail__label {
+  color: rgba(55, 53, 47, 0.95);
+  font-weight: 500;
 }
 .rail__tip {
   position: absolute;
@@ -1559,6 +1589,28 @@
 .rail__item:hover .rail__tip,
 .rail__item:focus-visible .rail__tip {
   opacity: 1;
+}
+
+/* rail 与 sidebar 之间的分割线：点一下切换展开/收起 */
+.rail__divider-toggle {
+  position: absolute;
+  top: 0;
+  right: -4px;
+  bottom: 0;
+  width: 8px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: ew-resize;
+  z-index: 3;
+  transition: background 0.12s ease;
+}
+.rail__divider-toggle:hover {
+  background: rgba(35, 131, 226, 0.18);
+}
+.rail__divider-toggle:focus-visible {
+  outline: 2px solid rgba(35, 131, 226, 0.6);
+  outline-offset: -2px;
 }
 
 /* —— 侧边栏（Notion 式：浅底、分区小标题、圆角选中、彩色圆点） —— */
