@@ -3228,6 +3228,11 @@
   outline: none;
 }
 
+/* 让合集名撑满剩余空间，数量徽章贴到右端（与 .sidebar__file-subtype-body 行为一致） */
+.sidebar__item-hit > .sidebar__name {
+  flex: 1;
+}
+
 .sidebar__item-hit:focus-visible {
   outline: 2px solid rgba(37, 99, 235, 0.4);
   outline-offset: 1px;
