@@ -5,14 +5,20 @@ import { CollectionIconGlyph } from "./CollectionIconGlyph";
 import { RailIcon } from "./RailIcon";
 import type { RailIconKey } from "./RailIcon";
 import { toContrastyGlyphColor } from "../sidebarDotColor";
-import type { RailKey } from "./SidebarRail";
+import { RAIL_ITEMS, type RailKey } from "./SidebarRail";
 
 type QuickLink = {
   key: RailKey;
   label: string;
   icon: RailIconKey;
+  color: string;
   show: boolean;
 };
+
+/** 从 RAIL_ITEMS 找对应项的 icon / color，保持概览面板 与 rail 一致 */
+function lookupRailItem(key: RailKey) {
+  return RAIL_ITEMS.find((it) => it.key === key);
+}
 
 export type SidebarOverviewPanelProps = {
   onPick: (key: RailKey, opts?: { collectionId?: string }) => void;
@@ -34,25 +40,20 @@ export function SidebarOverviewPanel(
   const { onPick, recentCollections, availability } = props;
   const ui = useAppChrome();
 
+  const make = (key: RailKey, label: string, show: boolean): QuickLink | null => {
+    const src = lookupRailItem(key);
+    if (!src) return null;
+    return { key, icon: src.icon, color: src.color, label, show };
+  };
   const quickLinks: QuickLink[] = [
-    { key: "notes", icon: "arch", label: ui.railNotes, show: true },
-    {
-      key: "files",
-      icon: "stair",
-      label: ui.railFiles,
-      show: availability.files,
-    },
-    { key: "calendar", icon: "ring", label: ui.railCalendar, show: true },
-    { key: "reminders", icon: "sparkle", label: ui.railReminders, show: true },
-    { key: "connections", icon: "peanut", label: ui.railConnections, show: true },
-    {
-      key: "archived",
-      icon: "scallop",
-      label: ui.railArchived,
-      show: availability.archived,
-    },
-    { key: "trash", icon: "sStep", label: ui.railTrash, show: true },
-  ];
+    make("notes", ui.railNotes, true),
+    make("files", ui.railFiles, availability.files),
+    make("calendar", ui.railCalendar, true),
+    make("reminders", ui.railReminders, true),
+    make("connections", ui.railConnections, true),
+    make("archived", ui.railArchived, availability.archived),
+    make("trash", ui.railTrash, true),
+  ].filter((q): q is QuickLink => q !== null);
 
   return (
     <div className="sidebar__overview" role="listbox" aria-label={ui.railOverview}>
@@ -72,6 +73,7 @@ export function SidebarOverviewPanel(
               >
                 <RailIcon
                   shape={q.icon}
+                  color={q.color}
                   size={16}
                   className="sidebar__overview-icon"
                 />

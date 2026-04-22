@@ -60,18 +60,33 @@ type RailItemDef = {
     | "railTrash";
   /** 未命中 availability 时本项整个不渲染 */
   availabilityKey?: keyof RailAvailability;
+  /** 覆盖 shape 的缺省色：rail 里 15 项各用一个，保持「彩虹」但不跳出当前大地/暖粉色系 */
+  color: string;
   group: RailGroup;
 };
 
 /** 导航顺序。预设大类型全部平行放在 content 组，无分小组。 */
 export const RAIL_ITEMS: RailItemDef[] = [
-  { key: "overview", icon: "twinkle", labelKey: "railOverview", group: "content" },
-  { key: "notes", icon: "arch", labelKey: "railNotes", group: "content" },
+  {
+    key: "overview",
+    icon: "twinkle",
+    labelKey: "railOverview",
+    color: "#E6A82A", // mustard
+    group: "content",
+  },
+  {
+    key: "notes",
+    icon: "arch",
+    labelKey: "railNotes",
+    color: "#E3A0AB", // rose pink
+    group: "content",
+  },
   {
     key: "files",
     icon: "stair",
     labelKey: "railFiles",
     availabilityKey: "files",
+    color: "#1F5F57", // deep teal
     group: "content",
   },
   {
@@ -79,6 +94,7 @@ export const RAIL_ITEMS: RailItemDef[] = [
     icon: "petal",
     labelKey: "railTopic",
     availabilityKey: "topic",
+    color: "#B57A9A", // mauve
     group: "content",
   },
   {
@@ -86,6 +102,7 @@ export const RAIL_ITEMS: RailItemDef[] = [
     icon: "arc",
     labelKey: "railClip",
     availabilityKey: "clip",
+    color: "#E68045", // orange
     group: "content",
   },
   {
@@ -93,6 +110,7 @@ export const RAIL_ITEMS: RailItemDef[] = [
     icon: "hourglass",
     labelKey: "railWork",
     availabilityKey: "work",
+    color: "#7F8F4F", // olive
     group: "content",
   },
   {
@@ -100,6 +118,7 @@ export const RAIL_ITEMS: RailItemDef[] = [
     icon: "dots",
     labelKey: "railTask",
     availabilityKey: "task",
+    color: "#D98A3A", // amber
     group: "content",
   },
   {
@@ -107,6 +126,7 @@ export const RAIL_ITEMS: RailItemDef[] = [
     icon: "butterfly",
     labelKey: "railProject",
     availabilityKey: "project",
+    color: "#DE4A2C", // coral red
     group: "content",
   },
   {
@@ -114,6 +134,7 @@ export const RAIL_ITEMS: RailItemDef[] = [
     icon: "capsule",
     labelKey: "railExpense",
     availabilityKey: "expense",
+    color: "#8CB1D9", // periwinkle
     group: "content",
   },
   {
@@ -121,19 +142,45 @@ export const RAIL_ITEMS: RailItemDef[] = [
     icon: "heart",
     labelKey: "railAccount",
     availabilityKey: "account",
+    color: "#E88368", // salmon
     group: "content",
   },
-  { key: "calendar", icon: "ring", labelKey: "railCalendar", group: "system" },
-  { key: "reminders", icon: "sparkle", labelKey: "railReminders", group: "system" },
-  { key: "connections", icon: "peanut", labelKey: "railConnections", group: "system" },
+  {
+    key: "calendar",
+    icon: "ring",
+    labelKey: "railCalendar",
+    color: "#4C6C9A", // navy
+    group: "system",
+  },
+  {
+    key: "reminders",
+    icon: "sparkle",
+    labelKey: "railReminders",
+    color: "#E5C263", // gold
+    group: "system",
+  },
+  {
+    key: "connections",
+    icon: "peanut",
+    labelKey: "railConnections",
+    color: "#A696C4", // lavender
+    group: "system",
+  },
   {
     key: "archived",
     icon: "scallop",
     labelKey: "railArchived",
     availabilityKey: "archived",
+    color: "#9FAD72", // sage
     group: "system",
   },
-  { key: "trash", icon: "sStep", labelKey: "railTrash", group: "system" },
+  {
+    key: "trash",
+    icon: "sStep",
+    labelKey: "railTrash",
+    color: "#5C9D8F", // seafoam
+    group: "system",
+  },
 ];
 
 function filterItems(
@@ -181,7 +228,12 @@ export function SidebarRail(props: SidebarRailProps): ReactNode {
         title={label}
         onClick={() => onPick(it.key)}
       >
-        <RailIcon shape={it.icon} size={22} className="rail__icon" />
+        <RailIcon
+          shape={it.icon}
+          color={it.color}
+          size={22}
+          className="rail__icon"
+        />
         <span className="rail__tip">{label}</span>
       </button>
     );
