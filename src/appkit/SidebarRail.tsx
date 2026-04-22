@@ -241,11 +241,7 @@ export function SidebarRail(props: SidebarRailProps): ReactNode {
           size={22}
           className="rail__icon"
         />
-        {expanded ? (
-          <span className="rail__label">{label}</span>
-        ) : (
-          <span className="rail__tip">{label}</span>
-        )}
+        {expanded ? <span className="rail__label">{label}</span> : null}
       </button>
     );
   };

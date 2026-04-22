@@ -1569,27 +1569,7 @@
   color: rgba(55, 53, 47, 0.95);
   font-weight: 500;
 }
-.rail__tip {
-  position: absolute;
-  left: 48px;
-  top: 50%;
-  transform: translateY(-50%);
-  white-space: nowrap;
-  background: rgba(55, 53, 47, 0.92);
-  color: #fff;
-  font-size: 12px;
-  line-height: 1;
-  padding: 5px 8px;
-  border-radius: 6px;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.12s ease 0.28s;
-  z-index: 40;
-}
-.rail__item:hover .rail__tip,
-.rail__item:focus-visible .rail__tip {
-  opacity: 1;
-}
+/* 收起态下浮层 tooltip 已去掉；hover/focus 时由 button[title] 走浏览器默认提示 */
 
 /* rail 与 sidebar 之间的分割线：点一下切换展开/收起 */
 .rail__divider-toggle {
