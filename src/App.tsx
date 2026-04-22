@@ -811,9 +811,6 @@ export default function App() {
   });
   const [attachmentsViewActive, setAttachmentsViewActive] = useState(() => {
     try {
-      if (typeof window !== "undefined" && matchesMobileChromeMedia()) {
-        return false;
-      }
       if (getAppDataMode() === "local") {
         const k = activeCollectionStorageKey("local", null);
         return (
@@ -1853,19 +1850,11 @@ export default function App() {
           setAttachmentsViewActive(false);
         }
       } else if (raw === PERSISTED_WORKSPACE_ALL_ATTACHMENTS) {
-        if (matchesMobileChromeMedia()) {
-          setAttachmentsViewActive(false);
-          setAllNotesViewActive(true);
-          setRemindersViewActive(false);
-          setConnectionsViewActive(false);
-          setConnectionsPrimed(false);
-        } else {
-          setAttachmentsViewActive(true);
-          setAllNotesViewActive(false);
-          setRemindersViewActive(false);
-          setConnectionsViewActive(false);
-          setConnectionsPrimed(false);
-        }
+        setAttachmentsViewActive(true);
+        setAllNotesViewActive(false);
+        setRemindersViewActive(false);
+        setConnectionsViewActive(false);
+        setConnectionsPrimed(false);
       }
       if (savedAttachmentFilter) {
         setAttachmentsFilterKey(savedAttachmentFilter);
