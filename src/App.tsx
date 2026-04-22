@@ -1085,14 +1085,13 @@ export default function App() {
     return () => mq.removeEventListener("change", onMq);
   }, []);
 
-  /** 窄屏无「笔记探索 / 文件」入口：从桌面切入窄屏或误入对应态时回到全部笔记 */
+  /** 窄屏无「笔记探索」入口（文件保留，手机端也要能进「文件」视图） */
   useEffect(() => {
     if (!narrowUi) return;
-    if (!connectionsViewActive && !attachmentsViewActive) return;
+    if (!connectionsViewActive) return;
     setConnectionsViewActive(false);
-    setAttachmentsViewActive(false);
     setAllNotesViewActive(true);
-  }, [narrowUi, connectionsViewActive, attachmentsViewActive]);
+  }, [narrowUi, connectionsViewActive]);
 
   useEffect(() => {
     const mq = window.matchMedia(TABLET_WIDE_TOUCH_MEDIA);
