@@ -294,13 +294,13 @@ const CONNECTIONS_EDGE_BATCH = 500;
 const FILE_PRESET_SUBTYPE_ITEMS =
   PRESET_OBJECT_TYPES_GROUPS.find((g) => g.baseId === "file")?.children ?? [];
 
-/** 侧栏文件子类型圆点（与 preset 色相一致，与合集树圆点同级） */
+/** 侧栏文件子类型圆点：从大地色系里挑相邻 5 色，与 rail / 合集默认色一致 */
 const FILE_SUBTYPE_SIDEBAR_DOT: Record<string, string> = {
-  file_image: "#db2777",
-  file_video: "#7c3aed",
-  file_audio: "#0284c7",
-  file_document: "#57534e",
-  file_other: "#78716c",
+  file_image: "#E88368", // salmon
+  file_video: "#B57A9A", // mauve
+  file_audio: "#4C6C9A", // navy
+  file_document: "#7F8F4F", // olive
+  file_other: "#9FAD72", // sage
 };
 
 /** 侧栏「主题」子类型（与对象类型目录一致） */

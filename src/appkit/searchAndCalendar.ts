@@ -101,10 +101,30 @@ export function buildCalendarCells(
   return cells;
 }
 
-/** 新建合集侧栏圆点：随机色相，饱和度与亮度控制在易辨认、不过分刺眼 */
+/**
+ * 合集侧栏默认调色板：与左侧 rail 共用的大地/暖粉色系 15 色。
+ * 把新建合集 / 合集设置 / 文件子类型默认色统一到这套。
+ */
+export const EARTHY_DOT_PALETTE: readonly string[] = [
+  "#DE4A2C", // coral
+  "#E88368", // salmon
+  "#E68045", // orange
+  "#D98A3A", // amber
+  "#E6A82A", // mustard
+  "#E5C263", // gold
+  "#7F8F4F", // olive
+  "#9FAD72", // sage
+  "#1F5F57", // teal
+  "#5C9D8F", // seafoam
+  "#8CB1D9", // periwinkle
+  "#4C6C9A", // navy
+  "#A696C4", // lavender
+  "#B57A9A", // mauve
+  "#E3A0AB", // rose
+];
+
+/** 新建合集侧栏圆点：从大地色系里随机挑一个 */
 export function randomDotColor(): string {
-  const h = Math.floor(Math.random() * 360);
-  const s = 48 + Math.floor(Math.random() * 28);
-  const l = 48 + Math.floor(Math.random() * 14);
-  return `hsl(${h} ${s}% ${l}%)`;
+  const i = Math.floor(Math.random() * EARTHY_DOT_PALETTE.length);
+  return EARTHY_DOT_PALETTE[i];
 }

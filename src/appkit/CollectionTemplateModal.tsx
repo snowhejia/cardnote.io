@@ -67,20 +67,23 @@ const FIELD_TYPE_LABELS: Record<
   url: { zh: "链接", en: "URL" },
 };
 
-/** 预设调色板：和已有 randomDotColor 里用到的色相一致 */
+/** 预设调色板：与 rail / randomDotColor 共享的大地色系 15 色 */
 const PRESET_COLORS: string[] = [
-  "#ef4444",
-  "#f97316",
-  "#f59e0b",
-  "#22c55e",
-  "#10b981",
-  "#0ea5e9",
-  "#3b82f6",
-  "#6366f1",
-  "#8b5cf6",
-  "#ec4899",
-  "#a8a29e",
-  "#111827",
+  "#DE4A2C", // coral
+  "#E88368", // salmon
+  "#E68045", // orange
+  "#D98A3A", // amber
+  "#E6A82A", // mustard
+  "#E5C263", // gold
+  "#7F8F4F", // olive
+  "#9FAD72", // sage
+  "#1F5F57", // teal
+  "#5C9D8F", // seafoam
+  "#8CB1D9", // periwinkle
+  "#4C6C9A", // navy
+  "#A696C4", // lavender
+  "#B57A9A", // mauve
+  "#E3A0AB", // rose
 ];
 
 function createFieldId(index: number) {
