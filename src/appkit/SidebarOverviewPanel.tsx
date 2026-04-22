@@ -92,13 +92,17 @@ export function SidebarOverviewPanel(
         </div>
         <div className="sidebar__overview-stats">
           {statCards.map((s) => (
-            <div
-              key={s.key}
-              className="sidebar__overview-stat"
-              style={{ borderLeftColor: s.color }}
-            >
-              <span className="sidebar__overview-stat-value">{s.value}</span>
-              <span className="sidebar__overview-stat-label">{s.label}</span>
+            <div key={s.key} className="sidebar__overview-stat">
+              <span
+                className="sidebar__overview-stat-badge"
+                style={{ background: s.color }}
+                aria-hidden
+              >
+                {s.value > 999 ? "999+" : s.value}
+              </span>
+              <span className="sidebar__overview-stat-label">
+                {s.label}
+              </span>
             </div>
           ))}
         </div>
