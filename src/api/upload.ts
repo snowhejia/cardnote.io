@@ -478,6 +478,21 @@ export async function uploadCardMedia(
   const { coverUrl, thumbnailUrl, durationSec, widthPx, heightPx } =
     await finalizeAfterUpload(base, key, kind);
 
+  /** 若服务端 finalize-video 没返回 thumbnailUrl（多半是没装 ffmpeg / 报错），
+   *  在浏览器里自己截第一帧并 PUT 上去，至少保证新视频有个能缓存的缩略图。 */
+  let effectiveThumbnailUrl: string | undefined = thumbnailUrl;
+  if (!effectiveThumbnailUrl && kind === "video") {
+    try {
+      const fallback = await captureAndUploadVideoThumbnailInBrowser(
+        base,
+        file
+      );
+      if (fallback) effectiveThumbnailUrl = fallback;
+    } catch {
+      /* 忽略：上传失败不阻塞主流程 */
+    }
+  }
+
   const out: UploadMediaResult = {
     url: pj.url,
     kind,
@@ -487,7 +502,7 @@ export async function uploadCardMedia(
     out.name = pj.name.trim();
   }
   if (coverUrl) out.coverUrl = coverUrl;
-  if (thumbnailUrl) out.thumbnailUrl = thumbnailUrl;
+  if (effectiveThumbnailUrl) out.thumbnailUrl = effectiveThumbnailUrl;
   if (durationSec !== undefined) out.durationSec = durationSec;
   let wPx = widthPx;
   let hPx = heightPx;
@@ -506,4 +521,137 @@ export async function uploadCardMedia(
     out.heightPx = hPx;
   }
   return out;
+}
+
+/**
+ * 浏览器内抓取视频第一帧为 JPEG，走 /api/upload/presign 直传 COS，返回公开 URL。
+ * 只在服务器 finalize-video 没给出 thumbnailUrl 时作为兜底调用。
+ */
+async function captureAndUploadVideoThumbnailInBrowser(
+  base: string,
+  videoFile: File
+): Promise<string | null> {
+  const blob = await captureVideoFirstFrameBlob(videoFile).catch(() => null);
+  if (!blob) {
+    console.warn(
+      "[upload] 视频缩略图浏览器兜底：抓帧失败（CORS / 不支持的编码等）",
+      { name: videoFile.name }
+    );
+    return null;
+  }
+  const stem = (videoFile.name || "video").replace(/\.[^.]+$/, "");
+  const thumbFile = new File([blob], `${stem}-thumb.jpg`, {
+    type: "image/jpeg",
+  });
+  try {
+    const pres = await fetch(
+      `${base}/api/upload/presign`,
+      apiFetchInit({
+        method: "POST",
+        headers: {
+          ...authHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          filename: thumbFile.name,
+          contentType: "image/jpeg",
+          fileSize: thumbFile.size,
+        }),
+      })
+    );
+    const pj = (await pres.json().catch(() => ({}))) as PresignJson;
+    if (!pres.ok || pj.direct !== true) return null;
+    if (typeof pj.putUrl !== "string" || typeof pj.url !== "string") return null;
+    if (pj.multipart === true) {
+      /** 缩略图恒小，不走分片路径；若服务器强行返回 multipart 直接放弃兜底 */
+      return null;
+    }
+    const headers: Record<string, string> = { ...(pj.headers ?? {}) };
+    try {
+      await xhrPutBlob(pj.putUrl, headers, thumbFile, {
+        expectedBytes: thumbFile.size,
+      });
+    } catch {
+      return null;
+    }
+    return pj.url;
+  } catch {
+    return null;
+  }
+}
+
+/** 在 <video> + <canvas> 中抓取首帧（默认 0.2s 或 5% 处）为 JPEG Blob；失败返回 null */
+function captureVideoFirstFrameBlob(file: File): Promise<Blob | null> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const video = document.createElement("video");
+    video.preload = "auto";
+    video.muted = true;
+    video.playsInline = true;
+    video.src = url;
+    let settled = false;
+    const finish = (b: Blob | null) => {
+      if (settled) return;
+      settled = true;
+      try {
+        video.removeAttribute("src");
+        video.load();
+      } catch {
+        /* ignore */
+      }
+      URL.revokeObjectURL(url);
+      resolve(b);
+    };
+    const safety = window.setTimeout(() => finish(null), 8000);
+    video.addEventListener("loadedmetadata", () => {
+      const d = Number.isFinite(video.duration) ? video.duration : 0;
+      const target = d > 0 ? Math.min(0.2, d * 0.05) : 0;
+      try {
+        video.currentTime = target;
+      } catch {
+        finish(null);
+      }
+    });
+    video.addEventListener("seeked", () => {
+      const w = video.videoWidth;
+      const h = video.videoHeight;
+      if (!w || !h) {
+        window.clearTimeout(safety);
+        finish(null);
+        return;
+      }
+      const MAX_EDGE = 720;
+      const ratio = Math.min(1, MAX_EDGE / Math.max(w, h));
+      const cw = Math.max(1, Math.round(w * ratio));
+      const ch = Math.max(1, Math.round(h * ratio));
+      const canvas = document.createElement("canvas");
+      canvas.width = cw;
+      canvas.height = ch;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        window.clearTimeout(safety);
+        finish(null);
+        return;
+      }
+      try {
+        ctx.drawImage(video, 0, 0, cw, ch);
+      } catch {
+        window.clearTimeout(safety);
+        finish(null);
+        return;
+      }
+      canvas.toBlob(
+        (b) => {
+          window.clearTimeout(safety);
+          finish(b);
+        },
+        "image/jpeg",
+        0.82
+      );
+    });
+    video.addEventListener("error", () => {
+      window.clearTimeout(safety);
+      finish(null);
+    });
+  });
 }
