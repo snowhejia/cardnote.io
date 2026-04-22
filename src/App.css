@@ -3391,11 +3391,11 @@
 }
 
 .sidebar__dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
+  width: 13px;
+  height: 13px;
   flex-shrink: 0;
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.06);
+  /* SVG 本身带 fill+stroke 圆润描边，这里不再画 box-shadow；
+     圆形形状仍靠 SVG circle 本身（≈ r=10.5/24）呈现。 */
 }
 
 .sidebar__name {
@@ -8665,8 +8665,8 @@ div.card__text--readonly:not(.card__text--preview) {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  margin-top: 10px;
-  margin-bottom: 12px;
+  /* 分节自带 margin-top + label margin-bottom 控距；这里不再叠加 */
+  margin: 0;
 }
 
 .collection-template-modal__field-row {
@@ -8682,13 +8682,138 @@ div.card__text--readonly:not(.card__text--preview) {
 
 .collection-template-modal__add-btn {
   width: 100%;
-  margin: 0 0 12px;
+  margin: 10px 0 0;
 }
 
 .collection-template-modal__actions {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
+  margin-top: 18px;
+}
+
+/* ── 合集设置：形状 / 颜色 / 属性 分节，保持三段间距一致 ─────────────── */
+.collection-template-modal__section {
+  margin-top: 18px;
+}
+
+.collection-template-modal__section:first-of-type {
+  margin-top: 6px;
+}
+
+.collection-template-modal__section-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: rgba(55, 53, 47, 0.55);
+  letter-spacing: 0.02em;
+  margin: 0 0 10px;
+}
+
+.collection-template-modal__shape-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.collection-template-modal__shape-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 8px;
+  border: 1.5px solid transparent;
+  background: transparent;
+  cursor: pointer;
+  transition:
+    border-color 0.12s ease,
+    background 0.12s ease;
+}
+
+.collection-template-modal__shape-btn:hover {
+  background: rgba(55, 53, 47, 0.06);
+}
+
+.collection-template-modal__shape-btn:focus-visible {
+  outline: 2px solid rgba(55, 53, 47, 0.28);
+  outline-offset: 1px;
+}
+
+.collection-template-modal__shape-btn.is-active {
+  border-color: rgba(55, 53, 47, 0.78);
+  background: transparent;
+}
+
+.collection-template-modal__color-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.collection-template-modal__color-swatch {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  box-shadow: 0 0 0 1px rgba(55, 53, 47, 0.12);
+  cursor: pointer;
+  transition:
+    border-color 0.1s ease,
+    transform 0.1s ease,
+    box-shadow 0.12s ease;
+}
+
+.collection-template-modal__color-swatch:hover {
+  transform: scale(1.06);
+  box-shadow: 0 0 0 1px rgba(55, 53, 47, 0.28);
+}
+
+.collection-template-modal__color-swatch.is-active {
+  border-color: #ffffff;
+  box-shadow: 0 0 0 2px rgba(35, 131, 226, 0.75);
+}
+
+/* 自由颜色选择器：画成一个色轮按钮；点它仍打开原生 color picker，但不显示色块内嵌预览 */
+.collection-template-modal__color-input {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  margin-left: 2px;
+  border: 1px solid rgba(55, 53, 47, 0.2);
+  border-radius: 50%;
+  background: conic-gradient(
+    from 0deg,
+    #ef4444,
+    #f59e0b,
+    #eab308,
+    #22c55e,
+    #0ea5e9,
+    #6366f1,
+    #a855f7,
+    #ec4899,
+    #ef4444
+  );
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.collection-template-modal__color-input::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.collection-template-modal__color-input::-webkit-color-swatch {
+  border: none;
+  opacity: 0;
+}
+
+.collection-template-modal__color-input::-moz-color-swatch {
+  border: none;
+  opacity: 0;
 }
 
 /* ── Attachment migration section ──────────────────────────── */

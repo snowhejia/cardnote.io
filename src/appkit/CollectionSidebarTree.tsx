@@ -7,7 +7,7 @@ import {
 } from "react";
 import type { DragEvent } from "react";
 import { useAppChrome } from "../i18n/useAppChrome";
-import { toReadableSidebarDotColor } from "../sidebarDotColor";
+import { toContrastyGlyphColor } from "../sidebarDotColor";
 import type { Collection } from "../types";
 import {
   countSidebarCollectionCardBadge,
@@ -15,6 +15,7 @@ import {
 } from "./collectionModel";
 import { CollectionDragGripIcon } from "./AppIcons";
 import type { CollectionDropPosition } from "./collectionDrag";
+import { CollectionIconGlyph } from "./CollectionIconGlyph";
 
 export type CollectionSidebarTreeProps = {
   items: Collection[];
@@ -254,10 +255,11 @@ function CollectionTreeRows(p: CollectionSidebarTreeProps): ReactNode {
             }}
           >
             {!hideCollectionDots ? (
-              <span
+              <CollectionIconGlyph
                 className="sidebar__dot"
-                style={{ backgroundColor: toReadableSidebarDotColor(c.dotColor) }}
-                aria-hidden
+                shape={c.iconShape}
+                color={toContrastyGlyphColor(c.dotColor)}
+                size={13}
               />
             ) : null}
             {editingCollectionId === c.id ? (

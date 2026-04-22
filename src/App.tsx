@@ -80,7 +80,7 @@ import {
   writeSidebarSectionsCollapsed,
   type SidebarSectionCollapseState,
 } from "./sidebarSectionCollapseStorage";
-import { toReadableSidebarDotColor } from "./sidebarDotColor";
+import { toContrastyGlyphColor } from "./sidebarDotColor";
 const UserProfileModal = lazy(() =>
   import("./UserProfileModal").then((m) => ({ default: m.UserProfileModal }))
 );
@@ -130,6 +130,7 @@ import type {
   CardProperty,
   Collection,
   CollectionCardSchema,
+  CollectionIconShape,
   NoteCard,
   NoteMediaItem,
   SchemaField,
@@ -167,6 +168,7 @@ import {
   CollectionContextMenu,
   CollectionTemplateModal,
   type CollectionTemplateDialogState,
+  CollectionIconGlyph,
   CollectionDeleteDialog,
   CollectionMergeDialog,
   type CollectionMergeDialogState,
@@ -2584,6 +2586,7 @@ export default function App() {
           !connectionsViewActive &&
           !remindersViewActive;
         const subtypeCount = countCollectionSubtreeCards(col);
+        const isEditing = editingCollectionId === col.id;
         return (
           <div key={col.id} className="sidebar__file-subtype-row" role="listitem">
             <button
@@ -2603,6 +2606,7 @@ export default function App() {
                 });
               }}
               onClick={() => {
+                if (isEditing) return;
                 closeCardFullPage();
                 setTrashViewActive(false);
                 setCalendarDay(null);
@@ -2627,13 +2631,54 @@ export default function App() {
                   />
                 ) : null}
                 {!hideSidebarCollectionDots ? (
-                  <span
+                  <CollectionIconGlyph
                     className="sidebar__dot"
-                    style={{ backgroundColor: toReadableSidebarDotColor(col.dotColor) }}
-                    aria-hidden
+                    shape={col.iconShape}
+                    color={toContrastyGlyphColor(col.dotColor)}
+                    size={13}
                   />
                 ) : null}
-                <span className="sidebar__name">{label}</span>
+                {isEditing ? (
+                  <input
+                    ref={collectionNameInputRef}
+                    type="text"
+                    className="sidebar__name-input"
+                    value={draftCollectionName}
+                    aria-label={c.uiCollectionNameAria}
+                    onChange={(e) =>
+                      setDraftCollectionName(e.target.value)
+                    }
+                    onClick={(e) => e.stopPropagation()}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        (e.target as HTMLInputElement).blur();
+                      }
+                      if (e.key === "Escape") {
+                        e.preventDefault();
+                        skipCollectionBlurCommitRef.current = true;
+                        setEditingCollectionId(null);
+                      }
+                    }}
+                    onBlur={() => onCollectionNameBlur()}
+                  />
+                ) : (
+                  <span
+                    className="sidebar__name"
+                    title={canEdit ? c.uiCollectionNameHint : undefined}
+                    onDoubleClick={
+                      canEdit
+                        ? (e) => {
+                            e.stopPropagation();
+                            setDraftCollectionName(col.name);
+                            setEditingCollectionId(col.id);
+                          }
+                        : undefined
+                    }
+                  >
+                    {label}
+                  </span>
+                )}
                 <span className="sidebar__count">{subtypeCount}</span>
               </span>
             </button>
@@ -5008,11 +5053,16 @@ export default function App() {
         window.alert(c.errMergeCol);
         return;
       }
-      const { nextTree, movedCardIds } = merged;
+      const { nextTree, movedCardIds, duplicateMoves, mergedSchemaFields } =
+        merged;
       const subtreeIds = collectSubtreeCollectionIds(subtreeRoot);
 
       if (dataMode === "remote") {
-        const totalSteps = movedCardIds.length + 1;
+        const totalSteps =
+          movedCardIds.length +
+          duplicateMoves.length +
+          (mergedSchemaFields ? 1 : 0) +
+          1;
         setCollectionCloudSyncProgress({
           current: 0,
           total: totalSteps,
@@ -5031,7 +5081,9 @@ export default function App() {
                 total,
                 variant: "merge",
               });
-            }
+            },
+            duplicateMoves,
+            mergedSchemaFields
           );
           if (!ok) {
             window.alert(c.errMergeColSave);
@@ -5102,24 +5154,40 @@ export default function App() {
   );
 
   const performCollectionTemplateSave = useCallback(
-    async (collectionId: string, fields: SchemaField[]) => {
+    async (
+      collectionId: string,
+      patch: {
+        fields: SchemaField[] | null;
+        dotColor: string;
+        iconShape: CollectionIconShape;
+      }
+    ) => {
       if (!canEdit) return;
       const prevCol = findCollectionById(collections, collectionId);
-      const prevSchema: CollectionCardSchema = prevCol?.cardSchema ?? {};
-      const schema: CollectionCardSchema = {
-        ...prevSchema,
-        version: 1,
-        fields: fields.map((f, idx) => ({ ...f, order: idx })),
-      };
+      const nextDotColor = patch.dotColor.trim() || prevCol?.dotColor || "";
+      const nextIconShape: CollectionIconShape = patch.iconShape;
+      /** schema 只读场景：只更新颜色 / 形状，不重写 cardSchema.fields */
+      const schema: CollectionCardSchema | null =
+        patch.fields === null
+          ? null
+          : {
+              ...(prevCol?.cardSchema ?? {}),
+              version: 1,
+              fields: patch.fields.map((f, idx) => ({ ...f, order: idx })),
+            };
       setCollections((prev) =>
         mapCollectionById(prev, collectionId, (col) => ({
           ...col,
-          cardSchema: schema,
+          ...(schema ? { cardSchema: schema } : {}),
+          dotColor: nextDotColor,
+          iconShape: nextIconShape,
         }))
       );
       if (dataMode === "remote" && canEdit) {
         const ok = await updateCollectionApi(collectionId, {
-          cardSchema: schema,
+          ...(schema ? { cardSchema: schema } : {}),
+          dotColor: nextDotColor,
+          iconShape: nextIconShape,
         });
         if (!ok) window.alert(c.errCollectionTemplateSync);
       }
@@ -6168,6 +6236,10 @@ export default function App() {
                 const fk = presetFileSubtypeIdToAttachmentFilterKey(item.id);
                 if (!fk) return null;
                 const subtypeCol = findCollectionByPresetType(collections, item.id);
+                /** 用户没启用该子类型时，右键菜单退到父级「文件」合集，至少图标/颜色可改 */
+                const ctxTargetCol =
+                  subtypeCol ??
+                  findCollectionByPresetType(collections, "file");
                 const label =
                   appUiLang === "en" ? item.nameEn : item.nameZh;
                 const subtypeActive =
@@ -6190,6 +6262,19 @@ export default function App() {
                         "sidebar__file-subtype-hit" +
                         (subtypeActive ? " is-active" : "")
                       }
+                      onContextMenu={(e) => {
+                        if (!canEdit || !ctxTargetCol) return;
+                        e.preventDefault();
+                        setCollectionCtxMenu({
+                          x: e.clientX,
+                          y: e.clientY,
+                          id: ctxTargetCol.id,
+                          /** 菜单里仍显示用户点的那个子类型名（图片/视频…） */
+                          name: label,
+                          hasChildren:
+                            (ctxTargetCol.children?.length ?? 0) > 0,
+                        });
+                      }}
                       onClick={() => {
                         closeCardFullPage();
                         setTrashViewActive(false);
@@ -6208,14 +6293,16 @@ export default function App() {
                       <span className="sidebar__chevron-spacer" aria-hidden />
                       <span className="sidebar__file-subtype-body">
                         {!hideSidebarCollectionDots ? (
-                          <span
+                          <CollectionIconGlyph
                             className="sidebar__dot"
-                            style={{
-                              backgroundColor:
-                                FILE_SUBTYPE_SIDEBAR_DOT[item.id] ??
-                                "rgba(55, 53, 47, 0.35)",
-                            }}
-                            aria-hidden
+                            shape={subtypeCol?.iconShape}
+                            color={toContrastyGlyphColor(
+                              (subtypeCol?.dotColor?.trim()
+                                ? subtypeCol.dotColor
+                                : FILE_SUBTYPE_SIDEBAR_DOT[item.id]) ??
+                                "rgba(55, 53, 47, 0.35)"
+                            )}
+                            size={13}
                           />
                         ) : null}
                         <span className="sidebar__name">{label}</span>
@@ -8031,10 +8118,37 @@ export default function App() {
               )
             : []
         }
+        initialDotColor={
+          (collectionTemplateDialog &&
+            findCollectionById(
+              collections,
+              collectionTemplateDialog.collectionId
+            )?.dotColor) ||
+          ""
+        }
+        initialIconShape={
+          collectionTemplateDialog
+            ? findCollectionById(
+                collections,
+                collectionTemplateDialog.collectionId
+              )?.iconShape ?? null
+            : null
+        }
+        schemaReadonly={(() => {
+          if (!collectionTemplateDialog) return false;
+          const target = findCollectionById(
+            collections,
+            collectionTemplateDialog.collectionId
+          );
+          /** 预设子类型合集（如 文件/图片、主题/人物、任务/待办）：字段由目录写入，
+           *  模态里允许改形状 / 颜色但不允许增删/改字段 */
+          const pid = target?.presetTypeId?.trim() ?? "";
+          return Boolean(pid) && pid !== "note";
+        })()}
         onClose={() => setCollectionTemplateDialog(null)}
-        onConfirm={(collectionId, fields) => {
+        onConfirm={(collectionId, patch) => {
           setCollectionTemplateDialog(null);
-          void performCollectionTemplateSave(collectionId, fields);
+          void performCollectionTemplateSave(collectionId, patch);
         }}
       />
       {collectionCloudSyncProgress
