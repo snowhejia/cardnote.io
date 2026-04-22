@@ -8725,23 +8725,26 @@ div.card__text--readonly:not(.card__text--preview) {
   width: 100%;
   padding: 0;
   border-radius: 10px;
-  border: 1px solid transparent;
-  background: rgba(247, 244, 239, 0.9);
+  border: 1.5px solid transparent;
+  background: transparent;
   cursor: pointer;
   transition:
     border-color 0.12s ease,
-    background 0.12s ease,
-    box-shadow 0.12s ease;
+    background 0.12s ease;
 }
 
 .collection-template-modal__shape-btn:hover {
-  background: rgba(240, 234, 225, 1);
+  background: rgba(55, 53, 47, 0.06);
+}
+
+.collection-template-modal__shape-btn:focus-visible {
+  outline: 2px solid rgba(55, 53, 47, 0.28);
+  outline-offset: 1px;
 }
 
 .collection-template-modal__shape-btn.is-active {
-  border-color: rgba(55, 53, 47, 0.7);
-  background: rgba(247, 244, 239, 0.6);
-  box-shadow: 0 0 0 1px rgba(55, 53, 47, 0.1);
+  border-color: rgba(55, 53, 47, 0.78);
+  background: transparent;
 }
 
 .collection-template-modal__color-row {
