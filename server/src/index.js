@@ -1100,8 +1100,8 @@ app.post("/api/admin/migrate-clip-tagged-notes", collectionsWriterMw, v2GoneRout
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 「补缩略图」：对当前用户缺 thumbnailUrl / durationSec / sizeBytes 的附件
-// 调 COS 端脚本补齐并写回 cards.media。与 backfill-video-thumbnails.mjs 同逻辑，
-// 只对 req 用户范围内的 cards 执行，单次调用有处理上限以免阻塞。
+// 调 COS 端脚本补齐并写回 v2 的 card_files / cards.custom_props。
+// 只对 req 用户范围内的 attachment 附件执行，单次调用有处理上限以免阻塞。
 // ─────────────────────────────────────────────────────────────────────────────
 const BACKFILL_MEDIA_DEFAULT_LIMIT = 20;
 const BACKFILL_MEDIA_MAX_LIMIT = 50;
@@ -1143,81 +1143,109 @@ function backfillMediaItemNeedsDuration(item) {
   return true;
 }
 
-async function patchBackfillMediaArray(media) {
-  if (!Array.isArray(media)) return { changed: false, media: [] };
-  let changed = false;
-  const next = [];
-  for (const raw of media) {
-    if (
-      !raw ||
-      typeof raw !== "object" ||
-      typeof raw.url !== "string" ||
-      !raw.url.trim()
-    ) {
-      next.push(raw);
-      continue;
-    }
-    let out = { ...raw };
-    const url = raw.url.trim();
-    const key = extractObjectKeyFromCosPublicUrl(url);
-
-    if (
-      typeof out.sizeBytes === "string" &&
-      /^\d+$/.test(String(out.sizeBytes).trim())
-    ) {
-      changed = true;
-      out = { ...out, sizeBytes: parseInt(String(out.sizeBytes).trim(), 10) };
-    }
-
-    if (backfillMediaItemNeedsThumb(out) && key) {
-      const gen =
-        out.kind === "video"
-          ? await generateVideoThumbnailForExistingCosKey(key)
-          : await generateImagePreviewForExistingCosKey(key);
-      if (gen.thumbnailUrl) {
-        changed = true;
-        out = { ...out, thumbnailUrl: gen.thumbnailUrl };
-      }
-      if (
-        out.kind === "video" &&
-        gen.durationSec != null &&
-        Number.isFinite(gen.durationSec) &&
-        gen.durationSec >= 0
-      ) {
-        changed = true;
-        out = { ...out, durationSec: Math.round(gen.durationSec) };
-      }
-    } else if (
-      out.kind === "video" &&
-      backfillMediaItemNeedsDuration(out) &&
-      key
-    ) {
-      const pr = await probeVideoOrAudioDurationFromCosKey(key);
-      if (
-        pr.durationSec != null &&
-        Number.isFinite(pr.durationSec) &&
-        pr.durationSec >= 0
-      ) {
-        changed = true;
-        out = { ...out, durationSec: Math.round(pr.durationSec) };
-      }
-    }
-
-    if (backfillMediaItemNeedsSizeBytes(out) && key) {
-      try {
-        const n = await getCosObjectByteLength(key);
-        if (Number.isFinite(n) && n >= 0) {
-          changed = true;
-          out = { ...out, sizeBytes: Math.floor(n) };
-        }
-      } catch {
-        /* 单条失败跳过即可 */
-      }
-    }
-
-    next.push(out);
+function backfillDurationFromCustomProps(customProps, presetSlug) {
+  const arr = Array.isArray(customProps) ? customProps : [];
+  const targetId =
+    presetSlug === "file_video"
+      ? "sf-vid-duration-sec"
+      : presetSlug === "file_audio"
+        ? "sf-aud-duration-sec"
+        : "";
+  if (!targetId) return undefined;
+  for (const p of arr) {
+    if (!p || typeof p !== "object" || p.id !== targetId) continue;
+    const v = Number(p.value);
+    if (Number.isFinite(v) && v >= 0) return v;
   }
-  return { changed, media: next };
+  return undefined;
+}
+
+function backfillRowToMediaItem(row) {
+  const slug = String(row.preset_slug || "").trim();
+  const kind =
+    slug === "file_video"
+      ? "video"
+      : slug === "file_image"
+        ? "image"
+        : slug === "file_audio"
+          ? "audio"
+          : "file";
+  const out = {
+    kind,
+    url: String(row.url || "").trim(),
+  };
+  if (row.original_name) out.name = String(row.original_name);
+  if (row.thumb_url) out.thumbnailUrl = String(row.thumb_url);
+  if (row.cover_url) out.coverUrl = String(row.cover_url);
+  if (row.bytes != null && Number.isFinite(Number(row.bytes))) {
+    out.sizeBytes = Number(row.bytes);
+  }
+  const durationSec = backfillDurationFromCustomProps(
+    row.custom_props,
+    slug
+  );
+  if (durationSec != null) out.durationSec = durationSec;
+  return out;
+}
+
+async function patchBackfillAttachmentRow(uid, row) {
+  const item = backfillRowToMediaItem(row);
+  const key = extractObjectKeyFromCosPublicUrl(item.url);
+  if (!key) return false;
+
+  const patch = {};
+  let changed = false;
+
+  if (backfillMediaItemNeedsThumb(item)) {
+    const gen =
+      item.kind === "video"
+        ? await generateVideoThumbnailForExistingCosKey(key)
+        : await generateImagePreviewForExistingCosKey(key);
+    if (gen.thumbnailUrl) {
+      patch.thumbnailUrl = gen.thumbnailUrl;
+      changed = true;
+    }
+    if (
+      item.kind === "video" &&
+      gen.durationSec != null &&
+      Number.isFinite(gen.durationSec) &&
+      gen.durationSec >= 0
+    ) {
+      patch.durationSec = Math.round(gen.durationSec);
+      changed = true;
+    }
+  } else if (backfillMediaItemNeedsDuration(item)) {
+    const pr = await probeVideoOrAudioDurationFromCosKey(key);
+    if (
+      pr.durationSec != null &&
+      Number.isFinite(pr.durationSec) &&
+      pr.durationSec >= 0
+    ) {
+      patch.durationSec = Math.round(pr.durationSec);
+      changed = true;
+    }
+  }
+
+  if (backfillMediaItemNeedsSizeBytes(item)) {
+    try {
+      const n = await getCosObjectByteLength(key);
+      if (Number.isFinite(n) && n >= 0) {
+        patch.sizeBytes = Math.floor(n);
+        changed = true;
+      }
+    } catch {
+      /* 单条失败跳过即可 */
+    }
+  }
+
+  if (!changed) return false;
+  const out = await patchCardMediaItemAtIndex(
+    uid,
+    row.owner_card_id,
+    row.media_index,
+    patch
+  );
+  return !!out?.updated;
 }
 
 app.post(
@@ -1237,41 +1265,149 @@ app.post(
         BACKFILL_MEDIA_MAX_LIMIT,
         Math.max(1, Number.isFinite(rawLimit) ? Math.floor(rawLimit) : BACKFILL_MEDIA_DEFAULT_LIMIT)
       );
-      const { mediaNeedsWorkExists } = await import(
-        "../scripts/mediaMetadataPendingSql.mjs"
-      );
-      const whereNeedsWork = mediaNeedsWorkExists("c", "media");
+      const whereNeedsWork = `
+        l.property_key = 'attachment'
+        AND owner.trashed_at IS NULL
+        AND file_card.trashed_at IS NULL
+        AND (
+          (
+            ct.preset_slug IN ('file_image', 'file_video')
+            AND (cf.thumb_url IS NULL OR btrim(cf.thumb_url) = '')
+            AND NOT (
+              ct.preset_slug = 'file_image'
+              AND (
+                lower(COALESCE(cf.url, '')) ~* '\\.svg(\\?|#|$)'
+                OR lower(COALESCE(cf.original_name, '')) ~* '\\.svg$'
+              )
+            )
+          )
+          OR (
+            ct.preset_slug = 'file_video'
+            AND NOT EXISTS (
+              SELECT 1
+                FROM jsonb_array_elements(COALESCE(file_card.custom_props, '[]'::jsonb)) p
+               WHERE p->>'id' = 'sf-vid-duration-sec'
+                 AND (
+                   (
+                     jsonb_typeof(p->'value') = 'number'
+                     AND (p->>'value')::double precision >= 0
+                   )
+                   OR COALESCE(p->>'value', '') ~ '^-?[0-9]+(\\.[0-9]+)?$'
+                 )
+            )
+          )
+          OR (
+            ct.kind = 'file'
+            AND (cf.bytes IS NULL OR cf.bytes < 0)
+          )
+        )
+      `;
       const remainingSql = uid
-        ? `SELECT COUNT(*)::int AS n FROM cards c WHERE c.trashed_at IS NULL AND c.user_id = $1 AND ${whereNeedsWork}`
-        : `SELECT COUNT(*)::int AS n FROM cards c WHERE c.trashed_at IS NULL AND ${whereNeedsWork}`;
+        ? `SELECT COUNT(DISTINCT l.from_card_id)::int AS n
+             FROM card_links l
+             JOIN cards owner ON owner.id = l.from_card_id
+             JOIN cards file_card ON file_card.id = l.to_card_id
+             JOIN card_types ct ON ct.id = file_card.card_type_id
+             JOIN card_files cf ON cf.card_id = file_card.id
+            WHERE owner.user_id = $1 AND ${whereNeedsWork}`
+        : `SELECT COUNT(DISTINCT l.from_card_id)::int AS n
+             FROM card_links l
+             JOIN cards owner ON owner.id = l.from_card_id
+             JOIN cards file_card ON file_card.id = l.to_card_id
+             JOIN card_types ct ON ct.id = file_card.card_type_id
+             JOIN card_files cf ON cf.card_id = file_card.id
+            WHERE ${whereNeedsWork}`;
       const remainingArgs = uid ? [uid] : [];
       const selectSql = uid
-        ? `SELECT id, media FROM cards c WHERE c.trashed_at IS NULL AND c.user_id = $1 AND ${whereNeedsWork} LIMIT $2`
-        : `SELECT id, media FROM cards c WHERE c.trashed_at IS NULL AND ${whereNeedsWork} LIMIT $1`;
+        ? `WITH owner_candidates AS (
+             SELECT DISTINCT l.from_card_id AS owner_card_id
+               FROM card_links l
+               JOIN cards owner ON owner.id = l.from_card_id
+               JOIN cards file_card ON file_card.id = l.to_card_id
+               JOIN card_types ct ON ct.id = file_card.card_type_id
+               JOIN card_files cf ON cf.card_id = file_card.id
+              WHERE owner.user_id = $1 AND ${whereNeedsWork}
+              ORDER BY l.from_card_id
+              LIMIT $2
+           )
+           SELECT l.from_card_id AS owner_card_id,
+                  l.sort_order AS media_index,
+                  cf.url,
+                  cf.original_name,
+                  cf.thumb_url,
+                  cf.cover_url,
+                  cf.bytes,
+                  ct.preset_slug,
+                  file_card.custom_props
+             FROM owner_candidates oc
+             JOIN card_links l ON l.from_card_id = oc.owner_card_id
+             JOIN cards owner ON owner.id = l.from_card_id
+             JOIN cards file_card ON file_card.id = l.to_card_id
+             JOIN card_types ct ON ct.id = file_card.card_type_id
+             JOIN card_files cf ON cf.card_id = file_card.id
+            WHERE ${whereNeedsWork}
+            ORDER BY l.from_card_id, l.sort_order ASC`
+        : `WITH owner_candidates AS (
+             SELECT DISTINCT l.from_card_id AS owner_card_id
+               FROM card_links l
+               JOIN cards owner ON owner.id = l.from_card_id
+               JOIN cards file_card ON file_card.id = l.to_card_id
+               JOIN card_types ct ON ct.id = file_card.card_type_id
+               JOIN card_files cf ON cf.card_id = file_card.id
+              WHERE ${whereNeedsWork}
+              ORDER BY l.from_card_id
+              LIMIT $1
+           )
+           SELECT l.from_card_id AS owner_card_id,
+                  l.sort_order AS media_index,
+                  cf.url,
+                  cf.original_name,
+                  cf.thumb_url,
+                  cf.cover_url,
+                  cf.bytes,
+                  ct.preset_slug,
+                  file_card.custom_props
+             FROM owner_candidates oc
+             JOIN card_links l ON l.from_card_id = oc.owner_card_id
+             JOIN cards owner ON owner.id = l.from_card_id
+             JOIN cards file_card ON file_card.id = l.to_card_id
+             JOIN card_types ct ON ct.id = file_card.card_type_id
+             JOIN card_files cf ON cf.card_id = file_card.id
+            WHERE ${whereNeedsWork}
+            ORDER BY l.from_card_id, l.sort_order ASC`;
       const selectArgs = uid ? [uid, limit] : [limit];
       const { rows } = await dbQuery(selectSql, selectArgs);
 
       let scanned = 0;
       let updated = 0;
       let failed = 0;
-      for (const row of rows) {
+      let currentOwnerId = "";
+      let ownerUpdated = false;
+      let ownerFailed = false;
+      const finishOwner = () => {
+        if (!currentOwnerId) return;
         scanned += 1;
+        if (ownerUpdated) updated += 1;
+        if (ownerFailed) failed += 1;
+      };
+      for (const row of rows) {
+        if (row.owner_card_id !== currentOwnerId) {
+          finishOwner();
+          currentOwnerId = row.owner_card_id;
+          ownerUpdated = false;
+          ownerFailed = false;
+        }
         try {
-          const { changed, media } = await patchBackfillMediaArray(row.media);
-          if (changed) {
-            await dbQuery(
-              `UPDATE cards SET media = $1::jsonb, updated_at = now() WHERE id = $2`,
-              [JSON.stringify(media), row.id]
-            );
-            updated += 1;
-          }
+          const didUpdate = await patchBackfillAttachmentRow(uid, row);
+          if (didUpdate) ownerUpdated = true;
         } catch (e) {
-          failed += 1;
+          ownerFailed = true;
           console.error(
-            `[backfill-media] 卡片 ${row.id} 失败: ${e?.message ?? e}`
+            `[backfill-media] 卡片 ${row.owner_card_id} 附件 ${row.media_index} 失败: ${e?.message ?? e}`
           );
         }
       }
+      finishOwner();
 
       const { rows: remRows } = await dbQuery(remainingSql, remainingArgs);
       const remaining = remRows[0]?.n ?? 0;
