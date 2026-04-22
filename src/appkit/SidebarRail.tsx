@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { useAppChrome } from "../i18n/useAppChrome";
-import { CollectionIconGlyph } from "./CollectionIconGlyph";
-import type { CollectionIconKey } from "./CollectionIconGlyph";
+import { RailIcon } from "./RailIcon";
+import type { RailIconKey } from "./RailIcon";
 
 /** Rail 顶层导航项的 key（与 App.tsx 的 railKey 派生一一对应）。 */
 export type RailKey =
@@ -40,7 +40,7 @@ type RailGroup = "content" | "system";
 
 type RailItemDef = {
   key: RailKey;
-  icon: CollectionIconKey;
+  icon: RailIconKey;
   /** useAppChrome 里的 label 键 */
   labelKey:
     | "railOverview"
@@ -65,75 +65,75 @@ type RailItemDef = {
 
 /** 导航顺序。预设大类型全部平行放在 content 组，无分小组。 */
 export const RAIL_ITEMS: RailItemDef[] = [
-  { key: "overview", icon: "plus", labelKey: "railOverview", group: "content" },
-  { key: "notes", icon: "bookmark", labelKey: "railNotes", group: "content" },
+  { key: "overview", icon: "twinkle", labelKey: "railOverview", group: "content" },
+  { key: "notes", icon: "arch", labelKey: "railNotes", group: "content" },
   {
     key: "files",
-    icon: "square",
+    icon: "stair",
     labelKey: "railFiles",
     availabilityKey: "files",
     group: "content",
   },
   {
     key: "topic",
-    icon: "star",
+    icon: "petal",
     labelKey: "railTopic",
     availabilityKey: "topic",
     group: "content",
   },
   {
     key: "clip",
-    icon: "diamond",
+    icon: "arc",
     labelKey: "railClip",
     availabilityKey: "clip",
     group: "content",
   },
   {
     key: "work",
-    icon: "rocket",
+    icon: "hourglass",
     labelKey: "railWork",
     availabilityKey: "work",
     group: "content",
   },
   {
     key: "task",
-    icon: "check",
+    icon: "dots",
     labelKey: "railTask",
     availabilityKey: "task",
     group: "content",
   },
   {
     key: "project",
-    icon: "flower",
+    icon: "butterfly",
     labelKey: "railProject",
     availabilityKey: "project",
     group: "content",
   },
   {
     key: "expense",
-    icon: "lightning",
+    icon: "capsule",
     labelKey: "railExpense",
     availabilityKey: "expense",
     group: "content",
   },
   {
     key: "account",
-    icon: "crown",
+    icon: "heart",
     labelKey: "railAccount",
     availabilityKey: "account",
     group: "content",
   },
-  { key: "calendar", icon: "calendar", labelKey: "railCalendar", group: "system" },
-  { key: "reminders", icon: "bell", labelKey: "railReminders", group: "system" },
-  { key: "connections", icon: "link", labelKey: "railConnections", group: "system" },
+  { key: "calendar", icon: "ring", labelKey: "railCalendar", group: "system" },
+  { key: "reminders", icon: "sparkle", labelKey: "railReminders", group: "system" },
+  { key: "connections", icon: "peanut", labelKey: "railConnections", group: "system" },
   {
     key: "archived",
-    icon: "moon",
+    icon: "scallop",
     labelKey: "railArchived",
     availabilityKey: "archived",
     group: "system",
   },
-  { key: "trash", icon: "trash", labelKey: "railTrash", group: "system" },
+  { key: "trash", icon: "sStep", labelKey: "railTrash", group: "system" },
 ];
 
 function filterItems(
@@ -181,12 +181,7 @@ export function SidebarRail(props: SidebarRailProps): ReactNode {
         title={label}
         onClick={() => onPick(it.key)}
       >
-        <CollectionIconGlyph
-          shape={it.icon}
-          color="currentColor"
-          size={20}
-          className="rail__icon"
-        />
+        <RailIcon shape={it.icon} size={22} className="rail__icon" />
         <span className="rail__tip">{label}</span>
       </button>
     );

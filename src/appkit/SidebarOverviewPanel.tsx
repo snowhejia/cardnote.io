@@ -2,20 +2,15 @@ import type { ReactNode } from "react";
 import { useAppChrome } from "../i18n/useAppChrome";
 import type { Collection } from "../types";
 import { CollectionIconGlyph } from "./CollectionIconGlyph";
+import { RailIcon } from "./RailIcon";
+import type { RailIconKey } from "./RailIcon";
 import { toContrastyGlyphColor } from "../sidebarDotColor";
 import type { RailKey } from "./SidebarRail";
 
 type QuickLink = {
   key: RailKey;
   label: string;
-  icon:
-    | "bookmark"
-    | "square"
-    | "calendar"
-    | "bell"
-    | "link"
-    | "moon"
-    | "trash";
+  icon: RailIconKey;
   show: boolean;
 };
 
@@ -40,23 +35,23 @@ export function SidebarOverviewPanel(
   const ui = useAppChrome();
 
   const quickLinks: QuickLink[] = [
-    { key: "notes", icon: "bookmark", label: ui.railNotes, show: true },
+    { key: "notes", icon: "arch", label: ui.railNotes, show: true },
     {
       key: "files",
-      icon: "square",
+      icon: "stair",
       label: ui.railFiles,
       show: availability.files,
     },
-    { key: "calendar", icon: "calendar", label: ui.railCalendar, show: true },
-    { key: "reminders", icon: "bell", label: ui.railReminders, show: true },
-    { key: "connections", icon: "link", label: ui.railConnections, show: true },
+    { key: "calendar", icon: "ring", label: ui.railCalendar, show: true },
+    { key: "reminders", icon: "sparkle", label: ui.railReminders, show: true },
+    { key: "connections", icon: "peanut", label: ui.railConnections, show: true },
     {
       key: "archived",
-      icon: "moon",
+      icon: "scallop",
       label: ui.railArchived,
       show: availability.archived,
     },
-    { key: "trash", icon: "trash", label: ui.railTrash, show: true },
+    { key: "trash", icon: "sStep", label: ui.railTrash, show: true },
   ];
 
   return (
@@ -75,10 +70,9 @@ export function SidebarOverviewPanel(
                 className="sidebar__overview-row"
                 onClick={() => onPick(q.key)}
               >
-                <CollectionIconGlyph
+                <RailIcon
                   shape={q.icon}
-                  color="currentColor"
-                  size={14}
+                  size={16}
                   className="sidebar__overview-icon"
                 />
                 <span className="sidebar__overview-label">{q.label}</span>
