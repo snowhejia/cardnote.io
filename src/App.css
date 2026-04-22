@@ -5976,20 +5976,20 @@ div.card__text--readonly:not(.card__text--preview) {
 .card.card--timeline-fold-body > .card__inner:not(.card__inner--split),
 .card.card--timeline-fold-body
   > .card__inner.card__inner--split:not(.card__inner--mobile-gallery-stack) {
-  /* 顶栏 1 行 + 正文 3 行 + 底内边距 0.5 行 = 4.5；
-     曾经与实际内容刚好相抵，浏览器子像素取整会把第 3 行裁掉。加 0.5 行 buffer。 */
-  height: calc(var(--note-line-height) * 5);
-  min-height: calc(var(--note-line-height) * 5);
-  max-height: calc(var(--note-line-height) * 5);
+  /* 顶栏 1 行 + 正文 3 行 = 4 行的内容；再加极小 buffer 避免子像素取整裁掉第 3 行。
+     不再留半行空白，避免出现「最后一道横线后一大块空白」的视感。 */
+  height: calc(var(--note-line-height) * 4 + 8px);
+  min-height: calc(var(--note-line-height) * 4 + 8px);
+  max-height: calc(var(--note-line-height) * 4 + 8px);
   overflow: hidden;
   align-items: stretch;
 }
 
 .card.card--timeline-fold-body
   > .card__inner.card__inner--split.card__inner--mobile-gallery-stack {
-  height: calc(var(--note-line-height) * 5 + 108px);
-  min-height: calc(var(--note-line-height) * 5 + 108px);
-  max-height: calc(var(--note-line-height) * 5 + 108px);
+  height: calc(var(--note-line-height) * 4 + 8px + 108px);
+  min-height: calc(var(--note-line-height) * 4 + 8px + 108px);
+  max-height: calc(var(--note-line-height) * 4 + 8px + 108px);
   overflow: hidden;
 }
 
@@ -5997,6 +5997,8 @@ div.card__text--readonly:not(.card__text--preview) {
   min-height: 0;
   max-height: 100%;
   overflow: hidden;
+  /* 折叠模式不要留半行底部 padding，让顶栏 + 3 行正文贴紧卡片下边缘 */
+  padding-bottom: 0;
 }
 
 .card.card--timeline-fold-body .card__gallery {
