@@ -270,6 +270,8 @@ import { useServerReminders } from "./appkit/useServerReminders";
 import { useServerNotesTimeline } from "./appkit/useServerNotesTimeline";
 import { useServerCalendarDots } from "./appkit/useServerCalendarDots";
 import { useServerOverviewSummary } from "./appkit/useServerOverviewSummary";
+import { fetchCardsForCollection } from "./api/collections-v2";
+import { isLazyCollectionsEnabled } from "./lazyFeatureFlag";
 import { collectConnectionEdges } from "./appkit/connectionEdges";
 import {
   findLinkedFileCardForNoteMedia,
@@ -283,6 +285,7 @@ import {
   isNoteForAllNotesView,
   mergeServerTreeWithLocalExtraCards,
   removeCardPlacementFromTree,
+  setCollectionCardsAtId,
   walkCollectionsWithPath,
 } from "./appkit/collectionModel";
 import { mergedTemplateSchemaFieldsForCollection } from "./appkit/schemaTemplateFields";
@@ -1734,6 +1737,54 @@ export default function App() {
     if (found) return found;
     return collections[0];
   }, [collections, activeId]);
+
+  /* 懒加载模式：当激活合集在 collections 里存在但 cards 为空（因为 boot
+     只拉了 meta tree），按需从 /api/collections/:id/cards 拉回来并 patch
+     到 collections state，这样所有读 col.cards 的既有组件照常工作。
+     每个合集只拉一次（用 Set 记录已请求）；合集卡数为 0 的直接标记已拉，
+     不发请求。flag 关闭时 hook 短路什么都不做。 */
+  const lazyLoadedColIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!isLazyCollectionsEnabled()) return;
+    if (dataMode !== "remote" || !remoteLoaded) return;
+    const col = active;
+    if (!col?.id || col.id === LOOSE_NOTES_COLLECTION_ID) return;
+    if (lazyLoadedColIdsRef.current.has(col.id)) return;
+    if (col.cards.length > 0) {
+      /* 已经有卡（乐观创建 / 其它路径注入），跳过 */
+      lazyLoadedColIdsRef.current.add(col.id);
+      return;
+    }
+    const metaCount =
+      (col as { cardCount?: number; totalCardCount?: number }).cardCount ??
+      (col as { totalCardCount?: number }).totalCardCount ??
+      0;
+    if (metaCount === 0) {
+      /* meta 说该合集本身直接无卡，不必发请求 */
+      lazyLoadedColIdsRef.current.add(col.id);
+      return;
+    }
+    const targetColId = col.id;
+    lazyLoadedColIdsRef.current.add(targetColId);
+    let cancelled = false;
+    (async () => {
+      const res = await fetchCardsForCollection(targetColId, {
+        page: 1,
+        limit: 200,
+      });
+      if (cancelled || !res) {
+        /* 失败：允许下次活跃时重试 */
+        lazyLoadedColIdsRef.current.delete(targetColId);
+        return;
+      }
+      setCollections((prev) =>
+        setCollectionCardsAtId(prev, targetColId, res.cards)
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [active?.id, collections, dataMode, remoteLoaded]);
 
   /** 「已归档」顶层特殊合集（与「笔记」「主题」同级）：按名称识别；用于专属侧栏段与 rail 定位 */
   const archivedCol = useMemo<Collection | null>(() => {

@@ -655,6 +655,35 @@ export function patchNoteCardByIdInTree(
   );
 }
 
+/**
+ * 把某个合集的 cards 数组整体替换（递归查 id）。
+ * 懒加载模式下，按需拉某合集卡片后用这个写回 collections state。
+ */
+export function setCollectionCardsAtId(
+  cols: Collection[],
+  collectionId: string,
+  cards: NoteCard[]
+): Collection[] {
+  let changed = false;
+  function visit(nodes: Collection[]): Collection[] {
+    return nodes.map((n) => {
+      if (n.id === collectionId) {
+        changed = true;
+        return { ...n, cards };
+      }
+      if (n.children?.length) {
+        const nextChildren = visit(n.children);
+        if (nextChildren !== n.children) {
+          return { ...n, children: nextChildren };
+        }
+      }
+      return n;
+    });
+  }
+  const out = visit(cols);
+  return changed ? out : cols;
+}
+
 /** 已包含该 cardId 的合集 id（含子树） */
 export function collectionIdsContainingCardId(
   cols: Collection[],
