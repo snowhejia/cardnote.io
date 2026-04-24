@@ -4749,6 +4749,10 @@ export default function App() {
     skipCloseMobileNavOnActiveChangeRef.current = true;
     setTrashViewActive(false);
     setRemindersViewActive(false);
+    setAllNotesViewActive(false);
+    setConnectionsViewActive(false);
+    setAttachmentsViewActive(false);
+    setCalendarDay(null);
     const id = `c-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
     const newCol: Collection = {
       id,
@@ -5289,6 +5293,13 @@ export default function App() {
     }
     if (allNotesViewActive) return "notes";
     if (activeIdInSubtree(noteNavRootCol?.id)) return "notes";
+    /* 新用户/无 preset-note 根：普通根合集（无 presetTypeId）及其后代也归到「笔记」rail，
+       否则点进种子合集或新建合集时 railKey 会落到 overview，造成「跳回概览」与无法添加笔记。 */
+    if (activeId) {
+      for (const pf of filterPlainFolderCollectionsForNotesSidebar(collections)) {
+        if (activeIdInSubtree(pf.id)) return "notes";
+      }
+    }
     return "overview";
   }, [
     trashViewActive,
@@ -5616,22 +5627,49 @@ export default function App() {
 
     const out: OverviewTypeWidget[] = [];
 
-    // 笔记
-    if (noteNavRootCol) {
-      const s = summarizeSubtree(noteNavRootCol);
-      out.push({
-        key: "preset-notes",
-        railKey: "notes",
-        label: c.railNotes,
-        icon: "arch",
-        color: "#E88368",
-        mainCount: s.total,
-        pills:
-          s.weekNew > 0
-            ? [{ key: "week", label: `+${s.weekNew} 本周` }]
-            : [],
-        recentCards: s.recent,
-      });
+    // 笔记：优先 preset-note 根；新用户没有该根时退回到所有普通根合集（与笔记侧栏 fallback 一致），
+    // 否则首页类型汇总会缺失「笔记」一栏。
+    {
+      const notesRoots: Collection[] = noteNavRootCol
+        ? [noteNavRootCol]
+        : filterPlainFolderCollectionsForNotesSidebar(collections);
+      if (notesRoots.length > 0) {
+        let total = 0;
+        let weekNew = 0;
+        const recentAgg: Array<{
+          card: NoteCard;
+          col: Collection;
+          sortKey: string;
+        }> = [];
+        for (const root of notesRoots) {
+          walkCollections([root], (col) => {
+            for (const card of col.cards) {
+              total += 1;
+              const on = card.addedOn ?? "";
+              if (on && on >= overviewWeekStartYmd) weekNew += 1;
+              const sortKey = `${on}-${String(card.minutesOfDay ?? 0).padStart(6, "0")}`;
+              recentAgg.push({ card, col, sortKey });
+            }
+          });
+        }
+        recentAgg.sort((a, b) => b.sortKey.localeCompare(a.sortKey));
+        const recent = recentAgg.slice(0, 2).map((e) => ({
+          id: e.card.id,
+          collectionId: e.col.id,
+          title: extractTitle(e.card),
+        }));
+        out.push({
+          key: "preset-notes",
+          railKey: "notes",
+          label: c.railNotes,
+          icon: "arch",
+          color: "#E88368",
+          mainCount: total,
+          pills:
+            weekNew > 0 ? [{ key: "week", label: `+${weekNew} 本周` }] : [],
+          recentCards: recent,
+        });
+      }
     }
 
     // 文件：用附件扁平列表计数，按 kind 出胶囊
