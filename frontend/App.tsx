@@ -5803,14 +5803,31 @@ export default function App() {
     setOverviewRandomRerollKey(Math.random());
   }, []);
 
+  /* 每次切回概览 / 标签页重新可见 时 bump 一下，驱动 serverOverview &
+     subtreeSummaries 重拉，避免"建卡后 widget 不变，要刷页才更新"。 */
+  const [overviewVisitKey, setOverviewVisitKey] = useState(0);
+  useEffect(() => {
+    if (railKey !== "overview") return;
+    setOverviewVisitKey((k) => k + 1);
+  }, [railKey]);
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState === "visible") {
+        setOverviewVisitKey((k) => k + 1);
+      }
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, []);
+
   /* flag on 时走 /api/overview/summary（服务端一次聚合所有概览字段）；
      未命中或未就绪时各字段各自 fallback 到本地 useMemo（见下方各处）。
-     refreshKey 组合了 collections.length + rerollKey，保证点"换一条"时
-     重新拉取（服务端返回新的随机卡）。 */
+     refreshKey 组合了 collections.length + rerollKey + visitKey，保证
+     点"换一条" / 切回概览 / 标签页重聚焦 时重新拉取。 */
   const serverOverview = useServerOverviewSummary({
     todayYmd: overviewTodayYmd,
     weekStartYmd: overviewWeekStartYmd,
-    refreshKey: `${collections.length}:${overviewRandomRerollKey}`,
+    refreshKey: `${collections.length}:${overviewRandomRerollKey}:${overviewVisitKey}`,
   });
 
   /* 懒加载 typeWidgets 兜底用：收集所有 preset 根合集 id + 收藏合集 id，
@@ -5843,7 +5860,7 @@ export default function App() {
   const subtreeSummaries = useServerSubtreeSummaries({
     colIds: subtreeSummaryColIds,
     weekStartYmd: overviewWeekStartYmd,
-    refreshKey: collections.length,
+    refreshKey: `${collections.length}:${overviewVisitKey}`,
   });
 
   /** 本周新增卡片总数（全库，addedOn >= 7 天前） */
@@ -5946,14 +5963,16 @@ export default function App() {
         collectionId: e.col.id,
         title: extractTitle(e.card),
       }));
-      /* 懒加载模式兜底（本地 walk 全空时）：
+      /* 懒加载模式兜底：
+         total/weekNew 取各来源最大值（本地 walk 受 limit=200 截断，不能以"有值"为由
+         就压过服务端聚合）；recent 本地为空才走远端兜底。
          优先级 1. server 子树聚合（最准，按合集子树算）
          优先级 2. meta 的 totalCardCount（只能给数，不给 recent）
          优先级 3. server byPresetSlug 前缀求和（按卡类型近似） */
       const byRoot = subtreeSummaries?.[root.id];
       if (byRoot) {
-        if (total === 0) total = byRoot.total;
-        if (weekNew === 0) weekNew = byRoot.weekNew;
+        if (byRoot.total > total) total = byRoot.total;
+        if (byRoot.weekNew > weekNew) weekNew = byRoot.weekNew;
         if (recent.length === 0 && byRoot.recent.length > 0) {
           recent = byRoot.recent.map((r) => ({
             id: r.id,
@@ -5962,14 +5981,14 @@ export default function App() {
           }));
         }
       }
-      if (total === 0 && typeof root.totalCardCount === "number") {
+      if (typeof root.totalCardCount === "number" && root.totalCardCount > total) {
         total = root.totalCardCount;
       }
-      if ((recent.length === 0 || weekNew === 0) && slugFallback) {
+      if (slugFallback && (recent.length === 0 || weekNew === 0 || total === 0)) {
         const s = sumSlugPrefix(slugFallback);
         if (recent.length === 0) recent = s.recent;
-        if (weekNew === 0) weekNew = s.weekNew;
-        if (total === 0) total = s.total;
+        if (s.weekNew > weekNew) weekNew = s.weekNew;
+        if (s.total > total) total = s.total;
       }
       return { total, weekNew, recent };
     };
@@ -6001,23 +6020,26 @@ export default function App() {
             }
           });
         }
-        /* 懒加载模式 fallback：各根合集的 totalCardCount 相加 */
-        if (total === 0) {
-          for (const root of notesRoots) {
-            if (typeof root.totalCardCount === "number") total += root.totalCardCount;
-          }
+        /* 懒加载模式：本地 walk 受单次 limit=200 截断，只能反映"已加载进
+           collections.cards 的那部分"，并非真实总数。改为与各根合集 meta 的
+           totalCardCount 求和取 max，保证显示服务端真实总数。 */
+        let metaTotal = 0;
+        for (const root of notesRoots) {
+          if (typeof root.totalCardCount === "number") metaTotal += root.totalCardCount;
         }
+        if (metaTotal > total) total = metaTotal;
         recentAgg.sort((a, b) => b.sortKey.localeCompare(a.sortKey));
         let recent = recentAgg.slice(0, 2).map((e) => ({
           id: e.card.id,
           collectionId: e.col.id,
           title: extractTitle(e.card),
         }));
-        /* 懒加载兜底 weekNew + recent：从 server 的 note* 系列 slug 求和 */
-        if ((recent.length === 0 || weekNew === 0) && serverOverview?.byPresetSlug) {
+        /* 懒加载兜底 weekNew + recent：从 server 的 note* 系列 slug 求和。
+           weekNew 同样取 max（本地 walk 受 limit=200 截断，可能偏小）。 */
+        if (serverOverview?.byPresetSlug) {
           const s = sumSlugPrefix("note");
           if (recent.length === 0) recent = s.recent;
-          if (weekNew === 0) weekNew = s.weekNew;
+          if (s.weekNew > weekNew) weekNew = s.weekNew;
         }
         out.push({
           key: "preset-notes",
