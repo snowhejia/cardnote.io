@@ -266,6 +266,7 @@ import {
 } from "./appkit";
 import { useLazyEndpointsProbe } from "./appkit/useLazyEndpointsProbe";
 import { useServerSearch } from "./appkit/useServerSearch";
+import { useServerReminders } from "./appkit/useServerReminders";
 import { collectConnectionEdges } from "./appkit/connectionEdges";
 import {
   findLinkedFileCardForNoteMedia,
@@ -2035,10 +2036,31 @@ export default function App() {
     [collections]
   );
 
-  const allReminderEntries = useMemo(
-    () => collectAllReminderEntries(collections),
-    [collections]
-  );
+  /* flag on 时走 /api/reminders?filter=all（分页聚合所有）；失败或 flag off
+     走本地 walk。服务端行 hydrate 为本地 ReminderListEntry 形状所需的
+     {col, card, reminderOn}，从当前 collections 里查对应对象；找不到的行
+     跳过（权限/同步边角）。 */
+  const serverReminders = useServerReminders(collections.length);
+  const allReminderEntries = useMemo(() => {
+    if (!serverReminders) return collectAllReminderEntries(collections);
+    const out: import("./appkit/collectionModel").ReminderListEntry[] = [];
+    for (const row of serverReminders) {
+      if (!row.collectionId || !row.reminderOn) continue;
+      const col = findCollectionById(collections, row.collectionId);
+      if (!col) continue;
+      const card = col.cards.find((c) => c.id === row.id);
+      if (!card) continue;
+      out.push({ col, card, reminderOn: row.reminderOn });
+    }
+    /* 服务端已按 due_at ASC 排，但 pending/completed 分组后顺序不一定和
+       本地一致；这里按 reminderOn + minutesOfDay 再排一次匹配老行为。 */
+    out.sort((a, b) => {
+      const c = a.reminderOn.localeCompare(b.reminderOn);
+      if (c !== 0) return c;
+      return (a.card.minutesOfDay ?? 0) - (b.card.minutesOfDay ?? 0);
+    });
+    return out;
+  }, [serverReminders, collections]);
 
   const topicParentCol = useMemo(
     () => findCollectionByPresetType(collections, "topic"),
