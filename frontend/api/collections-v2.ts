@@ -70,13 +70,20 @@ export async function fetchMetaTree(): Promise<CollectionMeta[] | null> {
  */
 export async function fetchCardsForCollection(
   collectionId: string,
-  opts: { page?: number; limit?: number; sort?: CollectionCardsSort } = {}
+  opts: {
+    page?: number;
+    limit?: number;
+    sort?: CollectionCardsSort;
+    /** 把自身 + 所有后代合集的卡片一并返回（按 card.id 去重，rail 聚合视图需要）*/
+    subtree?: boolean;
+  } = {}
 ): Promise<CardsPage | null> {
   const base = apiBase();
   const params = new URLSearchParams();
   params.set("page", String(opts.page ?? 1));
   params.set("limit", String(opts.limit ?? 50));
   if (opts.sort) params.set("sort", opts.sort);
+  if (opts.subtree) params.set("subtree", "1");
   try {
     const r = await fetch(
       `${base}/api/collections/${encodeURIComponent(collectionId)}/cards?${params}`,

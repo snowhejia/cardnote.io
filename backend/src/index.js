@@ -1009,10 +1009,13 @@ app.get(
       const page = Math.max(1, Number(req.query.page) || 1);
       const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
       const sort = typeof req.query.sort === "string" ? req.query.sort : undefined;
+      const subtree =
+        req.query.subtree === "1" || req.query.subtree === "true";
       const result = await getCardsForCollection(userId, id, {
         page,
         limit,
         sort,
+        subtree,
       });
       if (result === null) return res.status(404).json({ error: "合集不存在" });
       res.json(result);

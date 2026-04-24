@@ -1756,15 +1756,15 @@ export default function App() {
       lazyLoadedColIdsRef.current.add(col.id);
       return;
     }
-    const metaCount =
-      (col as { cardCount?: number; totalCardCount?: number }).cardCount ??
-      (col as { totalCardCount?: number }).totalCardCount ??
-      0;
-    if (metaCount === 0) {
-      /* meta 说该合集本身直接无卡，不必发请求 */
+    /* 直接卡数 vs 子树卡数。总子树有卡就拉（rail 聚合视图需要） */
+    const direct = (col as { cardCount?: number }).cardCount ?? 0;
+    const subtreeTotal =
+      (col as { totalCardCount?: number }).totalCardCount ?? direct;
+    if (subtreeTotal === 0) {
       lazyLoadedColIdsRef.current.add(col.id);
       return;
     }
+    const useSubtree = subtreeTotal > direct;
     const targetColId = col.id;
     lazyLoadedColIdsRef.current.add(targetColId);
     let cancelled = false;
@@ -1772,10 +1772,33 @@ export default function App() {
       const res = await fetchCardsForCollection(targetColId, {
         page: 1,
         limit: 200,
+        subtree: useSubtree,
       });
       if (cancelled || !res) {
         /* 失败：允许下次活跃时重试 */
         lazyLoadedColIdsRef.current.delete(targetColId);
+        return;
+      }
+      /* subtree 模式：cards 带 collection_id（每条 card 里在 placement 那
+         层），按 card.collection_id 把每张卡放到它真正归属的合集里；查不到
+         就堆到 root 上。非 subtree 模式：直接放 root。 */
+      if (useSubtree) {
+        const byCol = new Map<string, NoteCard[]>();
+        for (const card of res.cards) {
+          const cid =
+            (card as unknown as { collectionId?: string }).collectionId ??
+            targetColId;
+          if (!byCol.has(cid)) byCol.set(cid, []);
+          byCol.get(cid)!.push(card);
+        }
+        setCollections((prev) => {
+          let next = prev;
+          for (const [cid, cards] of byCol.entries()) {
+            next = setCollectionCardsAtId(next, cid, cards);
+            lazyLoadedColIdsRef.current.add(cid);
+          }
+          return next;
+        });
         return;
       }
       setCollections((prev) =>
