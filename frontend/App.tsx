@@ -2108,8 +2108,24 @@ export default function App() {
       if (!row.collectionId || !row.reminderOn) continue;
       const col = findCollectionById(collections, row.collectionId);
       if (!col) continue;
-      const card = col.cards.find((c) => c.id === row.id);
-      if (!card) continue;
+      /* 懒加载模式：col.cards 可能空；合成 stub 卡给提醒列表展示 */
+      const card: NoteCard =
+        col.cards.find((c) => c.id === row.id) ?? {
+          id: row.id,
+          text: row.snippet,
+          ...(row.title ? { title: row.title } : {}),
+          minutesOfDay: row.minutesOfDay ?? 0,
+          pinned: false,
+          tags: row.tags ?? [],
+          relatedRefs: [],
+          media: [],
+          addedOn: row.addedOn ?? undefined,
+          reminderOn: row.reminderOn ?? undefined,
+          reminderTime: row.reminderTime ?? undefined,
+          reminderCompletedAt: row.reminderCompletedAt ?? undefined,
+          reminderNote: row.reminderNote,
+          reminderCompletedNote: row.reminderCompletedNote,
+        };
       out.push({ col, card, reminderOn: row.reminderOn });
     }
     /* 服务端已按 due_at ASC 排，但 pending/completed 分组后顺序不一定和
@@ -2579,8 +2595,19 @@ export default function App() {
         if (!row.collectionId) continue;
         const col = findCollectionById(collections, row.collectionId);
         if (!col) continue;
-        const card = col.cards.find((c) => c.id === row.id);
-        if (!card) continue;
+        /* 懒加载模式：合成 stub 卡给时间线展示 */
+        const card: NoteCard =
+          col.cards.find((c) => c.id === row.id) ?? {
+            id: row.id,
+            text: row.snippet,
+            ...(row.title ? { title: row.title } : {}),
+            minutesOfDay: row.minutesOfDay ?? 0,
+            pinned: false,
+            tags: row.tags ?? [],
+            relatedRefs: [],
+            media: [],
+            addedOn: row.addedOn ?? undefined,
+          };
         seen.add(row.id);
         entries.push({ col, card });
       }
@@ -2914,8 +2941,20 @@ export default function App() {
         if (!hit.collectionId) continue;
         const col = findCollectionById(collections, hit.collectionId);
         if (!col) continue;
-        const card = col.cards.find((c) => c.id === hit.id);
-        if (!card) continue;
+        /* 懒加载模式：col.cards 可能为空；用 LightCardRow 合成最小卡给
+           搜索结果列表展示（点进详情 CardPageView 会重新加载完整卡）。 */
+        const card: NoteCard =
+          col.cards.find((c) => c.id === hit.id) ?? {
+            id: hit.id,
+            text: hit.snippet,
+            ...(hit.title ? { title: hit.title } : {}),
+            minutesOfDay: 0,
+            pinned: false,
+            tags: [],
+            relatedRefs: [],
+            media: [],
+            addedOn: hit.addedOn ?? undefined,
+          };
         cardHits.push({
           col,
           path: pathByColId.get(col.id) ?? col.name,
@@ -5797,6 +5836,12 @@ export default function App() {
           entries.push({ card, col, sortKey });
         }
       });
+      /* 懒加载模式：cards[] 还没拉回来，走树得到的 total 为 0，
+         退回到 meta 提供的 totalCardCount。weekNew / recent 在这种
+         情况下仍为 0/空——但至少主数不再误报 0。 */
+      if (total === 0 && typeof root.totalCardCount === "number") {
+        total = root.totalCardCount;
+      }
       entries.sort((a, b) => b.sortKey.localeCompare(a.sortKey));
       const recent = entries.slice(0, 2).map((e) => ({
         id: e.card.id,
@@ -5832,6 +5877,12 @@ export default function App() {
               recentAgg.push({ card, col, sortKey });
             }
           });
+        }
+        /* 懒加载模式 fallback：各根合集的 totalCardCount 相加 */
+        if (total === 0) {
+          for (const root of notesRoots) {
+            if (typeof root.totalCardCount === "number") total += root.totalCardCount;
+          }
         }
         recentAgg.sort((a, b) => b.sortKey.localeCompare(a.sortKey));
         const recent = recentAgg.slice(0, 2).map((e) => ({
@@ -6136,12 +6187,28 @@ export default function App() {
           if (!row.url || !row.collectionId) continue;
           const col = findCollectionById(collections, row.collectionId);
           if (!col) continue;
-          const card = col.cards.find((c) => c.id === row.cardId);
-          if (!card) continue;
+          /* 懒加载模式：col.cards 可能是空；stub 一个仅含 id + media 的
+             最小卡，组件只用它发 onOpenCard(col.id, card.id)，不读别的字段。 */
+          const card: NoteCard =
+            col.cards.find((c) => c.id === row.cardId) ?? {
+              id: row.cardId,
+              text: "",
+              minutesOfDay: 0,
+              pinned: false,
+              tags: [],
+              relatedRefs: [],
+              media: [
+                {
+                  kind: "image",
+                  url: row.url,
+                  thumbnailUrl: row.thumbUrl ?? undefined,
+                  name: row.name ?? undefined,
+                },
+              ],
+            };
           const key = `${card.id}:${row.url}`;
           if (seen.has(key)) continue;
           seen.add(key);
-          /* 构造 NoteMediaItem：直接用 file 卡自己的 url/thumb 字段 */
           out.push({
             card,
             col,
@@ -6186,21 +6253,31 @@ export default function App() {
           if (!row.url || !row.collectionId) continue;
           const col = findCollectionById(collections, row.collectionId);
           if (!col) continue;
-          const card = col.cards.find((c) => c.id === row.cardId);
-          if (!card) continue;
+          /* 懒加载模式：col.cards 可能为空；stub 最小卡 */
+          const mediaItem = {
+            kind: "audio" as const,
+            url: row.url,
+            coverUrl: row.coverUrl ?? undefined,
+            thumbnailUrl: row.thumbUrl ?? row.coverThumbUrl ?? undefined,
+            name: row.name ?? undefined,
+          };
+          const card: NoteCard =
+            col.cards.find((c) => c.id === row.cardId) ?? {
+              id: row.cardId,
+              text: "",
+              minutesOfDay: 0,
+              pinned: false,
+              tags: [],
+              relatedRefs: [],
+              media: [mediaItem],
+            };
           const key = `${card.id}:${row.url}`;
           if (seen.has(key)) continue;
           seen.add(key);
           out.push({
             card,
             col,
-            item: {
-              kind: "audio",
-              url: row.url,
-              coverUrl: row.coverUrl ?? undefined,
-              thumbnailUrl: row.thumbUrl ?? row.coverThumbUrl ?? undefined,
-              name: row.name ?? undefined,
-            },
+            item: mediaItem,
             displayName: row.displayName,
           });
         }
@@ -6250,14 +6327,24 @@ export default function App() {
 
   const overviewRandomCard =
     useMemo((): import("./appkit/OverviewDashboard").OverviewRandomCard | null => {
-      /* flag on 时用服务端 RANDOM() 选出的卡，本地查 col/card hydrate */
+      /* flag on 时用服务端 RANDOM() 选出的卡，本地查不到则合成 stub */
       if (serverOverview?.randomCard) {
         const sr = serverOverview.randomCard;
         const col = sr.collectionId
           ? findCollectionById(collections, sr.collectionId)
           : null;
-        const card = col?.cards.find((c) => c.id === sr.id) ?? null;
-        if (col && card) {
+        if (col) {
+          const card: NoteCard =
+            col.cards.find((c) => c.id === sr.id) ?? {
+              id: sr.id,
+              text: sr.snippet,
+              minutesOfDay: 0,
+              pinned: false,
+              tags: [],
+              relatedRefs: [],
+              media: [],
+              addedOn: sr.addedOn ?? undefined,
+            };
           const ymd = sr.addedOn ?? "";
           let dateLabel = "";
           if (ymd) {
@@ -6273,7 +6360,6 @@ export default function App() {
           }
           return { card, col, snippet: sr.snippet, dateLabel };
         }
-        /* 服务端给的卡在本地树没找到（罕见，比如 SSE 还没同步），落到本地池兜底 */
       }
       /** 候选池：跳过纯文件卡 + 正文为空的卡；每张 card 仅按首次出现的 placement 记一次 */
       const pool: Array<{ card: NoteCard; col: Collection; snippet: string }> =

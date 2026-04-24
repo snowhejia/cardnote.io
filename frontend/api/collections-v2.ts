@@ -125,5 +125,8 @@ export function metaToCollectionShell(m: CollectionMeta): Collection {
     ...(m.presetTypeId ? { presetTypeId: m.presetTypeId } : {}),
     cards: [],
     children: m.children.map(metaToCollectionShell),
+    /* 保留 meta 的卡片计数——懒加载模式下 cards[] 一直是空的，UI 要从这里读 */
+    cardCount: m.cardCount,
+    totalCardCount: m.totalCardCount,
   };
 }
