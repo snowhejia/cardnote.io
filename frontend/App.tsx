@@ -265,6 +265,14 @@ import {
   walkCollections,
 } from "./appkit";
 import { useLazyEndpointsProbe } from "./appkit/useLazyEndpointsProbe";
+import { useServerSearch } from "./appkit/useServerSearch";
+import { useServerReminders } from "./appkit/useServerReminders";
+import { useServerNotesTimeline } from "./appkit/useServerNotesTimeline";
+import { useServerCalendarDots } from "./appkit/useServerCalendarDots";
+import { useServerOverviewSummary } from "./appkit/useServerOverviewSummary";
+import { useServerSubtreeSummaries } from "./appkit/useServerSubtreeSummaries";
+import { fetchCardsForCollection } from "./api/collections-v2";
+import { isLazyCollectionsEnabled } from "./lazyFeatureFlag";
 import { collectConnectionEdges } from "./appkit/connectionEdges";
 import {
   findLinkedFileCardForNoteMedia,
@@ -278,6 +286,8 @@ import {
   isNoteForAllNotesView,
   mergeServerTreeWithLocalExtraCards,
   removeCardPlacementFromTree,
+  setCollectionCardsAtId,
+  walkCollectionsWithPath,
 } from "./appkit/collectionModel";
 import { mergedTemplateSchemaFieldsForCollection } from "./appkit/schemaTemplateFields";
 import {
@@ -1729,6 +1739,77 @@ export default function App() {
     return collections[0];
   }, [collections, activeId]);
 
+  /* 懒加载模式：当激活合集在 collections 里存在但 cards 为空（因为 boot
+     只拉了 meta tree），按需从 /api/collections/:id/cards 拉回来并 patch
+     到 collections state，这样所有读 col.cards 的既有组件照常工作。
+     每个合集只拉一次（用 Set 记录已请求）；合集卡数为 0 的直接标记已拉，
+     不发请求。flag 关闭时 hook 短路什么都不做。 */
+  const lazyLoadedColIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!isLazyCollectionsEnabled()) return;
+    if (dataMode !== "remote" || !remoteLoaded) return;
+    const col = active;
+    if (!col?.id || col.id === LOOSE_NOTES_COLLECTION_ID) return;
+    if (lazyLoadedColIdsRef.current.has(col.id)) return;
+    if (col.cards.length > 0) {
+      /* 已经有卡（乐观创建 / 其它路径注入），跳过 */
+      lazyLoadedColIdsRef.current.add(col.id);
+      return;
+    }
+    /* 直接卡数 vs 子树卡数。总子树有卡就拉（rail 聚合视图需要） */
+    const direct = (col as { cardCount?: number }).cardCount ?? 0;
+    const subtreeTotal =
+      (col as { totalCardCount?: number }).totalCardCount ?? direct;
+    if (subtreeTotal === 0) {
+      lazyLoadedColIdsRef.current.add(col.id);
+      return;
+    }
+    const useSubtree = subtreeTotal > direct;
+    const targetColId = col.id;
+    lazyLoadedColIdsRef.current.add(targetColId);
+    let cancelled = false;
+    (async () => {
+      const res = await fetchCardsForCollection(targetColId, {
+        page: 1,
+        limit: 200,
+        subtree: useSubtree,
+      });
+      if (cancelled || !res) {
+        /* 失败：允许下次活跃时重试 */
+        lazyLoadedColIdsRef.current.delete(targetColId);
+        return;
+      }
+      /* subtree 模式：cards 带 collection_id（每条 card 里在 placement 那
+         层），按 card.collection_id 把每张卡放到它真正归属的合集里；查不到
+         就堆到 root 上。非 subtree 模式：直接放 root。 */
+      if (useSubtree) {
+        const byCol = new Map<string, NoteCard[]>();
+        for (const card of res.cards) {
+          const cid =
+            (card as unknown as { collectionId?: string }).collectionId ??
+            targetColId;
+          if (!byCol.has(cid)) byCol.set(cid, []);
+          byCol.get(cid)!.push(card);
+        }
+        setCollections((prev) => {
+          let next = prev;
+          for (const [cid, cards] of byCol.entries()) {
+            next = setCollectionCardsAtId(next, cid, cards);
+            lazyLoadedColIdsRef.current.add(cid);
+          }
+          return next;
+        });
+        return;
+      }
+      setCollections((prev) =>
+        setCollectionCardsAtId(prev, targetColId, res.cards)
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [active?.id, collections, dataMode, remoteLoaded]);
+
   /** 「已归档」顶层特殊合集（与「笔记」「主题」同级）：按名称识别；用于专属侧栏段与 rail 定位 */
   const archivedCol = useMemo<Collection | null>(() => {
     let found: Collection | null = null;
@@ -2024,19 +2105,62 @@ export default function App() {
     [rest, collectionRestVisibleCount]
   );
 
-  const datesWithNotesOnCalendarSet = useMemo(
+  const localDatesWithNotes = useMemo(
     () => datesWithNoteAddedOn(collections),
     [collections]
   );
-  const datesWithRemindersOnCalendarSet = useMemo(
+  const localDatesWithReminders = useMemo(
     () => datesWithReminderOn(collections),
     [collections]
   );
+  /* flag on 时按月懒加载 /api/calendar/days 的高亮集；flag off 或失败走本地 walk */
+  const serverCalendarDots = useServerCalendarDots(calendarViewMonth);
+  const datesWithNotesOnCalendarSet =
+    serverCalendarDots?.notes ?? localDatesWithNotes;
+  const datesWithRemindersOnCalendarSet =
+    serverCalendarDots?.reminders ?? localDatesWithReminders;
 
-  const allReminderEntries = useMemo(
-    () => collectAllReminderEntries(collections),
-    [collections]
-  );
+  /* flag on 时走 /api/reminders?filter=all（分页聚合所有）；失败或 flag off
+     走本地 walk。服务端行 hydrate 为本地 ReminderListEntry 形状所需的
+     {col, card, reminderOn}，从当前 collections 里查对应对象；找不到的行
+     跳过（权限/同步边角）。 */
+  const serverReminders = useServerReminders(collections.length);
+  const allReminderEntries = useMemo(() => {
+    if (!serverReminders) return collectAllReminderEntries(collections);
+    const out: import("./appkit/collectionModel").ReminderListEntry[] = [];
+    for (const row of serverReminders) {
+      if (!row.collectionId || !row.reminderOn) continue;
+      const col = findCollectionById(collections, row.collectionId);
+      if (!col) continue;
+      /* 懒加载模式：col.cards 可能空；合成 stub 卡给提醒列表展示 */
+      const card: NoteCard =
+        col.cards.find((c) => c.id === row.id) ?? {
+          id: row.id,
+          text: row.snippet,
+          ...(row.title ? { title: row.title } : {}),
+          minutesOfDay: row.minutesOfDay ?? 0,
+          pinned: false,
+          tags: row.tags ?? [],
+          relatedRefs: [],
+          media: [],
+          addedOn: row.addedOn ?? undefined,
+          reminderOn: row.reminderOn ?? undefined,
+          reminderTime: row.reminderTime ?? undefined,
+          reminderCompletedAt: row.reminderCompletedAt ?? undefined,
+          reminderNote: row.reminderNote,
+          reminderCompletedNote: row.reminderCompletedNote,
+        };
+      out.push({ col, card, reminderOn: row.reminderOn });
+    }
+    /* 服务端已按 due_at ASC 排，但 pending/completed 分组后顺序不一定和
+       本地一致；这里按 reminderOn + minutesOfDay 再排一次匹配老行为。 */
+    out.sort((a, b) => {
+      const c = a.reminderOn.localeCompare(b.reminderOn);
+      if (c !== 0) return c;
+      return (a.card.minutesOfDay ?? 0) - (b.card.minutesOfDay ?? 0);
+    });
+    return out;
+  }, [serverReminders, collections]);
 
   const topicParentCol = useMemo(
     () => findCollectionByPresetType(collections, "topic"),
@@ -2146,7 +2270,7 @@ export default function App() {
     useState<Partial<Record<AttachmentUiCategory, number | null>>>({});
 
   useEffect(() => {
-    if (dataMode !== "remote" || !remoteLoaded) {
+    if (dataMode !== "remote" || !remoteLoaded || !currentUser) {
       setRemoteAttachmentsTotal(null);
       return;
     }
@@ -2157,13 +2281,13 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [dataMode, remoteLoaded, attachmentsViewActive]);
+  }, [dataMode, remoteLoaded, attachmentsViewActive, currentUser]);
 
   /** 远程模式下卡片附件增删后刷新侧边栏总数，并驱动「文件」列表重新拉取 */
   const [attachmentsRemoteListNonce, setAttachmentsRemoteListNonce] =
     useState(0);
   const notifyRemoteAttachmentsChanged = useCallback(() => {
-    if (dataMode !== "remote" || !remoteLoaded) return;
+    if (dataMode !== "remote" || !remoteLoaded || !currentUser) return;
     clearRemoteAttachmentsListCacheForUser(
       currentUser?.id?.trim() || "anon"
     );
@@ -2171,10 +2295,10 @@ export default function App() {
       if (n != null) setRemoteAttachmentsTotal(n);
     });
     setAttachmentsRemoteListNonce((x) => x + 1);
-  }, [dataMode, remoteLoaded, currentUser?.id]);
+  }, [dataMode, remoteLoaded, currentUser]);
 
   useEffect(() => {
-    if (dataMode !== "remote" || !remoteLoaded) {
+    if (dataMode !== "remote" || !remoteLoaded || !currentUser) {
       setRemoteAttachmentCountsByCategory({});
       return;
     }
@@ -2199,7 +2323,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [dataMode, remoteLoaded, attachmentsRemoteListNonce]);
+  }, [dataMode, remoteLoaded, attachmentsRemoteListNonce, currentUser]);
 
   const createFileCardFromNoteAttachment = useCallback(
     async (colId: string, cardId: string, item: NoteMediaItem) => {
@@ -2482,10 +2606,46 @@ export default function App() {
   }, [collections]);
   void _connectedCardsCount;
 
+  /* flag on 时走 /api/notes 分页聚合；flag off 或失败 fallback 到本地 walk。
+     服务端口径 = "非 file_* 卡"；本地多一层 preset-note 子树过滤——两者
+     在多数账户下一致，差异可接受。 */
+  const serverNotesRows = useServerNotesTimeline(collections.length);
   const allNotesSorted = useMemo(() => {
+    if (serverNotesRows) {
+      const entries: { col: Collection; card: NoteCard }[] = [];
+      const seen = new Set<string>();
+      for (const row of serverNotesRows) {
+        if (seen.has(row.id)) continue;
+        if (!row.collectionId) continue;
+        const col = findCollectionById(collections, row.collectionId);
+        if (!col) continue;
+        /* 懒加载模式：合成 stub 卡给时间线展示 */
+        const card: NoteCard =
+          col.cards.find((c) => c.id === row.id) ?? {
+            id: row.id,
+            text: row.snippet,
+            ...(row.title ? { title: row.title } : {}),
+            minutesOfDay: row.minutesOfDay ?? 0,
+            pinned: false,
+            tags: row.tags ?? [],
+            relatedRefs: [],
+            media: [],
+            addedOn: row.addedOn ?? undefined,
+          };
+        seen.add(row.id);
+        entries.push({ col, card });
+      }
+      /* 服务端已 ORDER BY added_on DESC, minutes_of_day DESC, id DESC；保险再排一次 */
+      entries.sort((a, b) => {
+        const dateA = a.card.addedOn ?? "";
+        const dateB = b.card.addedOn ?? "";
+        if (dateB !== dateA) return dateB.localeCompare(dateA);
+        return (b.card.minutesOfDay ?? 0) - (a.card.minutesOfDay ?? 0);
+      });
+      return entries;
+    }
+    /* 本地实现（保持原行为） */
     const entries: { col: Collection; card: NoteCard }[] = [];
-    // 限定「全部笔记」为「笔记」preset 子树（含任意层子合集）+ 未归类虚拟合集。
-    // 这样即便 task/person/file 子树里混入 objectKind==='note' 的历史卡，也不会漏进来。
     const noteRoot = findCollectionByPresetType(collections, "note");
     const allowedColIds = new Set<string>();
     allowedColIds.add(LOOSE_NOTES_COLLECTION_ID);
@@ -2497,11 +2657,10 @@ export default function App() {
         if (n.children?.length) stack.push(...n.children);
       }
     }
-    const useColFilter = allowedColIds.size > 1; // 有 note root 才启用
+    const useColFilter = allowedColIds.size > 1;
     walkCollections(collections, (col) => {
       if (useColFilter && !allowedColIds.has(col.id)) return;
       for (const card of col.cards) {
-        // 全部笔记：仅笔记形态，不含文件/人物/网页/任务等对象卡
         if (!isNoteForAllNotesView(card)) continue;
         entries.push({ col, card });
       }
@@ -2512,14 +2671,13 @@ export default function App() {
       if (dateB !== dateA) return dateB.localeCompare(dateA);
       return (b.card.minutesOfDay ?? 0) - (a.card.minutesOfDay ?? 0);
     });
-    /** 同一张卡被「加入合集」后会存在多条 placement；全部笔记按 card.id 去重，仅保留一条 */
     const seen = new Set<string>();
     return entries.filter((ent) => {
       if (seen.has(ent.card.id)) return false;
       seen.add(ent.card.id);
       return true;
     });
-  }, [collections]);
+  }, [serverNotesRows, collections]);
 
   const allNotesDisplayed = useMemo(
     () => allNotesSorted.slice(0, allNotesVisibleCount),
@@ -2777,11 +2935,70 @@ export default function App() {
     });
   }, [searchActive]);
 
+  /* flag on 时走 /api/search；flag off 或未就绪则保留本地 buildSearchResults 结果 */
+  const serverSearchResult = useServerSearch(searchTrim);
+  const localSearchResult = useMemo(
+    () => buildSearchResults(collections, searchTrim),
+    [collections, searchTrim]
+  );
   const { collectionMatches: searchCollectionMatches, groupedCards: searchGroupedCards } =
-    useMemo(
-      () => buildSearchResults(collections, searchTrim),
-      [collections, searchTrim]
-    );
+    useMemo(() => {
+      if (!serverSearchResult) return localSearchResult;
+      /* 把服务端返回的轻量行 hydrate 成本地 UI 期望的 {col, path, cards} 形状。
+         当前 collections 仍然是全树（boot 还没迁到 meta-only），所以 col + card
+         都能在本地找到；找不到的跳过（权限过滤 / SSE 未同步等边角）。 */
+      const pathByColId = new Map<string, string>();
+      for (const { col, path } of walkCollectionsWithPath(collections, [])) {
+        pathByColId.set(col.id, path);
+      }
+      const collectionMatches: { col: Collection; path: string }[] = [];
+      const cardHits: { col: Collection; path: string; card: NoteCard }[] = [];
+      const seenColName = new Set<string>();
+      for (const hit of serverSearchResult.collections) {
+        if (seenColName.has(hit.id)) continue;
+        const col = findCollectionById(collections, hit.id);
+        if (!col) continue;
+        seenColName.add(hit.id);
+        collectionMatches.push({ col, path: pathByColId.get(col.id) ?? col.name });
+      }
+      for (const hit of serverSearchResult.cards) {
+        if (!hit.collectionId) continue;
+        const col = findCollectionById(collections, hit.collectionId);
+        if (!col) continue;
+        /* 懒加载模式：col.cards 可能为空；用 LightCardRow 合成最小卡给
+           搜索结果列表展示（点进详情 CardPageView 会重新加载完整卡）。 */
+        const card: NoteCard =
+          col.cards.find((c) => c.id === hit.id) ?? {
+            id: hit.id,
+            text: hit.snippet,
+            ...(hit.title ? { title: hit.title } : {}),
+            minutesOfDay: 0,
+            pinned: false,
+            tags: [],
+            relatedRefs: [],
+            media: [],
+            addedOn: hit.addedOn ?? undefined,
+          };
+        cardHits.push({
+          col,
+          path: pathByColId.get(col.id) ?? col.name,
+          card,
+        });
+      }
+      const groupMap = new Map<
+        string,
+        { col: Collection; path: string; cards: NoteCard[] }
+      >();
+      for (const h of cardHits) {
+        let g = groupMap.get(h.col.id);
+        if (!g) {
+          g = { col: h.col, path: h.path, cards: [] };
+          groupMap.set(h.col.id, g);
+        }
+        g.cards.push(h.card);
+      }
+      return { collectionMatches, groupedCards: [...groupMap.values()] };
+    }, [serverSearchResult, localSearchResult, collections]);
   const searchHasResults =
     searchCollectionMatches.length > 0 || searchGroupedCards.length > 0;
 
@@ -5577,8 +5794,60 @@ export default function App() {
     return `${y}-${m}-${day}`;
   }, []);
 
+  /* reroll 钥匙提前到这里，让 overview summary 也能跟着重拉（服务端每次
+     RANDOM() 都会挑新卡，reroll 等价于刷新 summary）。 */
+  const [overviewRandomRerollKey, setOverviewRandomRerollKey] = useState(
+    () => Math.random()
+  );
+  const rerollOverviewRandom = useCallback(() => {
+    setOverviewRandomRerollKey(Math.random());
+  }, []);
+
+  /* flag on 时走 /api/overview/summary（服务端一次聚合所有概览字段）；
+     未命中或未就绪时各字段各自 fallback 到本地 useMemo（见下方各处）。
+     refreshKey 组合了 collections.length + rerollKey，保证点"换一条"时
+     重新拉取（服务端返回新的随机卡）。 */
+  const serverOverview = useServerOverviewSummary({
+    todayYmd: overviewTodayYmd,
+    weekStartYmd: overviewWeekStartYmd,
+    refreshKey: `${collections.length}:${overviewRandomRerollKey}`,
+  });
+
+  /* 懒加载 typeWidgets 兜底用：收集所有 preset 根合集 id + 收藏合集 id，
+     一次拉取它们各自子树的 {total, weekNew, recent}。比按 preset_slug 分组
+     更准（合集子树里的卡类型未必统一）。 */
+  const subtreeSummaryColIds = useMemo(() => {
+    const ids: string[] = [];
+    const seen = new Set<string>();
+    const push = (id: string | null | undefined) => {
+      if (!id || seen.has(id)) return;
+      seen.add(id);
+      ids.push(id);
+    };
+    push(noteNavRootCol?.id);
+    push(topicNavRootCol?.id);
+    push(clipParentCol?.id);
+    for (const baseId of SIDEBAR_COLLAPSIBLE_PRESET_BASE_IDS) {
+      push(presetCatalogRootIds[baseId]);
+    }
+    /* 概览的"自定义/收藏合集" widgets 也要 subtree 数据 */
+    for (const col of favoriteCollectionsForOverview) push(col.id);
+    return ids;
+  }, [
+    noteNavRootCol?.id,
+    topicNavRootCol?.id,
+    clipParentCol?.id,
+    presetCatalogRootIds,
+    favoriteCollectionsForOverview,
+  ]);
+  const subtreeSummaries = useServerSubtreeSummaries({
+    colIds: subtreeSummaryColIds,
+    weekStartYmd: overviewWeekStartYmd,
+    refreshKey: collections.length,
+  });
+
   /** 本周新增卡片总数（全库，addedOn >= 7 天前） */
-  const overviewWeekNewCount = useMemo(() => {
+  const localWeekNewCount = useMemo(() => {
     let n = 0;
     walkCollections(collections, (col) => {
       for (const card of col.cards) {
@@ -5588,6 +5857,7 @@ export default function App() {
     });
     return n;
   }, [collections, overviewWeekStartYmd]);
+  const overviewWeekNewCount = serverOverview?.weekNewCount ?? localWeekNewCount;
 
   /** 各预设类型的 widget 聚合：总数 + 最近 2 条 + 类型特定 pills */
   const overviewTypeWidgets = useMemo((): OverviewTypeWidget[] => {
@@ -5599,7 +5869,54 @@ export default function App() {
       if (!raw) return "";
       return raw.length > 40 ? raw.slice(0, 40) + "…" : raw;
     };
-    const summarizeSubtree = (root: Collection | null | undefined) => {
+    /* 把 server byPresetSlug 里所有以 prefix 开头的 slug 求和（覆盖父类
+       和子类型，比如 prefix="note" 覆盖 note + note_book + note_standard…） */
+    const sumSlugPrefix = (
+      prefix: string
+    ): {
+      total: number;
+      weekNew: number;
+      recent: Array<{ id: string; collectionId: string; title: string }>;
+    } => {
+      const bps = serverOverview?.byPresetSlug;
+      if (!bps) return { total: 0, weekNew: 0, recent: [] };
+      let total = 0;
+      let weekNew = 0;
+      const recentAgg: Array<{
+        id: string;
+        collectionId: string | null;
+        title: string;
+        addedOn: string | null;
+        minutesOfDay: number | null;
+      }> = [];
+      for (const [slug, slice] of Object.entries(bps)) {
+        if (slug !== prefix && !slug.startsWith(prefix + "_")) continue;
+        total += slice.total;
+        weekNew += slice.weekNew;
+        for (const r of slice.recent) recentAgg.push(r);
+      }
+      recentAgg.sort((a, b) => {
+        const da = a.addedOn ?? "";
+        const db = b.addedOn ?? "";
+        if (db !== da) return db.localeCompare(da);
+        return (b.minutesOfDay ?? 0) - (a.minutesOfDay ?? 0);
+      });
+      return {
+        total,
+        weekNew,
+        recent: recentAgg.slice(0, 2).map((r) => ({
+          id: r.id,
+          collectionId: r.collectionId ?? "",
+          title: r.title,
+        })),
+      };
+    };
+
+    const summarizeSubtree = (
+      root: Collection | null | undefined,
+      /** 懒加载模式下用来从 server byPresetSlug 兜底的 slug 前缀 */
+      slugFallback?: string
+    ) => {
       if (!root) {
         return {
           total: 0,
@@ -5624,11 +5941,36 @@ export default function App() {
         }
       });
       entries.sort((a, b) => b.sortKey.localeCompare(a.sortKey));
-      const recent = entries.slice(0, 2).map((e) => ({
+      let recent = entries.slice(0, 2).map((e) => ({
         id: e.card.id,
         collectionId: e.col.id,
         title: extractTitle(e.card),
       }));
+      /* 懒加载模式兜底（本地 walk 全空时）：
+         优先级 1. server 子树聚合（最准，按合集子树算）
+         优先级 2. meta 的 totalCardCount（只能给数，不给 recent）
+         优先级 3. server byPresetSlug 前缀求和（按卡类型近似） */
+      const byRoot = subtreeSummaries?.[root.id];
+      if (byRoot) {
+        if (total === 0) total = byRoot.total;
+        if (weekNew === 0) weekNew = byRoot.weekNew;
+        if (recent.length === 0 && byRoot.recent.length > 0) {
+          recent = byRoot.recent.map((r) => ({
+            id: r.id,
+            collectionId: r.collectionId,
+            title: r.title,
+          }));
+        }
+      }
+      if (total === 0 && typeof root.totalCardCount === "number") {
+        total = root.totalCardCount;
+      }
+      if ((recent.length === 0 || weekNew === 0) && slugFallback) {
+        const s = sumSlugPrefix(slugFallback);
+        if (recent.length === 0) recent = s.recent;
+        if (weekNew === 0) weekNew = s.weekNew;
+        if (total === 0) total = s.total;
+      }
       return { total, weekNew, recent };
     };
 
@@ -5659,12 +6001,24 @@ export default function App() {
             }
           });
         }
+        /* 懒加载模式 fallback：各根合集的 totalCardCount 相加 */
+        if (total === 0) {
+          for (const root of notesRoots) {
+            if (typeof root.totalCardCount === "number") total += root.totalCardCount;
+          }
+        }
         recentAgg.sort((a, b) => b.sortKey.localeCompare(a.sortKey));
-        const recent = recentAgg.slice(0, 2).map((e) => ({
+        let recent = recentAgg.slice(0, 2).map((e) => ({
           id: e.card.id,
           collectionId: e.col.id,
           title: extractTitle(e.card),
         }));
+        /* 懒加载兜底 weekNew + recent：从 server 的 note* 系列 slug 求和 */
+        if ((recent.length === 0 || weekNew === 0) && serverOverview?.byPresetSlug) {
+          const s = sumSlugPrefix("note");
+          if (recent.length === 0) recent = s.recent;
+          if (weekNew === 0) weekNew = s.weekNew;
+        }
         out.push({
           key: "preset-notes",
           railKey: "notes",
@@ -5708,13 +6062,13 @@ export default function App() {
           pills.push({ key: k, label: `${kindEmoji[k]} ${n}` });
         }
       }
-      const recentAtts = allMediaAttachmentEntries
-        .slice(0, 2)
-        .map((e) => ({
-          id: e.card.id,
-          collectionId: e.col.id,
-          title: e.item.name || extractTitle(e.card),
-        }));
+      /* 文件 widget 与 production 一致：只 count + kind pills，不带最近卡。
+         remote 模式下 allMediaAttachmentEntries 历来为 []，lazy 模式照样空。 */
+      const recentAtts = allMediaAttachmentEntries.slice(0, 2).map((e) => ({
+        id: e.card.id,
+        collectionId: e.col.id,
+        title: e.item.name || extractTitle(e.card),
+      }));
       out.push({
         key: "preset-files",
         railKey: "files",
@@ -5729,7 +6083,7 @@ export default function App() {
 
     // 主题
     if (topicNavRootCol) {
-      const s = summarizeSubtree(topicNavRootCol);
+      const s = summarizeSubtree(topicNavRootCol, "topic");
       out.push({
         key: "preset-topic",
         railKey: "topic",
@@ -5747,7 +6101,7 @@ export default function App() {
 
     // 剪藏：按子类型（objectKind）分桶显示
     if (clipParentCol) {
-      const s = summarizeSubtree(clipParentCol);
+      const s = summarizeSubtree(clipParentCol, "clip");
       const subCounts = new Map<string, number>();
       walkCollections([clipParentCol], (col) => {
         for (const card of col.cards) {
@@ -5755,6 +6109,14 @@ export default function App() {
           if (k) subCounts.set(k, (subCounts.get(k) ?? 0) + 1);
         }
       });
+      /* 懒加载兜底：subCounts 为空时从 server byPresetSlug 取子类 slug 计数 */
+      if (subCounts.size === 0 && serverOverview?.byPresetSlug) {
+        for (const [slug, slice] of Object.entries(serverOverview.byPresetSlug)) {
+          if (slug.startsWith("post_") || slug.startsWith("clip_")) {
+            subCounts.set(slug, slice.total);
+          }
+        }
+      }
       const subLabels: Array<[string, string]> = [
         ["post_xhs", "小红书"],
         ["post_bilibili", "B 站"],
@@ -5795,7 +6157,7 @@ export default function App() {
       if (!rootId) continue;
       const root = collectionsById.get(rootId) ?? null;
       if (!root) continue;
-      const s = summarizeSubtree(root);
+      const s = summarizeSubtree(root, def.baseId);
       // 任务特例：pill 展示今日到期 / 逾期未完成
       let pills: OverviewPill[] = [];
       if (def.baseId === "task") {
@@ -5810,6 +6172,11 @@ export default function App() {
             else if (r < overviewTodayYmd) overdueCount += 1;
           }
         });
+        /* 懒加载兜底：本地 walk 没数据时用 server 的 taskReminders */
+        if (todayCount === 0 && overdueCount === 0 && serverOverview?.taskReminders) {
+          todayCount = serverOverview.taskReminders.today;
+          overdueCount = serverOverview.taskReminders.overdue;
+        }
         if (todayCount > 0) {
           pills.push({ key: "today", label: `今日 ${todayCount}` });
         }
@@ -5952,6 +6319,59 @@ export default function App() {
   /** 概览相册候选：所有图片附件，按卡 id + url 去重。直接走 collections 兼容云端模式。 */
   const overviewPhotoItems =
     useMemo((): import("./appkit/OverviewPhotoAlbum").OverviewPhotoItem[] => {
+      /* flag on 时用服务端 recentImages（最近 12 张 file_image 卡）；
+         查本地 collections 拿到 card/col 对象以供 onOpenCard 用。
+         查不到的跳过（权限/同步边角）。 */
+      if (serverOverview?.recentImages) {
+        const out: import("./appkit/OverviewPhotoAlbum").OverviewPhotoItem[] = [];
+        const seen = new Set<string>();
+        for (const row of serverOverview.recentImages) {
+          if (!row.url) continue;
+          /* col 找不到就用 stub（让 onOpenCard 能传 collectionId 即可）；
+             card 找不到就用 stub。两层都允许 fallback，避免懒加载下整段空。 */
+          const col: Collection =
+            (row.collectionId
+              ? findCollectionById(collections, row.collectionId) ?? null
+              : null) ?? {
+              id: row.collectionId ?? "",
+              name: "",
+              dotColor: "",
+              cards: [],
+            };
+          const card: NoteCard =
+            col.cards.find((c) => c.id === row.cardId) ?? {
+              id: row.cardId,
+              text: "",
+              minutesOfDay: 0,
+              pinned: false,
+              tags: [],
+              relatedRefs: [],
+              media: [
+                {
+                  kind: "image",
+                  url: row.url,
+                  thumbnailUrl: row.thumbUrl ?? undefined,
+                  name: row.name ?? undefined,
+                },
+              ],
+            };
+          const key = `${card.id}:${row.url}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          out.push({
+            card,
+            col,
+            item: {
+              kind: "image",
+              url: row.url,
+              thumbnailUrl: row.thumbUrl ?? undefined,
+              name: row.name ?? undefined,
+            },
+          });
+        }
+        return out;
+      }
+      /* flag off / 失败：本地实现（原逻辑） */
       const out: import("./appkit/OverviewPhotoAlbum").OverviewPhotoItem[] = [];
       const seen = new Set<string>();
       walkCollections(collections, (col) => {
@@ -5969,12 +6389,59 @@ export default function App() {
         }
       });
       return out;
-    }, [collections]);
+    }, [serverOverview, collections]);
 
   /** 概览音乐播放器候选：音频附件且带封面（coverUrl 或 thumbnailUrl），按卡 id 去重。
    *  直接走 collections，避免 allMediaAttachmentEntries 在云端模式被置空时漏掉轨。 */
   const overviewAudioTracks =
     useMemo((): import("./appkit/OverviewMusicPlayer").OverviewMusicTrack[] => {
+      if (serverOverview?.recentAudio) {
+        const out: import("./appkit/OverviewMusicPlayer").OverviewMusicTrack[] = [];
+        const seen = new Set<string>();
+        for (const row of serverOverview.recentAudio) {
+          if (!row.url) continue;
+          const col: Collection =
+            (row.collectionId
+              ? findCollectionById(collections, row.collectionId) ?? null
+              : null) ?? {
+              id: row.collectionId ?? "",
+              name: "",
+              dotColor: "",
+              cards: [],
+            };
+          const mediaItem = {
+            kind: "audio" as const,
+            url: row.url,
+            coverUrl: row.coverUrl ?? undefined,
+            thumbnailUrl: row.thumbUrl ?? row.coverThumbUrl ?? undefined,
+            name: row.name ?? undefined,
+            ...(typeof row.durationSec === "number"
+              ? { durationSec: row.durationSec }
+              : {}),
+          };
+          const card: NoteCard =
+            col.cards.find((c) => c.id === row.cardId) ?? {
+              id: row.cardId,
+              text: "",
+              minutesOfDay: 0,
+              pinned: false,
+              tags: [],
+              relatedRefs: [],
+              media: [mediaItem],
+            };
+          const key = `${card.id}:${row.url}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          out.push({
+            card,
+            col,
+            item: mediaItem,
+            displayName: row.displayName,
+          });
+        }
+        return out;
+      }
+      /* flag off / 失败：本地实现 */
       const out: import("./appkit/OverviewMusicPlayer").OverviewMusicTrack[] = [];
       const seen = new Set<string>();
       walkCollections(collections, (col) => {
@@ -6009,22 +6476,49 @@ export default function App() {
         }
       });
       return out;
-    }, [collections]);
+    }, [serverOverview, collections]);
 
   // ─────────────────────────────────────────────────────────────────────
   // 概览 Hero 右侧「随手一翻」：随机抽一张有正文的笔记
+  // （reroll 钥匙在更上面 useServerOverviewSummary 之前已声明）
   // ─────────────────────────────────────────────────────────────────────
-
-  /** reroll 钥匙：每次点"换一条"产生一个新 float，触发 memo 重选 */
-  const [overviewRandomRerollKey, setOverviewRandomRerollKey] = useState(
-    () => Math.random()
-  );
-  const rerollOverviewRandom = useCallback(() => {
-    setOverviewRandomRerollKey(Math.random());
-  }, []);
 
   const overviewRandomCard =
     useMemo((): import("./appkit/OverviewDashboard").OverviewRandomCard | null => {
+      /* flag on 时用服务端 RANDOM() 选出的卡，本地查不到则合成 stub */
+      if (serverOverview?.randomCard) {
+        const sr = serverOverview.randomCard;
+        const col = sr.collectionId
+          ? findCollectionById(collections, sr.collectionId)
+          : null;
+        if (col) {
+          const card: NoteCard =
+            col.cards.find((c) => c.id === sr.id) ?? {
+              id: sr.id,
+              text: sr.snippet,
+              minutesOfDay: 0,
+              pinned: false,
+              tags: [],
+              relatedRefs: [],
+              media: [],
+              addedOn: sr.addedOn ?? undefined,
+            };
+          const ymd = sr.addedOn ?? "";
+          let dateLabel = "";
+          if (ymd) {
+            if (ymd === overviewTodayYmd) dateLabel = "今天";
+            else {
+              const yest = new Date();
+              yest.setDate(yest.getDate() - 1);
+              const y = yest.getFullYear();
+              const m = String(yest.getMonth() + 1).padStart(2, "0");
+              const d = String(yest.getDate()).padStart(2, "0");
+              dateLabel = ymd === `${y}-${m}-${d}` ? "昨天" : ymd;
+            }
+          }
+          return { card, col, snippet: sr.snippet, dateLabel };
+        }
+      }
       /** 候选池：跳过纯文件卡 + 正文为空的卡；每张 card 仅按首次出现的 placement 记一次 */
       const pool: Array<{ card: NoteCard; col: Collection; snippet: string }> =
         [];
@@ -6069,7 +6563,7 @@ export default function App() {
         snippet: picked.snippet,
         dateLabel,
       };
-    }, [collections, overviewRandomRerollKey, overviewTodayYmd]);
+    }, [serverOverview, collections, overviewRandomRerollKey, overviewTodayYmd]);
 
   /** rail 是否展开显示文字；持久化到 localStorage */
   const RAIL_EXPANDED_KEY = "ui:rail-expanded";

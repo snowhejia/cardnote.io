@@ -728,25 +728,65 @@ export async function getCardsForCollection(userIdIn, collectionId, opts = {}) {
     );
     if (colCheck.rows.length === 0) return null;
 
-    const r = await query(
-      `SELECT c.id, c.title, c.body, c.minutes_of_day, c.added_on,
-              c.tags, c.custom_props,
-              ct.preset_slug,
-              p.collection_id, p.pinned, p.sort_order
-         FROM card_placements p
-         JOIN cards c      ON c.id = p.card_id AND c.trashed_at IS NULL
-         JOIN card_types ct ON ct.id = c.card_type_id
-        WHERE p.collection_id = $1
-        ORDER BY ${orderBy}
-        LIMIT $2 OFFSET $3`,
-      [collectionId, limit + 1, offset]
-    );
-    rows = r.rows;
+    if (opts.subtree) {
+      /* subtree=1：把合集本身 + 所有后代的卡片都捞回来（去重 by card.id，
+         置顶先于非置顶，同 placement 内按 sort_order）。懒加载的预设 rail
+         聚合视图用这个。 */
+      const r = await query(
+        `WITH RECURSIVE roots AS (
+           SELECT id FROM collections WHERE id = $1 AND user_id = $4
+           UNION ALL
+           SELECT c.id FROM collections c
+             JOIN roots r ON c.parent_id = r.id
+            WHERE c.user_id = $4
+         ),
+         placed AS (
+           SELECT DISTINCT ON (p.card_id)
+                  p.card_id, p.collection_id, p.pinned, p.sort_order
+             FROM card_placements p
+             JOIN roots r ON p.collection_id = r.id
+             JOIN cards c ON c.id = p.card_id AND c.trashed_at IS NULL
+            ORDER BY p.card_id, p.pinned DESC, p.sort_order ASC
+         )
+         SELECT c.id, c.title, c.body, c.minutes_of_day, c.added_on,
+                c.tags, c.custom_props,
+                ct.preset_slug,
+                pl.collection_id, pl.pinned, pl.sort_order
+           FROM placed pl
+           JOIN cards c      ON c.id = pl.card_id
+           JOIN card_types ct ON ct.id = c.card_type_id
+          ORDER BY ${orderBy}
+          LIMIT $2 OFFSET $3`,
+        [collectionId, limit + 1, offset, userId]
+      );
+      rows = r.rows;
+    } else {
+      const r = await query(
+        `SELECT c.id, c.title, c.body, c.minutes_of_day, c.added_on,
+                c.tags, c.custom_props,
+                ct.preset_slug,
+                p.collection_id, p.pinned, p.sort_order
+           FROM card_placements p
+           JOIN cards c      ON c.id = p.card_id AND c.trashed_at IS NULL
+           JOIN card_types ct ON ct.id = c.card_type_id
+          WHERE p.collection_id = $1
+          ORDER BY ${orderBy}
+          LIMIT $2 OFFSET $3`,
+        [collectionId, limit + 1, offset]
+      );
+      rows = r.rows;
+    }
   }
 
   const hasMore = rows.length > limit;
   const trimmed = hasMore ? rows.slice(0, limit) : rows;
-  const cards = await assembleCards(trimmed);
+  const assembled = await assembleCards(trimmed);
+  /* 附上 collection_id（subtree 模式下前端按它把卡分发到各个合集 state）。
+     非 subtree 模式 collection_id === 请求的 collectionId，前端忽略也行。 */
+  const cards = assembled.map((card, i) => ({
+    ...card,
+    collectionId: trimmed[i].collection_id ?? collectionId,
+  }));
   return { cards, hasMore, page, limit };
 }
 

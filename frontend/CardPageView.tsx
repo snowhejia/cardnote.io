@@ -18,13 +18,13 @@ import { tagChipInlineStyle } from "./tagChipPalette";
 import { formatCardTimeLabel, localDateString } from "./cardTimeLabel";
 import { CardPageCollectionTagsPanel } from "./CardPageCollectionTagsPanel";
 import {
-  collectAllTagsFromCollections,
   collectionIdsContainingCardId,
   findCardInTree,
   isFileCard,
   LOOSE_NOTES_COLLECTION_ID,
   walkCollectionsWithPath,
 } from "./appkit/collectionModel";
+import { useTagsLibrary } from "./appkit/useTagsLibrary";
 import { mergedTemplateSchemaFieldsForPlacements } from "./appkit/schemaTemplateFields";
 import { DatePropPopover } from "./appkit/DatePropPopover";
 import { formatByteSize } from "./noteStats";
@@ -1621,10 +1621,8 @@ export function CardPageView({
     ].filter((id) => id && id !== LOOSE_NOTES_COLLECTION_ID);
     return computeFallbackSchemaFieldsFromPlacements(collections, placementIds);
   }, [collections, card.id, colId]);
-  const tagLibrary = useMemo(
-    () => collectAllTagsFromCollections(collections),
-    [collections]
-  );
+  /* flag on 时走 /api/tags；flag off 或失败则本地遍历兜底 */
+  const tagLibrary = useTagsLibrary(collections);
   const hasReminder = Boolean(card.reminderOn);
 
   const tocHeadings = useMemo(

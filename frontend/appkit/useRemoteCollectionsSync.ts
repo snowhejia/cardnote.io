@@ -7,6 +7,8 @@ import {
   createCollectionApi,
   fetchCollectionsFromApi,
 } from "../api/collections";
+import { fetchMetaTree, metaToCollectionShell } from "../api/collections-v2";
+import { isLazyCollectionsEnabled } from "../lazyFeatureFlag";
 import type { AppDataMode } from "../appDataModeStorage";
 import { getAdminToken } from "../auth/token";
 import { cloneInitialCollections } from "./initialWorkspace";
@@ -175,8 +177,24 @@ export function useRemoteCollectionsSync(p: {
           return;
         }
         await flushPendingTextBeforeRemoteFetch?.();
-        const data = await fetchCollectionsFromApi();
-        if (cancelled) return;
+        /* 懒加载模式：启动只拉 meta tree（合集元信息 + 每合集卡片数），
+           全量 cards[] 按需从 /api/collections/:id/cards 拉回。
+           失败则自动降级到全量路径。 */
+        const lazy = isLazyCollectionsEnabled();
+        let data: Collection[] | null = null;
+        if (lazy) {
+          const metaTree = await fetchMetaTree();
+          if (cancelled) return;
+          if (metaTree !== null) {
+            data = metaTree.map((m) => metaToCollectionShell(m));
+          }
+          /* fetchMetaTree 失败时 data 仍为 null，fallback 到下方全量；
+             对新账号空树也同样 fallback（seed 逻辑依赖全量路径）。 */
+        }
+        if (data === null) {
+          data = await fetchCollectionsFromApi();
+          if (cancelled) return;
+        }
         if (data !== null) {
           let tree = migrateCollectionTree(data);
           const authed = Boolean(currentUser || getAdminToken());

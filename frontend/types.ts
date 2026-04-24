@@ -292,6 +292,11 @@ export type Collection = {
   cards: NoteCard[];
   /** 子合集（侧栏树形折叠展示） */
   children?: Collection[];
+  /** 懒加载模式专用：该合集直接拥有的卡片数（服务端 meta 提供）。
+   *  cards[] 可能是空数组（还没懒拉），但这个字段仍是权威数。 */
+  cardCount?: number;
+  /** 懒加载模式专用：子树累加的卡片总数（含子合集） */
+  totalCardCount?: number;
 };
 
 /** 侧栏垃圾桶：删除的小笔记快照（本地模式存 localStorage；远程模式同步 PostgreSQL） */
