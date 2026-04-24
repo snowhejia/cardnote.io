@@ -35,7 +35,8 @@ export function useServerSubtreeSummaries(args: {
     (async () => {
       const res = await fetchSubtreeSummaries(ids, { weekStartYmd });
       if (cancelled) return;
-      setData(res);
+      /* 失败时保留上一轮成功结果，避免偶发网络抖动把 widget recent 清空 */
+      if (res) setData(res);
     })();
     return () => {
       cancelled = true;

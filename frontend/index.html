@@ -17,7 +17,8 @@
       href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Fraunces:ital,opsz,wght@1,9..144,400;1,9..144,500;1,9..144,600&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;600;700&family=VT323&family=Press+Start+2P&display=swap"
       rel="stylesheet"
     />
-    <!-- 首屏占位：在 JS 与鉴权请求完成前即可参与 LCP，减轻登录全屏层晚到导致的 Poor LCP -->
+    <!-- 首屏占位：在 JS 与鉴权请求完成前即可参与 LCP，减轻登录全屏层晚到导致的 Poor LCP；
+         视觉与 App.css 的 .app-boot-spinner 统一（橙/粉小卡叠放 + 浮动 + 轮播文案）。 -->
     <style>
       #app-html-boot {
         min-height: 100vh;
@@ -27,10 +28,12 @@
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        gap: 14px;
+        gap: 12px;
+        min-width: 210px;
         background: #f9f9f9;
-        color: #67676c;
         font-family:
+          "Inter",
+          "Noto Sans SC",
           system-ui,
           -apple-system,
           "PingFang SC",
@@ -40,21 +43,89 @@
         font-size: 0.875rem;
         -webkit-font-smoothing: antialiased;
       }
-      #app-html-boot .app-html-boot__sub {
-        margin: 0;
-      }
       #app-html-boot .app-html-boot__spinner {
-        width: 36px;
-        height: 36px;
-        box-sizing: border-box;
-        border-radius: 50%;
-        border: 3px solid rgba(55, 53, 47, 0.12);
-        border-top-color: rgba(37, 99, 235, 0.65);
-        animation: app-html-boot-spin 0.75s linear infinite;
+        position: relative;
+        width: 44px;
+        height: 44px;
+        animation: app-html-boot-float 1.8s ease-in-out infinite;
       }
-      @keyframes app-html-boot-spin {
-        to {
-          transform: rotate(360deg);
+      #app-html-boot .app-html-boot__spinner::before,
+      #app-html-boot .app-html-boot__spinner::after {
+        content: "";
+        position: absolute;
+        border-radius: 8px;
+        box-sizing: border-box;
+      }
+      #app-html-boot .app-html-boot__spinner::before {
+        left: 7px;
+        top: 8px;
+        width: 30px;
+        height: 28px;
+        background: #f8b77c;
+        border: 1px solid #e89856;
+        transform: rotate(-10deg);
+        box-shadow: 0 12px 24px -18px rgba(186, 52, 96, 0.55);
+      }
+      #app-html-boot .app-html-boot__spinner::after {
+        left: 6px;
+        top: 6px;
+        width: 32px;
+        height: 30px;
+        background:
+          linear-gradient(#fff 0 0) 15px 10px / 3px 3px no-repeat,
+          linear-gradient(#fff 0 0) 18px 10px / 3px 3px no-repeat,
+          linear-gradient(#fff 0 0) 24px 10px / 3px 3px no-repeat,
+          linear-gradient(#fff 0 0) 27px 10px / 3px 3px no-repeat,
+          linear-gradient(#fff 0 0) 12px 13px / 18px 3px no-repeat,
+          linear-gradient(#fff 0 0) 12px 16px / 18px 3px no-repeat,
+          linear-gradient(#fff 0 0) 15px 19px / 12px 3px no-repeat,
+          linear-gradient(#fff 0 0) 18px 22px / 6px 3px no-repeat,
+          linear-gradient(155deg, rgba(250, 164, 181, 0.96), rgba(232, 122, 144, 0.92));
+        border: 1px solid #e87a90;
+        transform: rotate(6deg);
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.42),
+          0 14px 28px -18px rgba(186, 52, 96, 0.55);
+      }
+      #app-html-boot .app-html-boot__sub {
+        position: relative;
+        margin: 0;
+        min-width: 210px;
+        min-height: 1.25rem;
+        color: transparent;
+        font-weight: 600;
+        text-align: center;
+      }
+      #app-html-boot .app-html-boot__sub::after {
+        content: "正在整理你的卡片笔记…";
+        position: absolute;
+        inset: 0;
+        color: oklch(0.44 0.08 355);
+        animation: app-html-boot-copy 5.6s steps(1, end) infinite;
+      }
+      @keyframes app-html-boot-float {
+        0%,
+        100% {
+          transform: translateY(0) scale(1);
+          filter: saturate(0.98);
+        }
+        50% {
+          transform: translateY(-4px) scale(1.03);
+          filter: saturate(1.08);
+        }
+      }
+      @keyframes app-html-boot-copy {
+        0% {
+          content: "正在整理你的卡片笔记…";
+        }
+        25% {
+          content: "正在同步小卡片…";
+        }
+        50% {
+          content: "正在铺开笔记时间线…";
+        }
+        75% {
+          content: "马上就好…";
         }
       }
     </style>
