@@ -4,6 +4,7 @@ import { CollectionIconGlyph } from "./CollectionIconGlyph";
 import { toContrastyGlyphColor } from "../sidebarDotColor";
 import type { RailKey } from "./SidebarRail";
 import type { Collection, NoteCard } from "../types";
+import { plainTextFromNoteHtml } from "../notePlainText";
 import {
   DiceIcon,
   HeroStickerStack,
@@ -574,10 +575,7 @@ function StickerChip({
 
 /** 从 card.text 提取 ≤ 40 字的第一行纯文本，用于最近条目标题 */
 function extractCardTitle(card: NoteCard): string {
-  const raw = String(card.text || "")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  const raw = plainTextFromNoteHtml(String(card.text || ""));
   if (!raw) return "（无标题）";
   return raw.length > 40 ? raw.slice(0, 40) + "…" : raw;
 }
