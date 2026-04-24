@@ -267,6 +267,7 @@ import {
 import { useLazyEndpointsProbe } from "./appkit/useLazyEndpointsProbe";
 import { useServerSearch } from "./appkit/useServerSearch";
 import { useServerReminders } from "./appkit/useServerReminders";
+import { useServerNotesTimeline } from "./appkit/useServerNotesTimeline";
 import { collectConnectionEdges } from "./appkit/connectionEdges";
 import {
   findLinkedFileCardForNoteMedia,
@@ -2506,10 +2507,35 @@ export default function App() {
   }, [collections]);
   void _connectedCardsCount;
 
+  /* flag on 时走 /api/notes 分页聚合；flag off 或失败 fallback 到本地 walk。
+     服务端口径 = "非 file_* 卡"；本地多一层 preset-note 子树过滤——两者
+     在多数账户下一致，差异可接受。 */
+  const serverNotesRows = useServerNotesTimeline(collections.length);
   const allNotesSorted = useMemo(() => {
+    if (serverNotesRows) {
+      const entries: { col: Collection; card: NoteCard }[] = [];
+      const seen = new Set<string>();
+      for (const row of serverNotesRows) {
+        if (seen.has(row.id)) continue;
+        if (!row.collectionId) continue;
+        const col = findCollectionById(collections, row.collectionId);
+        if (!col) continue;
+        const card = col.cards.find((c) => c.id === row.id);
+        if (!card) continue;
+        seen.add(row.id);
+        entries.push({ col, card });
+      }
+      /* 服务端已 ORDER BY added_on DESC, minutes_of_day DESC, id DESC；保险再排一次 */
+      entries.sort((a, b) => {
+        const dateA = a.card.addedOn ?? "";
+        const dateB = b.card.addedOn ?? "";
+        if (dateB !== dateA) return dateB.localeCompare(dateA);
+        return (b.card.minutesOfDay ?? 0) - (a.card.minutesOfDay ?? 0);
+      });
+      return entries;
+    }
+    /* 本地实现（保持原行为） */
     const entries: { col: Collection; card: NoteCard }[] = [];
-    // 限定「全部笔记」为「笔记」preset 子树（含任意层子合集）+ 未归类虚拟合集。
-    // 这样即便 task/person/file 子树里混入 objectKind==='note' 的历史卡，也不会漏进来。
     const noteRoot = findCollectionByPresetType(collections, "note");
     const allowedColIds = new Set<string>();
     allowedColIds.add(LOOSE_NOTES_COLLECTION_ID);
@@ -2521,11 +2547,10 @@ export default function App() {
         if (n.children?.length) stack.push(...n.children);
       }
     }
-    const useColFilter = allowedColIds.size > 1; // 有 note root 才启用
+    const useColFilter = allowedColIds.size > 1;
     walkCollections(collections, (col) => {
       if (useColFilter && !allowedColIds.has(col.id)) return;
       for (const card of col.cards) {
-        // 全部笔记：仅笔记形态，不含文件/人物/网页/任务等对象卡
         if (!isNoteForAllNotesView(card)) continue;
         entries.push({ col, card });
       }
@@ -2536,14 +2561,13 @@ export default function App() {
       if (dateB !== dateA) return dateB.localeCompare(dateA);
       return (b.card.minutesOfDay ?? 0) - (a.card.minutesOfDay ?? 0);
     });
-    /** 同一张卡被「加入合集」后会存在多条 placement；全部笔记按 card.id 去重，仅保留一条 */
     const seen = new Set<string>();
     return entries.filter((ent) => {
       if (seen.has(ent.card.id)) return false;
       seen.add(ent.card.id);
       return true;
     });
-  }, [collections]);
+  }, [serverNotesRows, collections]);
 
   const allNotesDisplayed = useMemo(
     () => allNotesSorted.slice(0, allNotesVisibleCount),
