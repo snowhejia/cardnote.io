@@ -3,15 +3,13 @@ import type { LoginUiLang } from "../auth/loginUiI18n";
 import { fetchApiHealth } from "../api/health";
 import { getAppChrome } from "../i18n/appChrome";
 import {
+  createCardApi,
+  createCollectionApi,
   fetchCollectionsFromApi,
-  saveCollectionsToApi,
 } from "../api/collections";
 import type { AppDataMode } from "../appDataModeStorage";
 import { getAdminToken } from "../auth/token";
-import {
-  cloneInitialCollections,
-  cloneInitialCollectionsForRemoteUser,
-} from "./initialWorkspace";
+import { cloneInitialCollections } from "./initialWorkspace";
 import { loadLocalCollections } from "../localCollectionsStorage";
 import { migrateCollectionTree } from "../migrateCollections";
 import {
@@ -31,6 +29,8 @@ import {
   pruneCollapsedFolderIds,
   resolveActiveCollectionId,
 } from "./collectionModel";
+import { localDateString } from "./dateUtils";
+import { randomDotColor } from "./searchAndCalendar";
 
 type MediaMode = "cos" | "local" | null;
 
@@ -181,15 +181,11 @@ export function useRemoteCollectionsSync(p: {
           let tree = migrateCollectionTree(data);
           const authed = Boolean(currentUser || getAdminToken());
           if (tree.length === 0 && authed && writeRequiresLogin) {
-            tree = currentUser?.id
-              ? cloneInitialCollectionsForRemoteUser(currentUser.id, appUiLang)
-              : cloneInitialCollections(appUiLang);
-            const seeded = await saveCollectionsToApi(tree);
+            const seeded = await seedDefaultWorkspace();
             if (cancelled) return;
             if (!seeded) {
               setSidebarFlash(chrome.syncWelcomeSeedFail);
             } else {
-              // await 期间用户可能已新建笔记；勿用保存前的 tree 覆盖乐观更新
               const pulled = await fetchCollectionsFromApi();
               if (cancelled) return;
               if (pulled !== null) {
@@ -277,4 +273,24 @@ export function useRemoteCollectionsSync(p: {
     getCollectionsForMerge,
     flushPendingTextBeforeRemoteFetch,
   ]);
+}
+
+/** 新账号首登：建一个空合集 + 一张空白卡，让用户有个起步的容器。 */
+async function seedDefaultWorkspace(): Promise<boolean> {
+  const rand = () => Math.random().toString(36).slice(2, 9);
+  const colId = `c-${Date.now()}-${rand()}`;
+  const col = await createCollectionApi({
+    id: colId,
+    name: "我的笔记",
+    dotColor: randomDotColor(),
+  });
+  if (!col) return false;
+  const now = new Date();
+  const card = await createCardApi(colId, {
+    id: `n-${Date.now()}-${rand()}`,
+    text: "",
+    minutesOfDay: now.getHours() * 60 + now.getMinutes(),
+    addedOn: localDateString(now),
+  });
+  return Boolean(card);
 }
