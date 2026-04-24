@@ -6054,28 +6054,13 @@ export default function App() {
           pills.push({ key: k, label: `${kindEmoji[k]} ${n}` });
         }
       }
-      const localRecentAtts = allMediaAttachmentEntries
-        .slice(0, 2)
-        .map((e) => ({
-          id: e.card.id,
-          collectionId: e.col.id,
-          title: e.item.name || extractTitle(e.card),
-        }));
-      /* 远程模式下 allMediaAttachmentEntries 一直为 []（历史上就这样，
-         避免云端多用户时打满客户端内存）。lazy-mode 同样会落到这里。
-         有 serverOverview.recentImages 就用它填 recent 两条，没有就空。 */
-      const recentAtts =
-        localRecentAtts.length > 0
-          ? localRecentAtts
-          : (serverOverview?.recentImages ?? [])
-              .slice(0, 2)
-              .map((r) => ({
-                id: r.cardId,
-                collectionId: r.collectionId ?? "",
-                title:
-                  r.name ||
-                  (r.url ? r.url.replace(/^.*\//, "").slice(0, 40) : ""),
-              }));
+      /* 文件 widget 与 production 一致：只 count + kind pills，不带最近卡。
+         remote 模式下 allMediaAttachmentEntries 历来为 []，lazy 模式照样空。 */
+      const recentAtts = allMediaAttachmentEntries.slice(0, 2).map((e) => ({
+        id: e.card.id,
+        collectionId: e.col.id,
+        title: e.item.name || extractTitle(e.card),
+      }));
       out.push({
         key: "preset-files",
         railKey: "files",
