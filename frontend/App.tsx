@@ -5680,12 +5680,23 @@ export default function App() {
     return `${y}-${m}-${day}`;
   }, []);
 
+  /* reroll 钥匙提前到这里，让 overview summary 也能跟着重拉（服务端每次
+     RANDOM() 都会挑新卡，reroll 等价于刷新 summary）。 */
+  const [overviewRandomRerollKey, setOverviewRandomRerollKey] = useState(
+    () => Math.random()
+  );
+  const rerollOverviewRandom = useCallback(() => {
+    setOverviewRandomRerollKey(Math.random());
+  }, []);
+
   /* flag on 时走 /api/overview/summary（服务端一次聚合所有概览字段）；
-     未命中或未就绪时各字段各自 fallback 到本地 useMemo（见下方各处）。 */
+     未命中或未就绪时各字段各自 fallback 到本地 useMemo（见下方各处）。
+     refreshKey 组合了 collections.length + rerollKey，保证点"换一条"时
+     重新拉取（服务端返回新的随机卡）。 */
   const serverOverview = useServerOverviewSummary({
     todayYmd: overviewTodayYmd,
     weekStartYmd: overviewWeekStartYmd,
-    refreshKey: collections.length,
+    refreshKey: `${collections.length}:${overviewRandomRerollKey}`,
   });
 
   /** 本周新增卡片总数（全库，addedOn >= 7 天前） */
@@ -6183,18 +6194,36 @@ export default function App() {
 
   // ─────────────────────────────────────────────────────────────────────
   // 概览 Hero 右侧「随手一翻」：随机抽一张有正文的笔记
+  // （reroll 钥匙在更上面 useServerOverviewSummary 之前已声明）
   // ─────────────────────────────────────────────────────────────────────
-
-  /** reroll 钥匙：每次点"换一条"产生一个新 float，触发 memo 重选 */
-  const [overviewRandomRerollKey, setOverviewRandomRerollKey] = useState(
-    () => Math.random()
-  );
-  const rerollOverviewRandom = useCallback(() => {
-    setOverviewRandomRerollKey(Math.random());
-  }, []);
 
   const overviewRandomCard =
     useMemo((): import("./appkit/OverviewDashboard").OverviewRandomCard | null => {
+      /* flag on 时用服务端 RANDOM() 选出的卡，本地查 col/card hydrate */
+      if (serverOverview?.randomCard) {
+        const sr = serverOverview.randomCard;
+        const col = sr.collectionId
+          ? findCollectionById(collections, sr.collectionId)
+          : null;
+        const card = col?.cards.find((c) => c.id === sr.id) ?? null;
+        if (col && card) {
+          const ymd = sr.addedOn ?? "";
+          let dateLabel = "";
+          if (ymd) {
+            if (ymd === overviewTodayYmd) dateLabel = "今天";
+            else {
+              const yest = new Date();
+              yest.setDate(yest.getDate() - 1);
+              const y = yest.getFullYear();
+              const m = String(yest.getMonth() + 1).padStart(2, "0");
+              const d = String(yest.getDate()).padStart(2, "0");
+              dateLabel = ymd === `${y}-${m}-${d}` ? "昨天" : ymd;
+            }
+          }
+          return { card, col, snippet: sr.snippet, dateLabel };
+        }
+        /* 服务端给的卡在本地树没找到（罕见，比如 SSE 还没同步），落到本地池兜底 */
+      }
       /** 候选池：跳过纯文件卡 + 正文为空的卡；每张 card 仅按首次出现的 placement 记一次 */
       const pool: Array<{ card: NoteCard; col: Collection; snippet: string }> =
         [];
@@ -6239,7 +6268,7 @@ export default function App() {
         snippet: picked.snippet,
         dateLabel,
       };
-    }, [collections, overviewRandomRerollKey, overviewTodayYmd]);
+    }, [serverOverview, collections, overviewRandomRerollKey, overviewTodayYmd]);
 
   /** rail 是否展开显示文字；持久化到 localStorage */
   const RAIL_EXPANDED_KEY = "ui:rail-expanded";
