@@ -587,9 +587,7 @@ export function NoteSettingsModal({
       setCustomTypeDraft({
         name: "",
         parentId: customTypeModal.parentId ?? "",
-        fields: customTypeModal.parentId
-          ? []
-          : [{ name: lang === "en" ? "Title" : "标题", type: "text" }],
+        fields: [],
       });
     } else {
       const col = customTypeModal.collection;
@@ -597,14 +595,11 @@ export function NoteSettingsModal({
       setCustomTypeDraft({
         name: col.name,
         parentId: "",
-        fields:
-          fs.length > 0
-            ? fs.map((f) => ({
-                id: f.id,
-                name: f.name,
-                type: f.type,
-              }))
-            : [{ name: lang === "en" ? "Title" : "标题", type: "text" }],
+        fields: fs.map((f) => ({
+          id: f.id,
+          name: f.name,
+          type: f.type,
+        })),
       });
     }
     setCustomTypeFormErr(null);
@@ -958,17 +953,6 @@ export function NoteSettingsModal({
           name: nm,
           type: f.type,
           order: ord++,
-        });
-      }
-      const hasParentInCreate =
-        customTypeModal.mode === "create" &&
-        Boolean(customTypeDraft.parentId.trim());
-      if (builtFields.length === 0 && !hasParentInCreate) {
-        builtFields.push({
-          id: `sf-u-${Date.now()}-0`,
-          name: lang === "en" ? "Title" : "标题",
-          type: "text",
-          order: 0,
         });
       }
       const cardSchema: CollectionCardSchema = {

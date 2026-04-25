@@ -12357,7 +12357,9 @@ body.app--card-page-open .app {
    (白底 / 圆角 / 软阴影 / 带彩色小图标的行)。
    原 --file-card modifier 已下沉到基类,现按 data-prop-type / data-prop-id 上色。 */
 .card-page__props-panel-inner {
-  --card-page-prop-value-h: 32px;
+  --card-page-prop-value-h: 24px;
+  --card-page-prop-value-pad-y: 1px;
+  --card-page-prop-value-pad-x: 6px;
   display: flex;
   flex-direction: column;
   gap: 0;
@@ -12371,9 +12373,9 @@ body.app--card-page-open .app {
 
 .card-page__props-panel-inner .card-page__prop-row {
   position: relative;
-  padding: 5px 4px 5px 34px;
+  padding: 0 4px 0 34px;
   border-radius: 8px;
-  min-height: 34px;
+  min-height: calc(var(--card-page-prop-value-h, 24px) + 2px);
   gap: 10px;
   align-items: center;
 }
@@ -12411,6 +12413,11 @@ body.app--card-page-open .app {
 
 .card-page__props-panel-inner .card-page__prop-label-wrap {
   min-height: var(--card-page-prop-value-h, 32px);
+}
+
+.card-page__props-panel-inner .card-page__prop-label,
+.card-page__props-panel-inner .card-page__prop-label-wrap {
+  min-height: var(--card-page-prop-value-h, 28px);
 }
 
 /* meta 行(格式/大小/分辨率/时长 等):扁平文字,不再加灰底胶囊 */
@@ -12561,11 +12568,12 @@ body.app--card-page-open .app {
 
 .card-page__props-panel-inner .card-page__prop-val-text--tags-panel {
   min-height: var(--card-page-prop-value-h, 34px);
-  padding: 6px 8px;
+  padding: var(--card-page-prop-value-pad-y, 6px)
+    var(--card-page-prop-value-pad-x, 8px);
 }
 
 .card-page__props-panel-inner .card-page__tags-panel {
-  min-height: var(--card-page-prop-value-h, 34px);
+  min-height: var(--card-page-prop-value-h, 28px);
 }
 
 /* 标题行/text 自定义属性的 input:与按钮/chip 行同高,不再因 input 自带
@@ -12573,7 +12581,9 @@ body.app--card-page-open .app {
    独立标签输入框,在统一属性面板里需要压缩)。 */
 .card-page__props-panel-inner .card-page__tags-add-input--prop-field {
   font-size: 0.75rem;
-  padding: 6px 8px;
+  line-height: 1.35;
+  padding: var(--card-page-prop-value-pad-y, 6px)
+    var(--card-page-prop-value-pad-x, 8px);
   min-height: var(--card-page-prop-value-h, 32px);
 }
 
@@ -12802,9 +12812,8 @@ body.app--card-page-open .app {
   align-items: center;
   gap: 8px;
   box-sizing: border-box;
-  /* 值区 40px + 上下各 4px，与 .card-page__prop-label min-height 对齐 */
-  min-height: calc(var(--card-page-prop-value-h, 40px) + 8px);
-  padding: 4px 0;
+  min-height: calc(var(--card-page-prop-value-h, 24px) + 2px);
+  padding: 0;
   border-radius: 6px;
   transition: background 0.12s;
 }
@@ -13210,7 +13219,8 @@ body.app--card-page-open .app {
   display: flex;
   align-items: center;
   min-height: var(--card-page-prop-value-h, 40px);
-  padding: 8px 10px;
+  padding: var(--card-page-prop-value-pad-y, 8px)
+    var(--card-page-prop-value-pad-x, 10px);
   box-sizing: border-box;
 }
 
@@ -13726,7 +13736,7 @@ body.app--card-page-open .app {
   align-items: center;
   align-self: center;
   box-sizing: border-box;
-  min-height: var(--card-page-prop-value-h, 40px);
+  min-height: var(--card-page-prop-value-h, 30px);
   font-size: 0.8125rem;
   line-height: 1.35;
   color: rgba(55, 53, 47, 0.5);
@@ -13745,7 +13755,7 @@ body.app--card-page-open .app {
   align-self: center;
   gap: 0;
   padding-top: 0;
-  min-height: var(--card-page-prop-value-h, 40px);
+  min-height: var(--card-page-prop-value-h, 30px);
   min-width: 0;
 }
 
@@ -13833,8 +13843,9 @@ body.app--card-page-open .app {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
   padding-top: 0;
 }
 
@@ -13856,8 +13867,9 @@ body.app--card-page-open .app {
   display: block;
   box-sizing: border-box;
   width: 100%;
-  min-height: var(--card-page-prop-value-h, 40px);
-  padding: 8px 10px;
+  min-height: var(--card-page-prop-value-h, 30px);
+  padding: var(--card-page-prop-value-pad-y, 4px)
+    var(--card-page-prop-value-pad-x, 8px);
   line-height: 1.35;
   word-break: break-word;
 }

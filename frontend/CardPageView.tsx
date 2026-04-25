@@ -231,6 +231,14 @@ function normalizeSchemaPropNameKey(name: string | undefined): string {
     .toLowerCase();
 }
 
+function isLegacyGenericTitleProp(
+  value: { name?: string; type?: string } | null | undefined
+): boolean {
+  if (!value || value.type !== "text") return false;
+  const key = normalizeSchemaPropNameKey(value.name);
+  return key === "title" || key === "标题";
+}
+
 function schemaFieldIdentityKey(field: SchemaField): string {
   return `${field.type}::${normalizeSchemaPropNameKey(field.name)}`;
 }
@@ -2670,17 +2678,21 @@ export function CardPageView({
           <span className="card-page__prop-label">{titleLabel}</span>
         </div>
         <div className="card-page__prop-content">
-          <input
-            type="text"
-            className="card-page__tags-add-input card-page__tags-add-input--prop-field"
-            value={card.title ?? ""}
-            placeholder={titlePlaceholder}
-            disabled={!canEdit}
-            onChange={(e) => {
-              const next = e.currentTarget.value;
-              setCardTitle(card.id, next);
-            }}
-          />
+          <div className="card-page__tags-panel card-page__tags-panel--single-hit">
+            <div className="card-page__prop-text-edit-row">
+              <input
+                type="text"
+                className="card-page__tags-add-input card-page__tags-add-input--prop-field"
+                value={card.title ?? ""}
+                placeholder={titlePlaceholder}
+                disabled={!canEdit}
+                onChange={(e) => {
+                  const next = e.currentTarget.value;
+                  setCardTitle(card.id, next);
+                }}
+              />
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -2688,7 +2700,9 @@ export function CardPageView({
 
   function renderPropsFieldsBlock() {
     const isFile = isFileCard(card);
-    const schemaFieldsBody = schemaFieldsForPanel;
+    const schemaFieldsBody = schemaFieldsForPanel.filter(
+      (field) => !isLegacyGenericTitleProp(field)
+    );
     const hiddenFileMetaPropIds = new Set([
       "sf-vid-duration-sec",
       "sf-aud-duration-sec",
@@ -2792,7 +2806,8 @@ export function CardPageView({
             .filter(
               (prop) =>
                 !schemaFieldsForPanel.some((f) => f.id === prop.id) &&
-                !(isFile && hiddenFileMetaPropIds.has(prop.id))
+                !(isFile && hiddenFileMetaPropIds.has(prop.id)) &&
+                !isLegacyGenericTitleProp(prop)
             )
             .map((prop) => (
             (() => {

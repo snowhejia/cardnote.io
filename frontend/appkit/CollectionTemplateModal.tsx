@@ -116,18 +116,7 @@ export function CollectionTemplateModal({
       id: f.id?.trim() || createFieldId(i),
       order: i,
     }));
-    setDraft(
-      seeded.length > 0
-        ? seeded
-        : [
-            {
-              id: createFieldId(0),
-              name: lang === "en" ? "Title" : "标题",
-              type: "text",
-              order: 0,
-            },
-          ]
-    );
+    setDraft(seeded);
     setDotColor(normalizeCssColor(initialDotColor));
     setIconShape(normalizeCollectionIconShape(initialIconShape));
   }, [dialog, initialFields, initialDotColor, initialIconShape, lang]);
