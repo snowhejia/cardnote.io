@@ -11,7 +11,6 @@ import {
 import type { ChangeEvent, MouseEvent as ReactMouseEvent } from "react";
 import type { ReminderPickerTarget } from "./ReminderPickerModal";
 import { createPortal, flushSync } from "react-dom";
-import { isTauri } from "@tauri-apps/api/core";
 import {
   createCollectionApi,
   updateCollectionApi,
@@ -60,10 +59,7 @@ import {
   saveLocalCollections,
 } from "./localCollectionsStorage";
 import { saveLocalMediaInlineInBrowser } from "./localMediaBrowser";
-import {
-  deleteLocalMediaFile,
-  saveLocalMediaToAppFolder,
-} from "./localMediaTauri";
+import { deleteLocalMediaFile } from "./localMediaTauri";
 import {
   readNewNotePlacement,
   saveNewNotePlacement,
@@ -4144,37 +4140,19 @@ export default function App() {
       setUploadCardProgress(null);
       try {
         if (dataMode === "local") {
-          if (isTauri()) {
-            for (const file of files) {
-              try {
-                const r = await saveLocalMediaToAppFolder(file);
-                const item = await ensureMediaItemDimensionsFromFile(
-                  file,
-                  mediaItemFromUploadResult(r)
-                );
-                addMediaItemToCard(colId, cardId, item);
-                out.push(item);
-              } catch (err) {
-                window.alert(
-                  err instanceof Error ? err.message : c.errLocalFolder
-                );
-              }
-            }
-          } else {
-            for (const file of files) {
-              try {
-                const r = await saveLocalMediaInlineInBrowser(file);
-                const item = await ensureMediaItemDimensionsFromFile(
-                  file,
-                  mediaItemFromUploadResult(r)
-                );
-                addMediaItemToCard(colId, cardId, item);
-                out.push(item);
-              } catch (err) {
-                window.alert(
-                  err instanceof Error ? err.message : c.errBrowserBlob
-                );
-              }
+          for (const file of files) {
+            try {
+              const r = await saveLocalMediaInlineInBrowser(file);
+              const item = await ensureMediaItemDimensionsFromFile(
+                file,
+                mediaItemFromUploadResult(r)
+              );
+              addMediaItemToCard(colId, cardId, item);
+              out.push(item);
+            } catch (err) {
+              window.alert(
+                err instanceof Error ? err.message : c.errBrowserBlob
+              );
             }
           }
           return out;
@@ -9452,7 +9430,7 @@ export default function App() {
               ? c.fabBack
               : remindersViewActive
                 ? c.newReminderTaskAria
-                : writeRequiresLogin && !getAdminToken() && !isTauri()
+                : writeRequiresLogin && !getAdminToken()
                   ? c.fabLogin
                   : c.fabNewNote
           }
@@ -9461,16 +9439,14 @@ export default function App() {
               ? c.fabTitleCalendar
               : remindersViewActive
                 ? c.fabTitleNewReminderTask
-                : writeRequiresLogin && !getAdminToken() && !isTauri()
+                : writeRequiresLogin && !getAdminToken()
                   ? c.fabTitleLogin
                   : c.fabTitleNewNote
           }
           disabled={
             calendarDay !== null
               ? false
-              : writeRequiresLogin &&
-                  !getAdminToken() &&
-                  !isTauri()
+              : writeRequiresLogin && !getAdminToken()
                 ? false
                 : trashViewActive ||
                   searchQuery.trim().length > 0 ||
@@ -9481,7 +9457,7 @@ export default function App() {
           }
           onClick={() => {
             if (remindersViewActive) {
-              if (writeRequiresLogin && !getAdminToken() && !isTauri()) {
+              if (writeRequiresLogin && !getAdminToken()) {
                 goLogin();
                 return;
               }
@@ -9495,7 +9471,7 @@ export default function App() {
               });
               return;
             }
-            if (writeRequiresLogin && !getAdminToken() && !isTauri()) {
+            if (writeRequiresLogin && !getAdminToken()) {
               goLogin();
               return;
             }

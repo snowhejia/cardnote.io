@@ -602,7 +602,7 @@ function computeFallbackSchemaFieldsFromPlacements(
   return mergedTemplateSchemaFieldsForPlacements(collections, placementIds);
 }
 
-/** 与 CardGallery 相同解析链（COS 预签名、本地 tauri: 等），避免直链 img 裂图 */
+/** 与 CardGallery 相同解析链(COS 预签名等),避免直链 img 裂图 */
 function CardPageAttachmentImage({
   item,
   className,

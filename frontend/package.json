@@ -9,10 +9,6 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@capacitor/core": "^8.3.0",
-    "@capacitor/keyboard": "^8.0.2",
-    "@tauri-apps/api": "^2.10.1",
-    "@tauri-apps/plugin-fs": "^2.4.5",
     "@tiptap/extension-highlight": "^3.22.1",
     "@tiptap/extension-image": "^3.22.1",
     "@tiptap/extension-link": "^3.22.1",

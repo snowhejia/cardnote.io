@@ -184,37 +184,13 @@ const CORS_MAX_AGE = Math.min(
   Math.max(0, Number(process.env.CORS_MAX_AGE ?? 86400) || 86400)
 );
 
-/**
- * Capacitor / Ionic 等原生壳内 WKWebView 的 Origin（与浏览器不同，必须在 CORS 白名单中显式加入）。
- * @see https://capacitorjs.com/docs/basics/utilities#getting-the-url-scheme
- */
-const NATIVE_WEBVIEW_CORS_ORIGINS = [
-  "capacitor://localhost",
-  "ionic://localhost",
-  "http://localhost",
-  "https://localhost",
-];
-
-/**
- * Tauri 在不同平台/版本下可能发 `Origin: https://tauri.localhost` 或 `http://tauri.localhost`。
- * 对 tauri.localhost / ipc.localhost 自动补全另一协议。
- */
+/** CORS 白名单组装:仅靠 CORS_ORIGIN 环境变量,纯浏览器场景。 */
 function buildCorsAllowedOrigins(envVal) {
-  /** 壳内 WebView Origin 始终加入；未配 CORS_ORIGIN 时仅靠浏览器同源访问 API，App 仍须能换签拉图 */
-  const set = new Set(NATIVE_WEBVIEW_CORS_ORIGINS);
+  const set = new Set();
   if (envVal?.trim()) {
     for (const s of envVal.split(",").map((x) => x.trim()).filter(Boolean)) {
       set.add(s);
     }
-  }
-  const mirrorHosts = new Set(["tauri.localhost", "ipc.localhost"]);
-  for (const o of [...set]) {
-    try {
-      const u = new URL(o);
-      if (!mirrorHosts.has(u.host)) continue;
-      const altProto = u.protocol === "https:" ? "http:" : "https:";
-      set.add(`${altProto}//${u.host}`);
-    } catch { /* 非 URL 则跳过 */ }
   }
   return [...set];
 }

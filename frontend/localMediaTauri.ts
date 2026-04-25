@@ -1,18 +1,21 @@
-import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
 import type { NoteMediaKind } from "./types";
 
-/** 写入 JSON 的标记；真实文件在 AppLocalData 下相对路径 */
-export const LOCAL_MEDIA_PREFIX = "local-media:";
+/**
+ * 历史命名(本来用于 Tauri 桌面壳本地文件存储);Tauri 已移除,
+ * 文件保留是因为 LOCAL_MEDIA_PREFIX / isLocalMediaRef / inferMediaKindFromFile
+ * 仍被多处引用。Tauri 专属函数现在退化为 no-op / 默认返回。
+ */
 
-const MEDIA_DIR = "mikujar/media";
+/** 写入 JSON 的标记;真实文件曾在 Tauri AppLocalData 下,Tauri 移除后旧链接读到会显示空 */
+export const LOCAL_MEDIA_PREFIX = "local-media:";
 
 export function isLocalMediaRef(url: string): boolean {
   return url.startsWith(LOCAL_MEDIA_PREFIX);
 }
 
-/** Tauri 桌面 + 本地模式可用「存到应用数据目录文件夹」 */
+/** 已不再支持本地文件夹保存(Tauri 移除) */
 export function canSaveMediaToAppFolder(): boolean {
-  return isTauri();
+  return false;
 }
 
 export function inferMediaKindFromFile(file: File): NoteMediaKind {
@@ -27,60 +30,23 @@ export function inferMediaKindFromFile(file: File): NoteMediaKind {
   return "file";
 }
 
-function safeFileSegment(name: string): string {
-  const base = name.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 96);
-  return base || "file";
-}
-
-export async function saveLocalMediaToAppFolder(file: File): Promise<{
+export async function saveLocalMediaToAppFolder(_file: File): Promise<{
   url: string;
   kind: NoteMediaKind;
   name?: string;
   sizeBytes: number;
 }> {
-  if (!isTauri()) {
-    throw new Error("本地小文件夹只有桌面版能打开喔～");
-  }
-  const { BaseDirectory, mkdir, writeFile } = await import(
-    "@tauri-apps/plugin-fs"
-  );
-  const kind = inferMediaKindFromFile(file);
-  const id = crypto.randomUUID();
-  const safe = safeFileSegment(file.name);
-  const rel = `${MEDIA_DIR}/${id}_${safe}`;
-  await mkdir(MEDIA_DIR, {
-    recursive: true,
-    baseDir: BaseDirectory.AppLocalData,
-  });
-  const buf = new Uint8Array(await file.arrayBuffer());
-  await writeFile(rel, buf, { baseDir: BaseDirectory.AppLocalData });
-  return {
-    url: `${LOCAL_MEDIA_PREFIX}${rel}`,
-    kind,
-    name: file.name.trim() || undefined,
-    sizeBytes: file.size,
-  };
+  throw new Error("本地小文件夹存储已移除(Tauri 桌面端不再支持)");
 }
 
-export async function deleteLocalMediaFile(storedUrl: string): Promise<void> {
-  if (!isTauri() || !isLocalMediaRef(storedUrl)) return;
-  const rel = storedUrl.slice(LOCAL_MEDIA_PREFIX.length);
-  try {
-    const { BaseDirectory, remove } = await import("@tauri-apps/plugin-fs");
-    await remove(rel, { baseDir: BaseDirectory.AppLocalData });
-  } catch {
-    /* 已删 */
-  }
+export async function deleteLocalMediaFile(_storedUrl: string): Promise<void> {
+  /* no-op: Tauri 移除后无法访问本地文件;旧 local-media:* 链接对应的文件已无法清理 */
 }
 
 export async function resolveLocalMediaDisplayUrl(
   storedUrl: string
 ): Promise<string> {
   if (!isLocalMediaRef(storedUrl)) return storedUrl;
-  if (!isTauri()) return "";
-  const rel = storedUrl.slice(LOCAL_MEDIA_PREFIX.length);
-  const { appLocalDataDir, join } = await import("@tauri-apps/api/path");
-  const root = await appLocalDataDir();
-  const abs = await join(root, rel);
-  return convertFileSrc(abs);
+  // Tauri 移除后无法解析本地文件路径,旧链接显示为空
+  return "";
 }
