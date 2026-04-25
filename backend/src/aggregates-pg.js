@@ -487,7 +487,7 @@ export async function getAllNotesTimeline(userIdIn, { page = 1, limit = 50 } = {
        FROM cards c
        JOIN card_types ct ON ct.id = c.card_type_id
       WHERE c.user_id = $1 AND c.trashed_at IS NULL
-        AND (ct.preset_slug IS NULL OR ct.preset_slug NOT LIKE 'file%')
+        AND ct.kind = 'note'
       ORDER BY c.added_on DESC NULLS LAST,
                c.minutes_of_day DESC NULLS LAST,
                c.id DESC
