@@ -1353,13 +1353,7 @@ export function NoteConnectionsView({
   }, []);
 
   if (edges.length === 0) {
-    return (
-      <div className="connections-page connections-page--empty">
-        <div className="timeline__empty connections-page__empty">
-          {c.connectionsEmpty}
-        </div>
-      </div>
-    );
+    return null;
   }
 
   // 当前图中所有 objectKind 集合（用于类型过滤 chips）

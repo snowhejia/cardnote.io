@@ -607,27 +607,6 @@ export default function App() {
     writeSidebarSectionsCollapsed(sidebarSectionsKey, sidebarSectionCollapsed);
   }, [sidebarSectionsKey, sidebarSectionCollapsed]);
 
-  const toggleSidebarSection = useCallback(
-    (part: keyof SidebarSectionCollapseState) => {
-      setSidebarSectionCollapsed((prev) => ({
-        ...prev,
-        [part]: !prev[part],
-      }));
-    },
-    []
-  );
-
-  const sidebarSectionToggleAria = useCallback(
-    (section: keyof SidebarSectionCollapseState, label: string) => {
-      const collapsed = sidebarSectionCollapsed[section];
-      if (appUiLang === "zh") {
-        return collapsed ? `展开「${label}」` : `折叠「${label}」`;
-      }
-      return collapsed ? `Expand ${label}` : `Collapse ${label}`;
-    },
-    [appUiLang, sidebarSectionCollapsed]
-  );
-
   const [collections, setCollections] = useState<Collection[]>(
     () => INITIAL_WORKSPACE.collections
   );
@@ -5571,6 +5550,14 @@ export default function App() {
     const notesCount = noteNavRootCol
       ? countCollectionSubtreeCards(noteNavRootCol)
       : allNotesSorted.length;
+    /* 日历 rail：今日新增笔记数。allNotesSorted 已按 addedOn DESC，
+       今天的笔记必在列首，遇到非今日即可停止计数。 */
+    const today = localDateString();
+    let calendarTodayCount = 0;
+    for (const ent of allNotesSorted) {
+      if (ent.card.addedOn !== today) break;
+      calendarTodayCount += 1;
+    }
     const m: Partial<Record<RailKey, number | string>> = {
       notes: notesCount,
       files:
@@ -5579,6 +5566,7 @@ export default function App() {
           : allMediaAttachmentEntries.length,
       trash: trashEntries.length,
       reminders: allReminderEntries.length,
+      calendar: calendarTodayCount,
     };
     if (topicNavRootCol) m.topic = topicSectionCount;
     if (clipParentCol) m.clip = clipSectionCount;
@@ -5593,7 +5581,7 @@ export default function App() {
     return m;
   }, [
     noteNavRootCol,
-    allNotesSorted.length,
+    allNotesSorted,
     dataMode,
     remoteAttachmentsTotal,
     allMediaAttachmentEntries.length,
@@ -7377,56 +7365,26 @@ export default function App() {
         ) : null}
 
         {railKey === "calendar" ? (
-        <div
-          className={
-            "sidebar__calendar-section" +
-            (allReminderEntries.length === 0 &&
-            sidebarSectionCollapsed.calendar
-              ? " sidebar__calendar-section--below-rule-desktop"
-              : "")
-          }
-        >
-          <div className="sidebar__section-row sidebar__section-row--collapsible sidebar__calendar-head">
-            <button
-              type="button"
-              className="sidebar__section-hit"
-              onClick={() => toggleSidebarSection("calendar")}
-              aria-expanded={!sidebarSectionCollapsed.calendar}
-              aria-label={sidebarSectionToggleAria("calendar", c.browseByDate)}
-            >
-              <span
-                className={
-                  "sidebar__chevron" +
-                  (!sidebarSectionCollapsed.calendar ? " is-expanded" : "")
-                }
-                aria-hidden
-              >
-                <span className="sidebar__chevron-icon">›</span>
-              </span>
-              <span className="sidebar__section">{c.browseByDate}</span>
-            </button>
+        <div className="sidebar__calendar-section">
+          <div
+            className={
+              "sidebar__calendar" +
+              (allReminderEntries.length === 0
+                ? " sidebar__calendar--below-rule-desktop"
+                : "")
+            }
+            aria-label={c.browseByDate}
+          >
+            <CalendarBrowsePanel
+              calendarViewMonth={calendarViewMonth}
+              setCalendarViewMonth={setCalendarViewMonth}
+              calendarCells={calendarCells}
+              calendarDay={calendarDay}
+              datesWithNotesSet={datesWithNotesOnCalendarSet}
+              datesWithRemindersSet={datesWithRemindersOnCalendarSet}
+              onDayClick={onPickCalendarDay}
+            />
           </div>
-          {!sidebarSectionCollapsed.calendar ? (
-            <div
-              className={
-                "sidebar__calendar" +
-                (allReminderEntries.length === 0
-                  ? " sidebar__calendar--below-rule-desktop"
-                  : "")
-              }
-              aria-label={c.browseByDate}
-            >
-              <CalendarBrowsePanel
-                calendarViewMonth={calendarViewMonth}
-                setCalendarViewMonth={setCalendarViewMonth}
-                calendarCells={calendarCells}
-                calendarDay={calendarDay}
-                datesWithNotesSet={datesWithNotesOnCalendarSet}
-                datesWithRemindersSet={datesWithRemindersOnCalendarSet}
-                onDayClick={onPickCalendarDay}
-              />
-            </div>
-          ) : null}
         </div>
         ) : null}
 

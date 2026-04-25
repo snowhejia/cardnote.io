@@ -25,11 +25,7 @@ export function AllRemindersView({
   const showCheck = canEdit && typeof onCompleteTask === "function";
 
   if (entries.length === 0) {
-    return (
-      <div className="timeline__empty all-reminders-page__empty">
-        {c.allRemEmpty}
-      </div>
-    );
+    return null;
   }
 
   const sections: ReactNode[] = [];
