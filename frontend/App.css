@@ -12359,7 +12359,7 @@ body.app--card-page-open .app {
 .card-page__props-panel-inner {
   --card-page-prop-value-h: 24px;
   --card-page-prop-value-pad-y: 1px;
-  --card-page-prop-value-pad-x: 6px;
+  --card-page-prop-value-pad-x: 8px;
   display: flex;
   flex-direction: column;
   gap: 0;
@@ -12373,42 +12373,46 @@ body.app--card-page-open .app {
 
 .card-page__props-panel-inner .card-page__prop-row {
   position: relative;
-  padding: 0 4px 0 34px;
-  border-radius: 8px;
+  padding: 8px 4px 8px 30px;
+  border-radius: 0;
   min-height: calc(var(--card-page-prop-value-h, 24px) + 2px);
-  gap: 10px;
+  gap: 8px;
   align-items: center;
+}
+
+.card-page__props-panel-inner .card-page__prop-row + .card-page__prop-row {
+  border-top: 1px dashed rgba(55, 53, 47, 0.08);
 }
 
 .card-page__props-panel-inner .card-page__prop-row::before {
   content: var(--prop-icon-glyph, "\B7"); /* · */
   position: absolute;
-  left: 2px;
+  left: 4px;
   top: 50%;
   transform: translateY(-50%);
-  width: 22px;
-  height: 22px;
+  width: 18px;
+  height: 18px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 6px;
-  font-size: var(--prop-icon-size, 11px);
-  font-weight: 600;
+  border-radius: 5px;
+  font-size: var(--prop-icon-size, 10px);
+  font-weight: 700;
   line-height: 1;
-  background: var(--prop-icon-bg, rgba(55, 53, 47, 0.06));
-  color: var(--prop-icon-fg, rgba(55, 53, 47, 0.65));
+  background: var(--prop-icon-bg, rgba(55, 53, 47, 0.5));
+  color: var(--prop-icon-fg, #fff);
   letter-spacing: 0;
   pointer-events: none;
 }
 
 .card-page__props-panel-inner .card-page__prop-row:hover {
-  background: rgba(55, 53, 47, 0.025);
+  background: rgba(55, 53, 47, 0.02);
 }
 
 .card-page__props-panel-inner .card-page__prop-label {
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
   font-weight: 500;
-  color: rgba(55, 53, 47, 0.78);
+  color: rgba(55, 53, 47, 0.55);
 }
 
 .card-page__props-panel-inner .card-page__prop-label-wrap {
@@ -12418,6 +12422,7 @@ body.app--card-page-open .app {
 .card-page__props-panel-inner .card-page__prop-label,
 .card-page__props-panel-inner .card-page__prop-label-wrap {
   min-height: var(--card-page-prop-value-h, 28px);
+  flex: 0 0 72px;
 }
 
 /* meta 行(格式/大小/分辨率/时长 等):扁平文字,不再加灰底胶囊 */
@@ -12444,112 +12449,112 @@ body.app--card-page-open .app {
    所以下方 [data-prop-id] 会覆盖同选择器特异性的 [data-prop-type]。 */
 .card-page__props-panel-inner [data-prop-type="text"] {
   --prop-icon-glyph: "T";
-  --prop-icon-bg: #FFE7DC;
-  --prop-icon-fg: #C84A2A;
+  --prop-icon-bg: #4aa2c8; /* candy-sky-deep */
+  --prop-icon-fg: #fff;
 }
 .card-page__props-panel-inner [data-prop-type="number"] {
   --prop-icon-glyph: "#";
-  --prop-icon-bg: #FFEFC8;
-  --prop-icon-fg: #8C6320;
+  --prop-icon-bg: #e87a90; /* candy-pink-deep */
+  --prop-icon-fg: #fff;
 }
 .card-page__props-panel-inner [data-prop-type="choice"] {
   --prop-icon-glyph: "\25CE"; /* ◎ */
-  --prop-icon-bg: #E5DDF1;
-  --prop-icon-fg: #6E54A8;
-  --prop-icon-size: 13px;
+  --prop-icon-bg: #5e9a66; /* candy-olive-deep */
+  --prop-icon-fg: #fff;
+  --prop-icon-size: 12px;
 }
 .card-page__props-panel-inner [data-prop-type="date"] {
   --prop-icon-glyph: "\25F7"; /* ◷ */
-  --prop-icon-bg: #FFE9C0;
-  --prop-icon-fg: #95702C;
-  --prop-icon-size: 13px;
+  --prop-icon-bg: #fff183; /* candy-maize */
+  --prop-icon-fg: #fff;
+  --prop-icon-size: 12px;
 }
 .card-page__props-panel-inner [data-prop-type="checkbox"] {
   --prop-icon-glyph: "\2713"; /* ✓ */
-  --prop-icon-bg: #D8EBE0;
-  --prop-icon-fg: #3F7B5C;
-  --prop-icon-size: 12px;
+  --prop-icon-bg: #5e9a66; /* candy-olive-deep */
+  --prop-icon-fg: #fff;
+  --prop-icon-size: 11px;
 }
 .card-page__props-panel-inner [data-prop-type="url"] {
   --prop-icon-glyph: "\2197"; /* ↗ */
-  --prop-icon-bg: #DCDFEA;
-  --prop-icon-fg: #4F608A;
-  --prop-icon-size: 12px;
+  --prop-icon-bg: #e89856; /* candy-fawn-deep */
+  --prop-icon-fg: #fff;
+  --prop-icon-size: 11px;
 }
 .card-page__props-panel-inner [data-prop-type="collectionLink"] {
   --prop-icon-glyph: "\25A1"; /* □ */
-  --prop-icon-bg: #E5EFD8;
-  --prop-icon-fg: #5C7B3F;
-  --prop-icon-size: 13px;
+  --prop-icon-bg: #5e9a66; /* candy-olive-deep */
+  --prop-icon-fg: #fff;
+  --prop-icon-size: 12px;
 }
 .card-page__props-panel-inner [data-prop-type="cardLink"] {
   --prop-icon-glyph: "\21AA"; /* ↪ */
-  --prop-icon-bg: #DCDFEA;
-  --prop-icon-fg: #4F608A;
-  --prop-icon-size: 12px;
+  --prop-icon-bg: #e87a90; /* candy-pink-deep (relation) */
+  --prop-icon-fg: #fff;
+  --prop-icon-size: 11px;
 }
 
 /* ── 按 data-prop-id 上色(系统行 + 文件 meta + 剪藏 schema 字段) ── */
 .card-page__props-panel-inner [data-prop-id="sf-file-title"] {
   --prop-icon-glyph: "T";
-  --prop-icon-bg: #FFE7DC;
-  --prop-icon-fg: #C84A2A;
+  --prop-icon-bg: #4aa2c8; /* candy-sky-deep */
+  --prop-icon-fg: #fff;
 }
 .card-page__props-panel-inner [data-prop-id="format"] {
   --prop-icon-glyph: "F";
-  --prop-icon-bg: #FFE3D0;
-  --prop-icon-fg: #B05722;
+  --prop-icon-bg: #e89856; /* candy-fawn-deep */
+  --prop-icon-fg: #fff;
 }
 .card-page__props-panel-inner [data-prop-id="size"] {
   --prop-icon-glyph: "S";
-  --prop-icon-bg: #FFEFC8;
-  --prop-icon-fg: #8C6320;
+  --prop-icon-bg: #e89856; /* candy-fawn-deep */
+  --prop-icon-fg: #fff;
 }
 .card-page__props-panel-inner [data-prop-id="duration"] {
   --prop-icon-glyph: "\25B6"; /* ▶ */
-  --prop-icon-bg: #F8E0CC;
-  --prop-icon-fg: #9A5A2A;
-  --prop-icon-size: 9px;
+  --prop-icon-bg: #e87a90; /* candy-pink-deep */
+  --prop-icon-fg: #fff;
+  --prop-icon-size: 8px;
 }
 .card-page__props-panel-inner [data-prop-id="resolution"] {
   --prop-icon-glyph: "\25A6"; /* ▦ */
-  --prop-icon-bg: #F0EBC9;
-  --prop-icon-fg: #847130;
+  --prop-icon-bg: #4aa2c8; /* candy-sky-deep */
+  --prop-icon-fg: #fff;
 }
 .card-page__props-panel-inner [data-prop-id="tags"] {
   --prop-icon-glyph: "#";
-  --prop-icon-bg: #FCDBE3;
-  --prop-icon-fg: #B0426A;
+  --prop-icon-bg: #e87a90; /* candy-pink-deep */
+  --prop-icon-fg: #fff;
 }
 .card-page__props-panel-inner [data-prop-id="collection"] {
   --prop-icon-glyph: "\25A1"; /* □ */
-  --prop-icon-bg: #E5EFD8;
-  --prop-icon-fg: #5C7B3F;
-  --prop-icon-size: 13px;
+  --prop-icon-bg: #5e9a66; /* candy-olive-deep */
+  --prop-icon-fg: #fff;
+  --prop-icon-size: 12px;
 }
 .card-page__props-panel-inner [data-prop-id="reminder"] {
   --prop-icon-glyph: "\25F7"; /* ◷ */
-  --prop-icon-bg: #E5DDF1;
-  --prop-icon-fg: #6E54A8;
-  --prop-icon-size: 13px;
+  --prop-icon-bg: #e89856; /* candy-fawn-deep */
+  --prop-icon-fg: #fff;
+  --prop-icon-size: 12px;
 }
 .card-page__props-panel-inner [data-prop-id="sf-img-taken"] {
   --prop-icon-glyph: "\25F7"; /* ◷ */
-  --prop-icon-bg: #FFE9C0;
-  --prop-icon-fg: #95702C;
-  --prop-icon-size: 13px;
+  --prop-icon-bg: #fff183; /* candy-maize */
+  --prop-icon-fg: #fff;
+  --prop-icon-size: 12px;
 }
 .card-page__props-panel-inner [data-prop-id="sf-img-location"] {
   --prop-icon-glyph: "\25C9"; /* ◉ */
-  --prop-icon-bg: #FFD8D8;
-  --prop-icon-fg: #B83A3A;
-  --prop-icon-size: 13px;
+  --prop-icon-bg: #5e9a66; /* candy-olive-deep */
+  --prop-icon-fg: #fff;
+  --prop-icon-size: 12px;
 }
 .card-page__props-panel-inner [data-prop-id="sf-file-source"] {
   --prop-icon-glyph: "\2197"; /* ↗ */
-  --prop-icon-bg: #DCDFEA;
-  --prop-icon-fg: #4F608A;
-  --prop-icon-size: 12px;
+  --prop-icon-bg: #e89856; /* candy-fawn-deep */
+  --prop-icon-fg: #fff;
+  --prop-icon-size: 11px;
 }
 
 .card-page__props-panel-inner .card-page__prop-val-text,
@@ -12562,8 +12567,28 @@ body.app--card-page-open .app {
 .card-page__props-panel-inner .card-page__tags-hit-btn--readonly-text,
 .card-page__props-panel-inner .card-page__prop-val-link,
 .card-page__props-panel-inner .card-page__prop-val-link--tags-panel,
-.card-page__props-panel-inner .card-page__file-meta-val {
-  font-size: 0.75rem;
+.card-page__props-panel-inner .card-page__file-meta-val,
+.card-page__props-panel-inner .card-page__tags-add-input,
+.card-page__props-panel-inner .card-page__tags-add-input--prop-field,
+.card-page__props-panel-inner .card-page__tags-add-input--url-field,
+.card-page__props-panel-inner .card-page__prop-link,
+.card-page__props-panel-inner .date-prop-popover-trigger {
+  font-size: 0.8125rem;
+}
+
+.card-page__props-panel-inner .card-page__tags-add-input::placeholder {
+  font-size: 0.8125rem;
+}
+
+/* 值区左基线统一:所有 input / link / 占位元素左右内距对齐到 8px,
+   避免「作者」(可见框) 与「URL/添加提醒」等无框行视觉缩进不一致 */
+.card-page__props-panel-inner .card-page__tags-add-input,
+.card-page__props-panel-inner .card-page__tags-add-input--prop-field,
+.card-page__props-panel-inner .card-page__tags-add-input--url-field,
+.card-page__props-panel-inner .card-page__prop-link,
+.card-page__props-panel-inner .date-prop-popover-trigger {
+  padding-left: 8px;
+  padding-right: 8px;
 }
 
 .card-page__props-panel-inner .card-page__prop-val-text--tags-panel {
@@ -12580,7 +12605,6 @@ body.app--card-page-open .app {
    8px+0.875rem 撑高一格(原 .card-page__tags-add-input 默认值更适合
    独立标签输入框,在统一属性面板里需要压缩)。 */
 .card-page__props-panel-inner .card-page__tags-add-input--prop-field {
-  font-size: 0.75rem;
   line-height: 1.35;
   padding: var(--card-page-prop-value-pad-y, 6px)
     var(--card-page-prop-value-pad-x, 8px);
@@ -13731,7 +13755,7 @@ body.app--card-page-open .app {
 }
 
 .card-page__prop-label {
-  flex: 0 0 92px;
+  flex: 0 0 72px;
   display: flex;
   align-items: center;
   align-self: center;
@@ -13749,7 +13773,7 @@ body.app--card-page-open .app {
 /* 自定义属性名称区域 */
 
 .card-page__prop-label-wrap {
-  flex: 0 0 92px;
+  flex: 0 0 72px;
   display: flex;
   align-items: center;
   align-self: center;
