@@ -3507,36 +3507,53 @@ export default function App() {
           }
         });
       }
-      if (card && canEdit) {
-        const entry: TrashedNoteEntry = {
-          trashId:
-            dataMode === "local"
-              ? `t-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
-              : card.id,
-          colId: resolvedColId,
-          colPathLabel: collectionPathLabel(collections, resolvedColId),
-          card: structuredClone(card) as NoteCard,
-          deletedAt: new Date().toISOString(),
-        };
-        if (dataMode !== "local") {
+      if (canEdit) {
+        if (card) {
+          const entry: TrashedNoteEntry = {
+            trashId:
+              dataMode === "local"
+                ? `t-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+                : card.id,
+            colId: resolvedColId,
+            colPathLabel: collectionPathLabel(collections, resolvedColId),
+            card: structuredClone(card) as NoteCard,
+            deletedAt: new Date().toISOString(),
+          };
+          if (dataMode !== "local") {
+            const ok = await postMeTrashEntry({
+              colId: entry.colId,
+              colPathLabel: entry.colPathLabel,
+              cardId: entry.card.id,
+              deletedAt: entry.deletedAt,
+            });
+            if (!ok) {
+              window.alert(c.errTrashMove);
+              return;
+            }
+          }
+          setTrashEntries((te) => {
+            const next = [entry, ...te];
+            if (dataMode === "local") {
+              saveTrashedNoteEntries(trashStorageKey, next);
+            }
+            return next;
+          });
+        } else if (dataMode !== "local") {
+          /* stub-only 卡(lazy collections 没把该 preset 合集 cards 拉下来,
+             或卡只存在于 useServerNotesTimeline 服务端时间线里):
+             本地树找不到 card 对象,但 cardId+colId 都是真实的,直接调后端
+             trash。本地 trashEntries 跳过(无 card 快照),靠 SSE/refresh 同步。 */
           const ok = await postMeTrashEntry({
-            colId: entry.colId,
-            colPathLabel: entry.colPathLabel,
-            cardId: entry.card.id,
-            deletedAt: entry.deletedAt,
+            colId,
+            colPathLabel: collectionPathLabel(collections, colId),
+            cardId,
+            deletedAt: new Date().toISOString(),
           });
           if (!ok) {
             window.alert(c.errTrashMove);
             return;
           }
         }
-        setTrashEntries((te) => {
-          const next = [entry, ...te];
-          if (dataMode === "local") {
-            saveTrashedNoteEntries(trashStorageKey, next);
-          }
-          return next;
-        });
       }
       setCollections((prev) => {
         const next = removeCardIdFromAllCollections(prev, cardId);
