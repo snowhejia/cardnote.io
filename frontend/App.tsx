@@ -1815,6 +1815,20 @@ export default function App() {
   useEffect(() => {
     if (!isLazyCollectionsEnabled()) return;
     if (dataMode !== "remote" || !remoteLoaded) return;
+    // 虚拟视图激活时,activeId 是"上次打开的真实合集",不代表用户当下在看的内容,
+    // 不应触发该合集的 lazy prefetch(否则 sidebar 会闪一下选中"已归档"等无关合集,
+    // 还多发一个无意义的 GET .../cards?subtree=1 请求)。
+    if (
+      allNotesViewActive ||
+      remindersViewActive ||
+      trashViewActive ||
+      connectionsViewActive ||
+      attachmentsViewActive ||
+      calendarDay !== null ||
+      searchQuery.trim().length > 0
+    ) {
+      return;
+    }
     const col = active;
     if (!col?.id || col.id === LOOSE_NOTES_COLLECTION_ID) return;
     if (lazyLoadedColIdsRef.current.has(col.id)) return;
@@ -1875,7 +1889,19 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [active?.id, collections, dataMode, remoteLoaded]);
+  }, [
+    active?.id,
+    collections,
+    dataMode,
+    remoteLoaded,
+    allNotesViewActive,
+    remindersViewActive,
+    trashViewActive,
+    connectionsViewActive,
+    attachmentsViewActive,
+    calendarDay,
+    searchQuery,
+  ]);
 
   /** 「已归档」顶层特殊合集（与「笔记」「主题」同级）：按名称识别；用于专属侧栏段与 rail 定位 */
   const archivedCol = useMemo<Collection | null>(() => {
@@ -2005,11 +2031,14 @@ export default function App() {
         setRemindersViewActive(false);
         setConnectionsViewActive(false);
         setAttachmentsViewActive(false);
+        // 清空 activeId,避免 rail 用上次访问的合集(如"已归档")错误高亮
+        setActiveId("");
       } else if (raw === PERSISTED_WORKSPACE_REMINDERS) {
         setRemindersViewActive(true);
         setAllNotesViewActive(false);
         setConnectionsViewActive(false);
         setAttachmentsViewActive(false);
+        setActiveId("");
       } else if (raw === PERSISTED_WORKSPACE_CONNECTIONS) {
         if (matchesMobileChromeMedia()) {
           setConnectionsViewActive(false);
@@ -2017,12 +2046,14 @@ export default function App() {
           setAllNotesViewActive(true);
           setRemindersViewActive(false);
           setAttachmentsViewActive(false);
+          setActiveId("");
         } else {
           setConnectionsViewActive(true);
           setConnectionsPrimed(true);
           setAllNotesViewActive(false);
           setRemindersViewActive(false);
           setAttachmentsViewActive(false);
+          setActiveId("");
         }
       } else if (raw === PERSISTED_WORKSPACE_ALL_ATTACHMENTS) {
         setAttachmentsViewActive(true);
@@ -2030,6 +2061,7 @@ export default function App() {
         setRemindersViewActive(false);
         setConnectionsViewActive(false);
         setConnectionsPrimed(false);
+        setActiveId("");
       }
       if (savedAttachmentFilter) {
         setAttachmentsFilterKey(savedAttachmentFilter);
@@ -2199,11 +2231,13 @@ export default function App() {
       if (!row.collectionId || !row.reminderOn) continue;
       const col = findCollectionById(collections, row.collectionId);
       if (!col) continue;
-      /* 懒加载模式：col.cards 可能空；合成 stub 卡给提醒列表展示 */
+      /* 懒加载模式:col.cards 可能空;合成 stub 卡给提醒列表展示。
+         isStub:true 防止 stub.text(snippet) 被回写覆盖真实 body。 */
       const card: NoteCard =
         col.cards.find((c) => c.id === row.id) ?? {
           id: row.id,
           text: row.snippet,
+          isStub: true,
           ...(row.title ? { title: row.title } : {}),
           minutesOfDay: row.minutesOfDay ?? 0,
           pinned: false,
@@ -2677,11 +2711,14 @@ export default function App() {
         if (!row.collectionId) continue;
         const col = findCollectionById(collections, row.collectionId);
         if (!col) continue;
-        /* 懒加载模式：合成 stub 卡给时间线展示 */
+        /* 懒加载模式:合成 stub 卡给时间线展示。
+           isStub:true 标志,渲染端 NoteTimelineCard 据此设 read-only,
+           防止 TipTap 把 snippet 当成正文回写覆盖真实 body。 */
         const card: NoteCard =
           col.cards.find((c) => c.id === row.id) ?? {
             id: row.id,
             text: row.snippet,
+            isStub: true,
             ...(row.title ? { title: row.title } : {}),
             minutesOfDay: row.minutesOfDay ?? 0,
             pinned: false,
@@ -5591,10 +5628,15 @@ export default function App() {
   );
 
   const railKey: RailKey = useMemo(() => {
+    // 用户"明确选择的视图"(view flags)优先于"上次访问的合集"(activeId 推断),
+    // 避免在"全部笔记"等视图里 sidebar rail 错误高亮上次的 activeId 所在 rail。
     if (trashViewActive) return "trash";
     if (remindersViewActive) return "reminders";
     if (connectionsViewActive) return "connections";
     if (calendarDay != null) return "calendar";
+    if (allNotesViewActive) return "notes";
+    if (attachmentsViewActive) return "files";
+    // 以下基于 activeId 推断的 rail 都属于"沿用上次访问"(用户没明确导航)
     if (activeId && archivedSubtreeIds.has(activeId)) return "archived";
     if (activeIdInSubtree(topicNavRootCol?.id)) return "topic";
     if (activeIdInSubtree(clipParentCol?.id)) return "clip";
@@ -5603,13 +5645,11 @@ export default function App() {
         return baseId as RailKey;
       }
     }
-    if (attachmentsViewActive) return "files";
     if (
       activeIdInSubtree(findCollectionByPresetType(collections, "file")?.id)
     ) {
       return "files";
     }
-    if (allNotesViewActive) return "notes";
     if (activeIdInSubtree(noteNavRootCol?.id)) return "notes";
     /* 新用户/无 preset-note 根：普通根合集（无 presetTypeId）及其后代也归到「笔记」rail，
        否则点进种子合集或新建合集时 railKey 会落到 overview，造成「跳回概览」与无法添加笔记。 */

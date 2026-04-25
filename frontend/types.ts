@@ -104,6 +104,13 @@ export type NoteCard = {
   media?: NoteMediaItem[];
   /** 用户自定义属性列表（每张卡片独立定义） */
   customProps?: CardProperty[];
+  /**
+   * 客户端临时桩(stub):懒加载模式下"全部笔记"等聚合视图,服务端只返回精简版
+   * (snippet 等),前端用 stub 占位渲染。stub 卡的 text 是 snippet 截断版,
+   * 不是真实正文,**绝对不能作为正文写回服务端**(否则原始正文被覆盖)。
+   * 真实卡片(从 col.cards 取)不会带这个标志。
+   */
+  isStub?: boolean;
 };
 
 // ─── Schema Field ───────────────────────────────────────────────────────────

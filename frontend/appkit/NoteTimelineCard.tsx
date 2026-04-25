@@ -199,9 +199,11 @@ export function NoteTimelineCard(p: NoteTimelineCardProps) {
   );
   /** 笔记设置「折叠」开启时：时间线正文仅预览，须进弹窗或全页编辑 */
   const foldTimelineReadOnly = foldBodyMaxLines === 3;
-  /** 仅控制时间线内联改字与编辑器粘贴；折叠模式为 false，窄屏为 false */
+  /** 仅控制时间线内联改字与编辑器粘贴;折叠模式为 false,窄屏为 false。
+      stub 卡(懒加载占位,text 是 snippet 截断版)强制只读,
+      防止 TipTap 把 snippet 当成正文 onChange 回写覆盖真实 body。 */
   const canEditTextInTimeline =
-    canEdit && !phoneNarrow && !foldTimelineReadOnly;
+    canEdit && !phoneNarrow && !foldTimelineReadOnly && !card.isStub;
   /** 灰条拖拽、卡片重排：与完整模式一致，折叠时仍可用；仅窄屏手机禁用 */
   const canDragNotesInTimeline = canEdit && !phoneNarrow;
   /** 折叠/只读正文时仍允许：拖入上传、图库右键设封面与删附件 */
@@ -604,7 +606,14 @@ export function NoteTimelineCard(p: NoteTimelineCardProps) {
               canEdit={canEditTextInTimeline}
               timelineBodyHeadings
               foldBodyMaxLines={foldBodyMaxLines}
-              onChange={(next) => setCardText(colId, card.id, next)}
+              onChange={
+                card.isStub
+                  ? () => {
+                      /* stub 占位卡: TipTap 把 snippet 纯文本 normalize 成 <p>...</p>
+                         也不能让这个回写到服务端覆盖真实 body */
+                    }
+                  : (next) => setCardText(colId, card.id, next)
+              }
               onPasteFiles={
                 canEditTextInTimeline && canAttachMedia
                   ? (files) => {
