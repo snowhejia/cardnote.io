@@ -23,8 +23,10 @@ import {
 // 常量与小工具
 // ─────────────────────────────────────────────────────────────────────────────
 
+// 历史 sentinel:旧前端在"全部笔记"视图发起 createCard 时传它;
+// 服务端不再返回孤儿"虚拟合集",但需保留这个 ID 来识别新建路由意图,
+// 然后转发到该用户该 type 的默认 preset 合集。
 const LOOSE_NOTES_COLLECTION_ID = "__loose_notes";
-const LOOSE_NOTES_DOT_COLOR = "#a8a29e";
 
 /**
  * object_kind 字符串 ↔ preset_slug 是恒等映射：cardTypePresets.js 已与前端 catalog
@@ -112,6 +114,42 @@ async function resolveUserId(userId, qFn) {
 }
 
 /** 按 preset_slug 查用户的 card_type_id；缺失则自动种子一次。 */
+/**
+ * 找该用户该卡片类型的"默认归属合集" id。
+ *  1) 优先精确匹配 collections.bound_type_id == cardTypeId
+ *  2) 其次 fallback 到同 kind 的合集(比如 file_image 卡 → kind='file' 的合集)
+ *  3) 多个匹配时优先 id LIKE 'preset-%' (系统种子合集),其次按 created_at ASC
+ *
+ * 取代 LOOSE_NOTES 孤儿概念:每张卡都必须落到一个真实合集。
+ *
+ * @returns {Promise<string | null>} 合集 id;找不到返回 null
+ */
+async function findDefaultCollectionForCardType(userId, cardTypeId, client) {
+  const q = client ? (sql, params) => client.query(sql, params) : query;
+  // (1) 精确匹配
+  let r = await q(
+    `SELECT id FROM collections
+      WHERE user_id = $1 AND bound_type_id = $2
+      ORDER BY (id LIKE 'preset-%') DESC, created_at ASC, id ASC
+      LIMIT 1`,
+    [userId, cardTypeId]
+  );
+  if (r.rows[0]) return r.rows[0].id;
+  // (2) 同 kind fallback (file_image → kind=file)
+  r = await q(
+    `SELECT col.id
+       FROM collections col
+       JOIN card_types target ON target.id = col.bound_type_id
+      WHERE col.user_id = $1
+        AND target.kind = (SELECT kind FROM card_types WHERE id = $2)
+      ORDER BY (col.id LIKE 'preset-%') DESC, col.created_at ASC, col.id ASC
+      LIMIT 1`,
+    [userId, cardTypeId]
+  );
+  if (r.rows[0]) return r.rows[0].id;
+  return null;
+}
+
 async function resolvePresetCardTypeId(userId, slug, client) {
   if (!slug) slug = "note";
   const q = client ? (sql, params) => client.query(sql, params) : query;
@@ -518,18 +556,6 @@ export async function getCollectionsTree(userIdIn) {
     [userId]
   );
 
-  const orphanRes = await query(
-    `SELECT c.id, c.title, c.body, c.minutes_of_day, c.added_on,
-            c.tags, c.custom_props,
-            ct.preset_slug
-       FROM cards c
-       JOIN card_types ct ON ct.id = c.card_type_id
-      WHERE c.user_id = $1 AND c.trashed_at IS NULL
-        AND NOT EXISTS (SELECT 1 FROM card_placements p WHERE p.card_id = c.id)
-      ORDER BY c.updated_at DESC`,
-    [userId]
-  );
-
   let cardRes = { rows: [] };
   if (colRes.rows.length > 0) {
     const colIds = colRes.rows.map((r) => r.id);
@@ -547,11 +573,8 @@ export async function getCollectionsTree(userIdIn) {
     );
   }
 
-  /* 一次性给所有卡片（含孤儿）装配 extras，再按原顺序拆回 placed / orphan 两组。 */
-  const allRows = [...cardRes.rows, ...orphanRes.rows];
-  const assembled = await assembleCards(allRows, query);
-  const placedAssembled = assembled.slice(0, cardRes.rows.length);
-  const orphanAssembled = assembled.slice(cardRes.rows.length);
+  /* 装配卡片附加字段(reminder/media/related 等),孤儿卡概念已废除,不再单独读 */
+  const placedAssembled = await assembleCards(cardRes.rows, query);
 
   const cardsByColId = new Map();
   for (let i = 0; i < cardRes.rows.length; i++) {
@@ -581,18 +604,7 @@ export async function getCollectionsTree(userIdIn) {
     }
   }
 
-  if (orphanRes.rows.length > 0) {
-    roots.push({
-      id: LOOSE_NOTES_COLLECTION_ID,
-      name: "",
-      dotColor: LOOSE_NOTES_DOT_COLOR,
-      cards: orphanAssembled,
-      children: [],
-    });
-  } else if (colRes.rows.length === 0) {
-    return [];
-  }
-
+  if (colRes.rows.length === 0) return [];
   return roots;
 }
 
@@ -620,14 +632,6 @@ export async function getCollectionsMetaTree(userIdIn) {
        LEFT JOIN card_types ct ON ct.id = col.bound_type_id
       WHERE col.user_id = $1
       ORDER BY col.sort_order`,
-    [userId]
-  );
-
-  const orphanCountRes = await query(
-    `SELECT COUNT(*)::int AS n
-       FROM cards c
-      WHERE c.user_id = $1 AND c.trashed_at IS NULL
-        AND NOT EXISTS (SELECT 1 FROM card_placements p WHERE p.card_id = c.id)`,
     [userId]
   );
 
@@ -662,18 +666,6 @@ export async function getCollectionsMetaTree(userIdIn) {
   }
   for (const root of roots) accumulate(root);
 
-  const looseCount = orphanCountRes.rows[0]?.n ?? 0;
-  if (looseCount > 0) {
-    roots.push({
-      id: LOOSE_NOTES_COLLECTION_ID,
-      name: "",
-      dotColor: LOOSE_NOTES_DOT_COLOR,
-      children: [],
-      cardCount: looseCount,
-      totalCardCount: looseCount,
-    });
-  }
-
   return roots;
 }
 
@@ -681,7 +673,7 @@ export async function getCollectionsMetaTree(userIdIn) {
  * 单合集的卡片分页读取。
  * - sort: "sort_order"（默认 = 置顶优先 + placement.sort_order）| "-added_on" | "-updated_at"
  * - 返回 { cards, hasMore, page, limit } 或 null（合集不存在或不属于该用户）
- * - 特殊 collectionId = LOOSE_NOTES_COLLECTION_ID 返回未归属任何合集的卡片
+ * (注:孤儿卡概念已废除,LOOSE_NOTES 路径不再有效;调用方应改传真实合集 id)
  */
 export async function getCardsForCollection(userIdIn, collectionId, opts = {}) {
   const userId = await resolveUserId(userIdIn);
@@ -706,26 +698,8 @@ export async function getCardsForCollection(userIdIn, collectionId, opts = {}) {
   }
 
   let rows;
-  if (collectionId === LOOSE_NOTES_COLLECTION_ID) {
-    /* 孤儿卡：没有 placements 可排，只能按 added_on / updated_at 排 */
-    const orderByLoose =
-      sort === "-added_on"
-        ? "c.added_on DESC NULLS LAST, c.minutes_of_day DESC NULLS LAST, c.id DESC"
-        : "c.updated_at DESC, c.id DESC";
-    const r = await query(
-      `SELECT c.id, c.title, c.body, c.minutes_of_day, c.added_on,
-              c.tags, c.custom_props,
-              ct.preset_slug
-         FROM cards c
-         JOIN card_types ct ON ct.id = c.card_type_id
-        WHERE c.user_id = $1 AND c.trashed_at IS NULL
-          AND NOT EXISTS (SELECT 1 FROM card_placements p WHERE p.card_id = c.id)
-        ORDER BY ${orderByLoose}
-        LIMIT $2 OFFSET $3`,
-      [userId, limit + 1, offset]
-    );
-    rows = r.rows;
-  } else {
+  // 孤儿卡(LOOSE_NOTES_COLLECTION_ID 旧路径)概念已废除,所有卡必须有合集归属
+  {
     const colCheck = await query(
       `SELECT 1 FROM collections WHERE id = $1 AND user_id = $2`,
       [collectionId, userId]
@@ -1057,6 +1031,25 @@ export async function removeCardFromCollectionPlacement(userIdIn, cardId, collec
 export async function createCard(userIdIn, collectionId, card, pgClient = null) {
   const userId = await resolveUserId(userIdIn);
   const q = pgClient ? (sql, params) => pgClient.query(sql, params) : query;
+
+  // "全部 X 类" 视图传 __loose_notes 时,把卡路由到该用户该 type 的默认合集;
+  // 抛弃孤儿卡概念 → 每张新卡必须有真实归属。
+  if (collectionId === LOOSE_NOTES_COLLECTION_ID) {
+    const objectKind = String(card?.objectKind || "note").trim() || "note";
+    const slug = objectKindToSlug(objectKind);
+    const cardTypeId = await resolvePresetCardTypeId(userId, slug, pgClient);
+    const defaultColId = await findDefaultCollectionForCardType(
+      userId,
+      cardTypeId,
+      pgClient
+    );
+    if (!defaultColId) {
+      throw new Error(
+        `找不到 "${slug}" 类型的默认合集,无法创建卡片(请先创建一个绑定该类型的合集)`
+      );
+    }
+    collectionId = defaultColId;
+  }
 
   const colCheck = await q(
     `SELECT id FROM collections WHERE id = $1 AND user_id = $2`,
