@@ -817,6 +817,12 @@ export default function App() {
     }
     return false;
   });
+  /** 卡片增删改时 +1,触发 useServerNotesTimeline 重新拉 /api/notes;
+      与 collections.length 一起作为 refreshKey,既感知合集变化也感知卡片变化。 */
+  const [serverNotesEpoch, setServerNotesEpoch] = useState(0);
+  const bumpServerNotesEpoch = useCallback(() => {
+    setServerNotesEpoch((n) => n + 1);
+  }, []);
   const [allNotesVisibleCount, setAllNotesVisibleCount] = useState(
     TIMELINE_VIRTUAL_BATCH
   );
@@ -2657,9 +2663,11 @@ export default function App() {
   void _connectedCardsCount;
 
   /* flag on 时走 /api/notes 分页聚合；flag off 或失败 fallback 到本地 walk。
-     服务端口径 = "非 file_* 卡"；本地多一层 preset-note 子树过滤——两者
-     在多数账户下一致，差异可接受。 */
-  const serverNotesRows = useServerNotesTimeline(collections.length);
+     服务端口径 = kind='note' 的所有卡(精确匹配 isNoteForAllNotesView 语义)。
+     refreshKey 同时跟踪 collections 数量与 serverNotesEpoch(create/update/delete card 时 +1)。 */
+  const serverNotesRows = useServerNotesTimeline(
+    `${collections.length}::${serverNotesEpoch}`
+  );
   const allNotesSorted = useMemo(() => {
     if (serverNotesRows) {
       const entries: { col: Collection; card: NoteCard }[] = [];
@@ -3508,8 +3516,9 @@ export default function App() {
       setDetailCard((d) =>
         d && d.colId === colId && d.card.id === cardId ? null : d
       );
+      bumpServerNotesEpoch();
     },
-    [canEdit, collections, trashStorageKey, dataMode, c.errTrashMove]
+    [canEdit, collections, trashStorageKey, dataMode, c.errTrashMove, bumpServerNotesEpoch]
   );
 
   /** 「文件」网格右键删除：连带把其它笔记卡里指向同 URL 的附件也抹掉 */
@@ -4001,9 +4010,10 @@ export default function App() {
       }
 
       addRelatedPair(sourceColId, sourceCardId, sourceColId, newId);
+      bumpServerNotesEpoch();
       return true;
     },
-    [canEdit, dataMode, addRelatedPair, collections]
+    [canEdit, dataMode, addRelatedPair, collections, bumpServerNotesEpoch]
   );
 
   const setCardTags = useCallback(
@@ -4534,6 +4544,7 @@ export default function App() {
           return null;
         }
       }
+      bumpServerNotesEpoch();
       return cardId;
     },
     [
@@ -4551,6 +4562,7 @@ export default function App() {
       c.looseNotesCollectionName,
       c.errCreateCol,
       collections,
+      bumpServerNotesEpoch,
     ]
   );
 
@@ -7042,9 +7054,10 @@ export default function App() {
         });
       }
 
+      bumpServerNotesEpoch();
       return { colId: targetColId, cardId: created.id };
     },
-    [canEdit, cardPageCardLive, collections, dataMode]
+    [canEdit, cardPageCardLive, collections, dataMode, bumpServerNotesEpoch]
   );
 
   useLayoutEffect(() => {
