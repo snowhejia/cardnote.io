@@ -2174,7 +2174,9 @@ export default function App() {
   const activeNoteCards = useMemo(() => {
     if (!active) return [];
     /** 所有合集（含预设根、子类型、用户文件夹）都把整棵子树的卡聚合进来，
-     *  避免「在 任务 / 待办 创建的卡在 任务 / 待办 / 2026 子合集里看不到」之类。 */
+     *  避免「在 任务 / 待办 创建的卡在 任务 / 待办 / 2026 子合集里看不到」之类。
+     *  排序按 addedOn DESC + minutesOfDay DESC,使父级 rail 视图(如 剪藏)
+     *  的时间线真正按时间混排,而不是按子合集分组导致后面的子类全被分页截掉。 */
     const out: NoteCard[] = [];
     const seen = new Set<string>();
     const walk = (col: Collection) => {
@@ -2187,6 +2189,12 @@ export default function App() {
       for (const ch of col.children ?? []) walk(ch);
     };
     walk(active);
+    out.sort((a, b) => {
+      const dateA = a.addedOn ?? "";
+      const dateB = b.addedOn ?? "";
+      if (dateB !== dateA) return dateB.localeCompare(dateA);
+      return (b.minutesOfDay ?? 0) - (a.minutesOfDay ?? 0);
+    });
     return out;
   }, [active]);
 
@@ -3106,11 +3114,13 @@ export default function App() {
         const col = findCollectionById(collections, hit.collectionId);
         if (!col) continue;
         /* 懒加载模式：col.cards 可能为空；用 LightCardRow 合成最小卡给
-           搜索结果列表展示（点进详情 CardPageView 会重新加载完整卡）。 */
+           搜索结果列表展示（点进详情 CardPageView 会重新加载完整卡）。
+           isStub:true 防止 stub.text(snippet) 被回写覆盖真实 body。 */
         const card: NoteCard =
           col.cards.find((c) => c.id === hit.id) ?? {
             id: hit.id,
             text: hit.snippet,
+            isStub: true,
             ...(hit.title ? { title: hit.title } : {}),
             minutesOfDay: 0,
             pinned: false,
@@ -6567,6 +6577,7 @@ export default function App() {
             col.cards.find((c) => c.id === row.cardId) ?? {
               id: row.cardId,
               text: "",
+              isStub: true,
               minutesOfDay: 0,
               pinned: false,
               tags: [],
@@ -6721,6 +6732,7 @@ export default function App() {
             col.cards.find((c) => c.id === sr.id) ?? {
               id: sr.id,
               text: sr.snippet,
+              isStub: true,
               minutesOfDay: 0,
               pinned: false,
               tags: [],
