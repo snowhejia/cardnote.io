@@ -13,16 +13,7 @@
 
 ---
 
-## 功能 · Features
-
-<div align="center">
-<img src="docs/screenshots/gallery.png" width="900" alt="概览 · 笔记 · 文件 · 剪藏" />
-</div>
-
-- 🏠 **概览 Overview** — 随手翻旧卡、待办、相册流、随机播放、最近打开
-- ✍️ **笔记 Notes** — 多层嵌套合集、置顶、卡片内嵌图片，一条笔记一件小事
-- 🗃 **文件 Files** — 图片 / 视频 / 音频 / 文档素材库，缩略图 + 尺寸 + 时长
-- ✂️ **剪藏 Clips** — 小红书 / B 站 / 网页 / 公众号 一键结构化剪藏（封面、标题、标签）
+## ✨ 特性 · Features
 
 ### 🧩 卡片 · 合集 · 连接 · Cards / Sets / Links
 <img src="docs/screenshots/ScreenShot_2026-07-13_000741_103.png" width="880" alt="Cards / Sets / Links" />
@@ -35,6 +26,17 @@
 
 - 给卡片加字段：标签 / 评分 / 日期 / 颜色 / 关系 / 作者…（12 种类型），定义一次整个合集继承
 - Add typed fields to cards: tags / rating / date / color / relation… (12 types), inherited per collection
+
+## 🗂 使用案例 · Use cases
+
+<div align="center">
+<img src="docs/screenshots/gallery.png" width="900" alt="概览 · 笔记 · 文件 · 剪藏" />
+</div>
+
+- 🏠 **概览 Overview** — 随手翻旧卡、待办、相册流、随机播放、最近打开
+- ✍️ **笔记 Notes** — 多层嵌套合集、置顶、卡片内嵌图片，一条笔记一件小事
+- 🗃 **文件 Files** — 图片 / 视频 / 音频 / 文档素材库，缩略图 + 尺寸 + 时长
+- ✂️ **剪藏 Clips** — 小红书 / B 站 / 网页 / 公众号 一键结构化剪藏（封面、标题、标签）
 
 **还有 · Also:** 主题 · 任务 · 项目 · 开支 · 账户 · 日历 · 提醒 · 连接图谱 · 导入（Flomo / 印象笔记 / Apple Notes / 语雀）· 归档 & 回收站 · 暗色模式 · 中英双语。
 
