@@ -1,12 +1,10 @@
 <div align="center">
 
-# CardNote · 卡片笔记
+<img src="docs/screenshots/banner.png" width="900" alt="CardNote · 卡片笔记" />
 
 **`connect your life`** — 面向对象的卡片笔记软件，全部作为「卡片」统一管理。
 
 ![status](https://img.shields.io/badge/status-demo-orange) ![frontend](https://img.shields.io/badge/frontend-Vite%20%2B%20React%2018-blue) ![backend](https://img.shields.io/badge/backend-Node%20%2B%20Postgres-green) ![license](https://img.shields.io/badge/license-AGPL--3.0-lightgrey)
-
-<img src="docs/screenshots/landing.gif" width="880" alt="CardNote" />
 
 </div>
 
