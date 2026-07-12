@@ -4634,6 +4634,33 @@ export default function App() {
           });
           return null;
         }
+        const confirmedColId = created.collectionId?.trim() || targetColId;
+        flushSync(() => {
+          setCollections((prev) => {
+            const withoutProvisional = removeCardIdFromAllCollections(
+              prev,
+              cardId
+            );
+            if (!findCollectionById(withoutProvisional, confirmedColId)) {
+              return mapCollectionById(prev, targetColId, (col) => ({
+                ...col,
+                cards: col.cards.map((card) =>
+                  card.id === cardId ? created : card
+                ),
+              }));
+            }
+            return mapCollectionById(
+              withoutProvisional,
+              confirmedColId,
+              (col) => ({
+                ...col,
+                cards: preferTop
+                  ? [created, ...col.cards]
+                  : [...col.cards, created],
+              })
+            );
+          });
+        });
       }
       bumpServerNotesEpoch();
       return cardId;
