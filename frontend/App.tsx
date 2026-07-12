@@ -2003,6 +2003,7 @@ export default function App() {
     }
   }, [collections, activeId]);
 
+
   /** 在 passive effect 写入 localStorage 之前恢复「全部笔记 / 待办 / 笔记探索」，避免 persist 用旧状态覆盖 sentinel（React 18 在 layout effect 内批处理 setState，勿用 flushSync） */
   useLayoutEffect(() => {
     if (!authReady) return;
@@ -5820,8 +5821,13 @@ export default function App() {
         return;
       }
       if (key === "notes") {
-        setAllNotesViewActive(true);
-        if (!activeIdInSubtree(noteNavRootCol?.id)) {
+        // 有「笔记」预设根合集时进入该合集（与 topic/clip 一致）；
+        // 仅在没有笔记根合集时才回落到「全部笔记」聚合视图。
+        if (noteNavRootCol) {
+          setActiveId(noteNavRootCol.id);
+          expandAncestorsOf(noteNavRootCol.id);
+        } else {
+          setAllNotesViewActive(true);
           setActiveId("");
         }
         return;

@@ -6,6 +6,7 @@ import {
   createCardApi,
   createCollectionApi,
   fetchCollectionsFromApi,
+  updateCollectionApi,
 } from "../api/collections";
 import { fetchMetaTree, metaToCollectionShell } from "../api/collections-v2";
 import { isLazyCollectionsEnabled } from "../lazyFeatureFlag";
@@ -293,16 +294,34 @@ export function useRemoteCollectionsSync(p: {
   ]);
 }
 
-/** 新账号首登：建一个空合集 + 一张空白卡，让用户有个起步的容器。 */
+/**
+ * 新账号首登：建立与成熟账号一致的两层笔记结构 —— 「笔记」类型根（绑定 note 预设）
+ * 下挂一个「我的笔记」子合集 + 一张起步空白卡。
+ * 之所以要有绑 note 的根：否则 noteNavRootCol 为空，导航回落到「全部笔记」，
+ * 且后端找不到 note 默认合集会导致新用户新建笔记失败。
+ * 之所以笔记要放进子合集：这样进入「我的笔记」时标题面包屑显示「笔记 / 我的笔记」。
+ */
 async function seedDefaultWorkspace(): Promise<boolean> {
   const rand = () => Math.random().toString(36).slice(2, 9);
+  // 1) 「笔记」类型根合集
+  const rootId = `c-${Date.now()}-${rand()}`;
+  const root = await createCollectionApi({
+    id: rootId,
+    name: "笔记",
+    dotColor: randomDotColor(),
+  });
+  if (!root) return false;
+  await updateCollectionApi(rootId, { presetTypeId: "note" });
+  // 2) 「我的笔记」子合集（挂在「笔记」根下）
   const colId = `c-${Date.now()}-${rand()}`;
   const col = await createCollectionApi({
     id: colId,
     name: "我的笔记",
     dotColor: randomDotColor(),
+    parentId: rootId,
   });
   if (!col) return false;
+  // 3) 起步空白卡放进「我的笔记」
   const now = new Date();
   const card = await createCardApi(colId, {
     id: `n-${Date.now()}-${rand()}`,
