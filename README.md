@@ -15,29 +15,14 @@
 
 ## 功能 · Features
 
-### 🏠 概览 · Overview
-<img src="docs/screenshots/ScreenShot_2026-07-13_000419_905.png" width="880" alt="Overview" />
+<div align="center">
+<img src="docs/screenshots/gallery.png" width="900" alt="概览 · 笔记 · 文件 · 剪藏" />
+</div>
 
-- 首页小组件：随手翻旧卡、今日待办、相册流、随机播放音频、最近打开
-- Home widgets: random revisit, today's todos, photo reel, audio player, recently opened
-
-### ✍️ 笔记 · Notes
-<img src="docs/screenshots/ScreenShot_2026-07-13_000500_390.png" width="880" alt="Notes" />
-
-- 多层嵌套合集、置顶、卡片内嵌图片；一条笔记一件小事，按时间堆叠
-- Nested collections, pinning, inline images; one small thing per card, stacked by time
-
-### 🗃 文件 · Files
-<img src="docs/screenshots/ScreenShot_2026-07-13_000611_951.png" width="880" alt="Files" />
-
-- 图片 / 视频 / 音频 / 文档 素材库，带缩略图、尺寸、时长——像 Eagle 一样管媒体
-- Media library (images / video / audio / docs) with thumbnails, dimensions, durations
-
-### ✂️ 剪藏 · Clips
-<img src="docs/screenshots/ScreenShot_2026-07-13_000537_117.png" width="880" alt="Clips" />
-
-- 小红书 / B 站 / 网页 / 公众号 一键剪藏成结构化卡片（封面、标题、作者、标签）
-- One-click structured clips from Xiaohongshu / Bilibili / web / WeChat (cover, title, author, tags)
+- 🏠 **概览 Overview** — 随手翻旧卡、待办、相册流、随机播放、最近打开
+- ✍️ **笔记 Notes** — 多层嵌套合集、置顶、卡片内嵌图片，一条笔记一件小事
+- 🗃 **文件 Files** — 图片 / 视频 / 音频 / 文档素材库，缩略图 + 尺寸 + 时长
+- ✂️ **剪藏 Clips** — 小红书 / B 站 / 网页 / 公众号 一键结构化剪藏（封面、标题、标签）
 
 ### 🧩 卡片 · 合集 · 连接 · Cards / Sets / Links
 <img src="docs/screenshots/ScreenShot_2026-07-13_000741_103.png" width="880" alt="Cards / Sets / Links" />
