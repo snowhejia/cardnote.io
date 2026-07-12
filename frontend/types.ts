@@ -72,6 +72,8 @@ export type NoteObjectKind = string;
 
 export type NoteCard = {
   id: string;
+  /** Server-authoritative placement returned after creation. */
+  collectionId?: string;
   /** 对象类型（默认笔记）；与类别合集 schema 配合 */
   objectKind?: NoteObjectKind;
   /** 卡片标题(可空)。文件卡:文件名;剪藏卡:页面标题;人物卡:姓名;笔记卡:用户填的话题。 */

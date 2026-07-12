@@ -1108,7 +1108,8 @@ export async function createCard(userIdIn, collectionId, card, pgClient = null) 
   if (existing.rowCount > 0) {
     if (existing.rows[0].trashed_at != null) throw new Error("该笔记在回收站中，请先恢复");
     await addCardToCollectionPlacement(userId, id, collectionId, { insertAtStart, pinned });
-    return await readCardForApi(userId, id);
+    const existingCard = await readCardForApi(userId, id);
+    return existingCard ? { ...existingCard, collectionId } : null;
   }
 
   // 决议 card_type_id：优先 objectKind → 预设 slug；兜底 'note'
@@ -1180,13 +1181,14 @@ export async function createCard(userIdIn, collectionId, card, pgClient = null) 
   }
 
   // 新建卡的子表多半为空,跳过对应 SELECT(reminder 仅在传入时建,media/related 同理)
-  return await readCardForApi(userId, id, pgClient, {
+  const createdCard = await readCardForApi(userId, id, pgClient, {
     reminders: !reminderOn,
     media: !hasMedia,
     related: !Array.isArray(relatedRefs) || relatedRefs.length === 0,
     // file_source 反向链(我作为 file 卡 → 哪张 note 卡引我)新建时一定为空
     fileSource: true,
   });
+  return createdCard ? { ...createdCard, collectionId } : null;
 }
 
 function dateOrNull(s) {
