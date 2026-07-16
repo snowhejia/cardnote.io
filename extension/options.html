@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>卡片笔记 · 小红书 / 哔哩哔哩摘录 — 选项</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        max-width: 42rem;
+        margin: 1.5rem auto;
+        padding: 0 1rem;
+        color: #1c1917;
+      }
+      label {
+        display: block;
+        font-weight: 600;
+        margin-top: 1rem;
+        font-size: 0.875rem;
+      }
+      input {
+        width: 100%;
+        box-sizing: border-box;
+        margin-top: 0.35rem;
+        padding: 0.5rem 0.65rem;
+        border: 1px solid rgba(55, 53, 47, 0.2);
+        border-radius: 6px;
+        font-size: 0.9rem;
+      }
+      .hint {
+        font-size: 0.8rem;
+        color: #78716c;
+        margin-top: 0.25rem;
+        line-height: 1.4;
+      }
+      button {
+        margin-top: 1.25rem;
+        padding: 0.55rem 1.1rem;
+        border: none;
+        border-radius: 8px;
+        background: #2563eb;
+        color: #fff;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button:hover {
+        background: #1d4ed8;
+      }
+      #status {
+        margin-top: 0.75rem;
+        font-size: 0.875rem;
+      }
+      .opt-row {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.5rem;
+        margin-top: 1rem;
+      }
+      .opt-row input[type="checkbox"] {
+        width: auto;
+        margin-top: 0.2rem;
+      }
+      .opt-row label {
+        margin-top: 0;
+        font-weight: 600;
+        font-size: 0.875rem;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>卡片笔记 · 小红书 / 哔哩哔哩摘录</h1>
+    <p class="hint">
+      在小红书笔记详情页或哔哩哔哩投稿页（<code>/video/BV…</code>）点击扩展图标，会把标题、正文、图片/封面与（若可抓取到直链
+      MP4）视频写入你指定的合集。服务端须已配置 <strong>PostgreSQL</strong> 与
+      <strong>腾讯云 COS</strong>（与网页版上传一致）。
+    </p>
+
+    <label for="apiBase">API 根地址</label>
+    <input
+      id="apiBase"
+      type="url"
+      placeholder="https://api.example.com"
+      autocomplete="off"
+    />
+    <p class="hint">与网页构建时的 VITE_API_BASE 相同，<strong>不要</strong>末尾斜杠。</p>
+
+    <label for="bearerToken">Bearer Token</label>
+    <input
+      id="bearerToken"
+      type="password"
+      placeholder="登录后 JWT 或 API_TOKEN"
+      autocomplete="off"
+    />
+    <p class="hint">
+      多用户模式：在笔记网页已登录后，开发者工具 → Application → Local Storage → 键名
+      <code>cardnote_admin_jwt</code>。若前端启用了仅 httpOnly Cookie（<code>VITE_AUTH_HTTPONLY_COOKIE</code>），浏览器里不再有 JWT，需改用静态 <code>API_TOKEN</code> + 下方 userId，或暂时关闭 Cookie 模式做摘录。
+    </p>
+
+    <label for="userId">userId（可选）</label>
+    <input id="userId" type="text" placeholder="仅在使用 API_TOKEN 时必填" autocomplete="off" />
+    <p class="hint">使用静态 API_TOKEN 时，后端要求查询参数 <code>userId</code>；用个人 JWT 时可留空。</p>
+
+    <label for="collectionId">目标合集 ID（可选）</label>
+    <input id="collectionId" type="text" placeholder="留空则保存到「全部笔记」（未归类 inbox）" autocomplete="off" />
+    <p class="hint">
+      留空时使用与网页「全部笔记」新建笔记相同的 inbox（<code>__loose_notes</code>）；填写时则写入指定合集。可从 <code>GET /api/collections</code> 或侧栏数据里复制 <code>id</code>。
+    </p>
+
+    <div class="opt-row">
+      <input type="checkbox" id="insertNewNotesAtTop" checked />
+      <label for="insertNewNotesAtTop"
+        >摘录的笔记插入到时间线顶部</label
+      >
+    </div>
+    <p class="hint">
+      与网页「笔记设置 → 新建笔记位置」保持一致：勾选表示插入到当前合集最前（与主站默认「顶部」相同）；若你在网页里选的是「底部」，请取消勾选。
+    </p>
+
+    <button type="button" id="save">保存</button>
+    <div id="status"></div>
+
+    <script src="options.js"></script>
+  </body>
+</html>

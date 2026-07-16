@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>卡片笔记摘录</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        width: 300px;
+        margin: 0;
+        padding: 12px 14px 14px;
+        font-family: system-ui, -apple-system, sans-serif;
+        font-size: 13px;
+        color: #292524;
+      }
+      h1 {
+        margin: 0 0 10px;
+        font-size: 14px;
+        font-weight: 600;
+      }
+      progress {
+        width: 100%;
+        height: 8px;
+        margin-bottom: 8px;
+        accent-color: #2563eb;
+      }
+      progress[hidden] {
+        display: none;
+      }
+      #status {
+        line-height: 1.45;
+        min-height: 2.9em;
+        max-height: 220px;
+        overflow-y: auto;
+        word-break: break-word;
+      }
+      #status.ok {
+        color: #15803d;
+      }
+      #status.err {
+        color: #b91c1c;
+      }
+      #hint {
+        margin-top: 10px;
+        font-size: 11px;
+        color: #78716c;
+      }
+      a {
+        color: #2563eb;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>保存到卡片笔记</h1>
+    <progress id="bar" max="100" value="0" hidden></progress>
+    <div id="status">准备中…</div>
+    <p id="hint">
+      <a href="#" id="openOpts">扩展选项</a>
+    </p>
+    <script src="popup.js"></script>
+  </body>
+</html>
