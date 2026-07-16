@@ -7028,8 +7028,23 @@ export default function App() {
   }, [detailCard, collections]);
 
   useEffect(() => {
-    if (detailCard && !detailCardLive) setDetailCard(null);
-  }, [detailCard, detailCardLive]);
+    if (!detailCard || detailCardLive) return;
+    /* 聚合父合集视图里，卡片其实住在子合集，detailCard.colId 传的是父合集 id，
+       直接卡片里找不到。这里全树重解析出卡片真实所在合集（与 cardPageCard 的
+       自愈逻辑一致），而不是直接清空导致「点了没反应」。 */
+    const nextCol = pickPlacementColIdForCard(
+      collections,
+      detailCard.card.id,
+      detailCard.colId
+    );
+    if (nextCol) {
+      if (nextCol !== detailCard.colId) {
+        setDetailCard((d) => (d ? { ...d, colId: nextCol } : d));
+      }
+      return;
+    }
+    setDetailCard(null);
+  }, [detailCard, detailCardLive, collections]);
 
   const cardPageCardLive = useMemo(() => {
     if (!cardPageCard) return null;
