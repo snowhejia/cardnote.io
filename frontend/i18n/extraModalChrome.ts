@@ -445,7 +445,7 @@ const zh: ExtraModalChrome = {
   noteSettingsExportNotes: (d, t) => `正在写入笔记 ${d} / ${t}`,
   noteSettingsExportFiles: (d, t, gd, gt) => `正在下载附件 ${d} / ${t}（${gd} / ${gt} GB）`,
   noteSettingsExportDone: (n, f, x) =>
-    `导出完成：${n} 条笔记、${f} 个附件` + (x ? `，${x} 个附件失败（见 export-failed-attachments.txt，可再次导出重试）` : ""),
+    `导出完成：${n} 条笔记、${f} 个附件` + (x ? `，${x} 项失败（见 export-failed.txt，可再次导出重试）` : ""),
   noteSettingsExportCancelled: "已取消。再次导出到同一文件夹会从断点继续。",
   noteSettingsExportFailed: (m) => `导出失败：${m}`,
   noteSettingsNavGeneral: "通用",
@@ -728,7 +728,7 @@ const en: ExtraModalChrome = {
   noteSettingsExportNotes: (d, t) => `Writing notes ${d} / ${t}`,
   noteSettingsExportFiles: (d, t, gd, gt) => `Downloading attachments ${d} / ${t} (${gd} / ${gt} GB)`,
   noteSettingsExportDone: (n, f, x) =>
-    `Export complete: ${n} notes, ${f} attachments` + (x ? `; ${x} attachments failed (see export-failed-attachments.txt, export again to retry)` : ""),
+    `Export complete: ${n} notes, ${f} attachments` + (x ? `; ${x} items failed (see export-failed.txt, export again to retry)` : ""),
   noteSettingsExportCancelled: "Cancelled. Exporting again to the same folder resumes where it stopped.",
   noteSettingsExportFailed: (m) => `Export failed: ${m}`,
   noteSettingsNavGeneral: "General",

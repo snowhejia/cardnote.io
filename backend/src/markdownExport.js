@@ -43,14 +43,22 @@ export function bodyToMarkdown(body) {
   }
 }
 
-/** Safe on macOS / Windows / zip readers; keeps CJK. */
+/**
+ * Safe on macOS / Windows / zip readers; keeps CJK. Also satisfies Chrome's
+ * File System Access check (net::IsSafePortablePathComponent), which rejects
+ * `~`, format chars such as the emoji ZWJ, leading/trailing space, trailing
+ * dots, Windows reserved names and .lnk/.local — any of these makes
+ * getFileHandle throw "Name is not allowed".
+ */
 function safeName(name, fallback, max = 80) {
-  const s = String(name || "")
-    .replace(/[\\/:*?"<>|#%\u0000-\u001f]/g, " ")
-    .replace(/\s+/g, " ")
-    .replace(/^[.\s]+|[.\s]+$/g, "")
+  let s = String(name || "")
+    .replace(/~/g, "～")
+    .replace(/[\p{Cf}﷐-﷯￾￿]/gu, "")
+    .replace(/[\\/:*?"<>|#%\p{Cc}]/gu, " ")
+    .replace(/\s+/gu, " ")
     .slice(0, max)
-    .trim();
+    .replace(/^[.\s]+|[.\s]+$/gu, "");
+  if (/^(con|prn|aux|nul|com\d|lpt\d|clock\$)(\..*)?$/i.test(s)) s = `_${s}`;
   return s || fallback;
 }
 
@@ -170,7 +178,9 @@ export function buildMarkdownExport(collections, { localMedia = false } = {}) {
     if (!a) {
       const name = mediaFileName(media);
       const dot = name.lastIndexOf(".");
-      const ext = dot > 0 && name.length - dot <= 8 ? name.slice(dot).replace(/[^.\w]/g, "") : "";
+      let ext = dot > 0 && name.length - dot <= 8 ? name.slice(dot).replace(/[^.\w]/g, "") : "";
+      if (ext === ".") ext = "";
+      if (/^\.(lnk|local)$/i.test(ext)) ext += "_";
       const base = safeName(ext ? name.slice(0, dot) : name, "file", 100);
       a = {
         url,

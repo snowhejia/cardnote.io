@@ -866,8 +866,8 @@ export function NoteSettingsModal({
       const result = await exportMarkdownToFolder(dir, setExportProgress, ac.signal);
       setExportMessage(
         c.noteSettingsExportDone(
-          result.notesDone,
-          result.filesDone - result.failed.length,
+          result.notesDone - (result.failed.length - result.filesFailed),
+          result.filesDone - result.filesFailed,
           result.failed.length
         )
       );
