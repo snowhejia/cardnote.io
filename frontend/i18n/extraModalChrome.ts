@@ -162,6 +162,17 @@ export type ExtraModalChrome = {
   noteSettingsImportSourceFlomo: string;
   noteSettingsImportSourceEvernote: string;
   noteSettingsImportSourceYuque: string;
+  noteSettingsExportSectionLabel: string;
+  noteSettingsExportHint: string;
+  noteSettingsExportHintZipOnly: string;
+  noteSettingsExportBtn: string;
+  noteSettingsExportCancel: string;
+  noteSettingsExportManifest: string;
+  noteSettingsExportNotes: (done: number, total: number) => string;
+  noteSettingsExportFiles: (done: number, total: number, gbDone: string, gbTotal: string) => string;
+  noteSettingsExportDone: (notes: number, files: number, failed: number) => string;
+  noteSettingsExportCancelled: string;
+  noteSettingsExportFailed: (msg: string) => string;
   /** 大页面左侧：通用设置 */
   noteSettingsNavGeneral: string;
   /** 大页面左侧：对象类型预设 */
@@ -423,6 +434,20 @@ const zh: ExtraModalChrome = {
   noteSettingsImportSourceFlomo: "flomo",
   noteSettingsImportSourceEvernote: "印象笔记 / Evernote",
   noteSettingsImportSourceYuque: "语雀知识库",
+  noteSettingsExportSectionLabel: "导出笔记",
+  noteSettingsExportHint:
+    "选择电脑上的一个文件夹，全部笔记以 Markdown 写入（一张卡一个 .md，合集即文件夹），附件原文件存进 attachments/。可直接导入 Craft、Obsidian 等。附件较多时耗时较长，中途中断后再次导出到同一文件夹会跳过已下载的附件。",
+  noteSettingsExportHintZipOnly:
+    "当前浏览器不支持写入本地文件夹，只能下载仅含正文的 zip（附件为在线链接）。如需连附件一起导出，请用 Chrome 或 Edge。",
+  noteSettingsExportBtn: "导出到本地…",
+  noteSettingsExportCancel: "取消导出",
+  noteSettingsExportManifest: "正在整理笔记…",
+  noteSettingsExportNotes: (d, t) => `正在写入笔记 ${d} / ${t}`,
+  noteSettingsExportFiles: (d, t, gd, gt) => `正在下载附件 ${d} / ${t}（${gd} / ${gt} GB）`,
+  noteSettingsExportDone: (n, f, x) =>
+    `导出完成：${n} 条笔记、${f} 个附件` + (x ? `，${x} 个附件失败（见 export-failed-attachments.txt，可再次导出重试）` : ""),
+  noteSettingsExportCancelled: "已取消。再次导出到同一文件夹会从断点继续。",
+  noteSettingsExportFailed: (m) => `导出失败：${m}`,
   noteSettingsNavGeneral: "通用",
   noteSettingsNavObjectTypes: "合集模板",
   noteSettingsObjectTypesTitle: "合集模板",
@@ -692,6 +717,20 @@ const en: ExtraModalChrome = {
   noteSettingsImportSourceFlomo: "flomo",
   noteSettingsImportSourceEvernote: "Evernote",
   noteSettingsImportSourceYuque: "Yuque",
+  noteSettingsExportSectionLabel: "Export notes",
+  noteSettingsExportHint:
+    "Pick a folder on your computer. All notes are written as Markdown (one .md per card, collections as folders) with attachment files under attachments/. Ready to import into Craft, Obsidian and more. Large libraries take a while; exporting again to the same folder skips attachments already downloaded.",
+  noteSettingsExportHintZipOnly:
+    "This browser can't write to a local folder, so the download is a text-only zip (attachments as online links). Use Chrome or Edge to export attachments too.",
+  noteSettingsExportBtn: "Export to computer…",
+  noteSettingsExportCancel: "Cancel export",
+  noteSettingsExportManifest: "Preparing notes…",
+  noteSettingsExportNotes: (d, t) => `Writing notes ${d} / ${t}`,
+  noteSettingsExportFiles: (d, t, gd, gt) => `Downloading attachments ${d} / ${t} (${gd} / ${gt} GB)`,
+  noteSettingsExportDone: (n, f, x) =>
+    `Export complete: ${n} notes, ${f} attachments` + (x ? `; ${x} attachments failed (see export-failed-attachments.txt, export again to retry)` : ""),
+  noteSettingsExportCancelled: "Cancelled. Exporting again to the same folder resumes where it stopped.",
+  noteSettingsExportFailed: (m) => `Export failed: ${m}`,
   noteSettingsNavGeneral: "General",
   noteSettingsNavObjectTypes: "Collection templates",
   noteSettingsObjectTypesTitle: "Collection templates",

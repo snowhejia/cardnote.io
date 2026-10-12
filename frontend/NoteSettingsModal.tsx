@@ -43,6 +43,13 @@ import {
 } from "./appkit/collectionModel";
 import { mergedTemplateSchemaFieldsForCollection } from "./appkit/schemaTemplateFields";
 import { NOTE_SETTINGS_POST_MIGRATE_HINTS } from "./noteSettingsPostMigrateHints";
+import {
+  canExportToFolder,
+  downloadMarkdownZip,
+  exportMarkdownToFolder,
+  pickExportFolder,
+  type MarkdownExportProgress,
+} from "./exportMarkdown";
 
 const CATALOG_PRESET_IDS: Set<string> = (() => {
   const s = new Set<string>();
@@ -381,6 +388,10 @@ export function NoteSettingsModal({
     "" | "apple" | "flomo" | "evernote" | "yuque"
   >("");
   const [typeActionLoading, setTypeActionLoading] = useState<string | null>(null);
+  const [exportProgress, setExportProgress] =
+    useState<MarkdownExportProgress | null>(null);
+  const [exportMessage, setExportMessage] = useState("");
+  const [exportAbort, setExportAbort] = useState<AbortController | null>(null);
   const [migrateResult, setMigrateResult] = useState<{
     processed: number; created: number; skipped: number;
   } | null>(null);
@@ -837,6 +848,51 @@ export function NoteSettingsModal({
     } finally {
       setRefreshPresetCardTypesLoading(false);
     }
+  }
+
+  async function handleExportMarkdown() {
+    setExportMessage("");
+    try {
+      if (!canExportToFolder()) {
+        setExportMessage(c.noteSettingsExportManifest);
+        await downloadMarkdownZip();
+        setExportMessage("");
+        return;
+      }
+      const dir = await pickExportFolder();
+      if (!dir) return;
+      const ac = new AbortController();
+      setExportAbort(ac);
+      const result = await exportMarkdownToFolder(dir, setExportProgress, ac.signal);
+      setExportMessage(
+        c.noteSettingsExportDone(
+          result.notesDone,
+          result.filesDone - result.failed.length,
+          result.failed.length
+        )
+      );
+    } catch (e) {
+      setExportMessage(
+        (e as DOMException)?.name === "AbortError"
+          ? c.noteSettingsExportCancelled
+          : c.noteSettingsExportFailed((e as Error)?.message ?? String(e))
+      );
+    } finally {
+      setExportAbort(null);
+      setExportProgress(null);
+    }
+  }
+
+  function exportProgressText(p: MarkdownExportProgress): string {
+    if (p.phase === "manifest") return c.noteSettingsExportManifest;
+    if (p.phase === "notes")
+      return c.noteSettingsExportNotes(p.notesDone, p.notesTotal);
+    return c.noteSettingsExportFiles(
+      p.filesDone,
+      p.filesTotal,
+      (p.bytesDone / 1e9).toFixed(2),
+      (p.bytesTotal / 1e9).toFixed(2)
+    );
   }
 
   async function handleBackfillMediaThumbnails() {
@@ -1872,6 +1928,45 @@ export function NoteSettingsModal({
                 <option value="yuque">{c.noteSettingsImportSourceYuque}</option>
               ) : null}
             </select>
+          </>
+        ) : null}
+
+        {dataMode === "remote" ? (
+          <>
+            <p className="note-settings-modal__label">
+              {c.noteSettingsExportSectionLabel}
+            </p>
+            <p className="note-settings-modal__migrate-desc">
+              {canExportToFolder()
+                ? c.noteSettingsExportHint
+                : c.noteSettingsExportHintZipOnly}
+            </p>
+            {exportProgress ? (
+              <p className="note-settings-modal__migrate-result">
+                {exportProgressText(exportProgress)}
+              </p>
+            ) : exportMessage ? (
+              <p className="note-settings-modal__migrate-result">
+                {exportMessage}
+              </p>
+            ) : null}
+            {exportAbort ? (
+              <button
+                type="button"
+                className="note-settings-modal__migrate-btn"
+                onClick={() => exportAbort.abort()}
+              >
+                {c.noteSettingsExportCancel}
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="note-settings-modal__migrate-btn"
+                onClick={() => void handleExportMarkdown()}
+              >
+                {c.noteSettingsExportBtn}
+              </button>
+            )}
           </>
         ) : null}
       </div>

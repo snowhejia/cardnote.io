@@ -27,10 +27,8 @@ No official importer for:
 
 ## Export / backup
 
-cardnote does not yet have a one-click bulk export. Today's options:
+**Settings → Export notes → Export to computer…**: pick a folder on your computer; every note is written as Markdown (one `.md` per card, collections as folders) with attachment files in `attachments/`, ready to import into Craft, Obsidian and more.
 
-1. Data lives under a remote account (Postgres) backed up by the platform
-2. Individual cards: copy body / download attachments by hand
-3. A self-serve bulk export API is in progress
-
-> If you need to take everything out urgently, email hejiac0226@gmail.com — one-time JSON export can be arranged manually.
+- Exporting attachments needs Chrome / Edge; other browsers get a text-only zip (attachments as online links)
+- Exporting again to the same folder skips attachments already downloaded
+- Remote account data lives in Postgres and is still backed up by the server
