@@ -23,6 +23,8 @@ export type MarkdownExportProgress = {
   filesTotal: number;
   bytesDone: number;
   bytesTotal: number;
+  filesFailed: number;
+  /** 失败的笔记与附件（制表符分隔：路径、URL、原因） */
   failed: string[];
 };
 
@@ -140,6 +142,7 @@ export async function exportMarkdownToFolder(
     filesTotal: 0,
     bytesDone: 0,
     bytesTotal: 0,
+    filesFailed: 0,
     failed: [],
   };
   const emit = () => onProgress({ ...p, failed: [...p.failed] });
@@ -163,7 +166,11 @@ export async function exportMarkdownToFolder(
 
   for (const n of manifest.notes) {
     signal.throwIfAborted();
-    await writeText(root, n.path, n.content);
+    try {
+      await writeText(root, n.path, n.content);
+    } catch (e) {
+      p.failed.push(`${n.path}\t\t${(e as Error)?.message ?? e}`);
+    }
     p.notesDone++;
     throttledEmit();
   }
@@ -197,6 +204,7 @@ export async function exportMarkdownToFolder(
       } catch (e) {
         if (signal.aborted) throw e;
         p.failed.push(`${a.path}\t${a.url}\t${(e as Error)?.message ?? e}`);
+        p.filesFailed++;
         if (a.bytes != null) p.bytesDone += a.bytes;
       }
       p.filesDone++;
@@ -206,7 +214,7 @@ export async function exportMarkdownToFolder(
   await Promise.all(Array.from({ length: ATTACHMENT_CONCURRENCY }, worker));
 
   if (p.failed.length) {
-    await writeText(root, "export-failed-attachments.txt", p.failed.join("\n") + "\n");
+    await writeText(root, "export-failed.txt", p.failed.join("\n") + "\n");
   }
   p.phase = "done";
   emit();
