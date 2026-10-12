@@ -128,6 +128,7 @@ import {
   isGeminiConfigured,
   runNoteAssist,
 } from "./geminiAssist.js";
+import { buildMarkdownExport, markdownExportZip } from "./markdownExport.js";
 import {
   consumeAiNoteAssistQuota,
   refundAiNoteAssistQuota,
@@ -988,6 +989,57 @@ app.get(
       res.status(500).json({ error: e.message || "Read failed" });
     }
   }
+);
+
+/**
+ * Markdown 导出（一卡一 .md，合集即文件夹），可直接导入 Craft / Obsidian / Bear 等。
+ * - GET /api/exports/markdown          → zip，仅正文，附件为远程链接（不支持选文件夹的浏览器用）
+ * - GET /api/exports/markdown/manifest → JSON { notes, attachments }，前端写入用户选的本地文件夹，
+ *   附件由浏览器经 /api/upload/cos-read 直连 COS 下载（全量附件可达数十 GB，不经后端打包）
+ */
+const markdownExportGate = (req, res, next) => {
+  if (adminGateEnabled) return requireCollectionsReader(req, res, next);
+  next();
+};
+
+app.get(
+  "/api/exports/markdown/manifest",
+  markdownExportGate,
+  async (req, res) => {
+    try {
+      const userId = adminGateEnabled ? (req.collectionsUserId ?? null) : null;
+      const data = buildMarkdownExport(await getCollectionsTree(userId), {
+        localMedia: true,
+      });
+      res.setHeader("Cache-Control", "private, no-store");
+      res.json(data);
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: e.message || "Export failed" });
+    }
+  },
+);
+
+app.get(
+  "/api/exports/markdown",
+  markdownExportGate,
+  async (req, res) => {
+    try {
+      const userId = adminGateEnabled ? (req.collectionsUserId ?? null) : null;
+      const { zip } = markdownExportZip(await getCollectionsTree(userId));
+      const date = new Date().toISOString().slice(0, 10);
+      res.setHeader("Cache-Control", "private, no-store");
+      res.setHeader("Content-Type", "application/zip");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="cardnote-markdown-${date}.zip"`,
+      );
+      res.send(Buffer.from(zip));
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: e.message || "Export failed" });
+    }
+  },
 );
 
 /** GET /api/collections/:id/cards — 懒加载：按合集分页拉卡 */
